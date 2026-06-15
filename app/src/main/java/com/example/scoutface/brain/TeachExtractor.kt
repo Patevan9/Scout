@@ -2,6 +2,32 @@ package com.example.scoutface.brain
 
 object TeachExtractor {
 
+    // Common words that can follow "this is", "i am", or "you see" without
+    // being a person's name (feelings, locations, pronouns, filler, etc.)
+    private val NON_NAME_WORDS = setOf(
+        "a", "an", "the", "this", "that", "these", "those", "it", "its",
+        "my", "your", "his", "her", "our", "their", "here", "there",
+        "what", "who", "which", "anything", "something", "nothing",
+        "everything", "someone", "somebody", "everyone", "everybody",
+        "no", "not", "all", "some",
+        "in", "on", "at", "with", "to", "for", "from", "of", "about",
+        "into", "onto", "over", "under", "near", "behind", "beside", "around",
+        "going", "gonna", "doing", "trying", "looking", "talking", "kidding",
+        "joking", "asking", "saying", "feeling", "getting", "being",
+        "named", "called", "ready", "done", "finished", "leaving",
+        "coming", "back", "home",
+        "happy", "sad", "glad", "mad", "angry", "upset", "tired", "sleepy",
+        "hungry", "thirsty", "cold", "hot", "warm", "sick", "fine", "okay",
+        "ok", "good", "bad", "great", "well", "busy", "free", "lost",
+        "confused", "nervous", "scared", "afraid", "excited", "bored",
+        "alone", "single", "married", "right", "wrong", "late", "early",
+        "sorry", "serious", "sure", "certain",
+        "cool", "awesome", "amazing", "weird", "crazy", "funny",
+        "interesting", "nice", "terrible", "annoying", "perfect", "stupid",
+        "dumb", "silly", "important", "true", "false", "real", "fake",
+        "different", "new", "old", "big", "small", "broken", "working"
+    )
+
     fun extract(input: String): Pair<String, String>? {
         val s = input.lowercase().trim()
 
@@ -16,6 +42,23 @@ object TeachExtractor {
         }
         Regex("""\bi'm named ([a-z]+)\b""").find(s)?.let {
             return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+
+        // Phrases used to introduce/identify the person Scout is looking
+        // at: "this is Patrick", "I'm Patrick", "I am Patrick", "you see
+        // Patrick". These are broad, so guard against common non-name
+        // words (feelings, locations, filler) via NON_NAME_WORDS.
+        Regex("""\bthis is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+        Regex("""\bi am ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+        Regex("""\byou see ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
         }
 
         // -------------------------
