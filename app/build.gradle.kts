@@ -41,6 +41,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    androidResources {
+        // MobileFaceNet.tflite must stay uncompressed in the APK so it can
+        // be mapped directly into memory at runtime.
+        noCompress += "tflite"
+    }
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -63,6 +68,9 @@ dependencies {
     // ML Kit
     implementation("com.google.mlkit:face-detection:16.1.6")
     implementation("com.google.mlkit:image-labeling:17.0.7")
+
+    // TensorFlow Lite (on-device face recognition)
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
