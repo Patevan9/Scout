@@ -296,6 +296,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastSpeechDoneMs = 0L
     private var lastScoutResponseMs = 0L
+    private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
     private val MIC_RESUME_COOLDOWN_MS = 650L
@@ -1498,6 +1499,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 }
 
+                // Ignore mic pickup of Scout's own voice — without hardware
+                // echo cancellation, TTS audio can bleed back into the mic
+                // and otherwise get treated as a new question.
+                if (words.size >= 2 &&
+                    lastScoutUtteranceNormalized.isNotBlank() &&
+                    lastScoutUtteranceNormalized.contains(normalized)
+                ) {
+
+                    scheduleListenRestart()
+
+                    return
+
+                }
+
                 convoDb.logTurn("user", normalized)
 
                 habitLayer.logUtterance(normalized, lastFaceHashes.firstOrNull())
@@ -1949,6 +1964,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun respond(out: String) {
 
         lastScoutResponseMs = System.currentTimeMillis()
+
+        lastScoutUtteranceNormalized = TextNormalizer.normalizeUtterance(out)
 
         speak(out, true)
 
