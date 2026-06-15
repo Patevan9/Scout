@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <!-- Camera preview (under the face) -->
+    <!-- IMPORTANT: Keep it VISIBLE so CameraX always has a live surface. -->
+    <!-- We hide it with alpha instead of visibility=invisible. -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/viewFinder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0.01"
+        android:importantForAccessibility="no" />
+
+    <!-- Scout face overlay -->
+    <com.example.scoutface.ScoutFaceView
+        android:id="@+id/faceView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no" />
+
+</FrameLayout>

@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="30dp"
+    android:viewportWidth="100"
+    android:viewportHeight="30">
+    <!-- This draws a nice friendly Arch/Crescent shape -->
+    <!-- It curves up, then down. No sharp corners. -->
+    <path
+        android:fillColor="#0D47A1"
+        android:pathData="M0,30 Q50,0 100,30 Q50,15 0,30" />
+</vector>

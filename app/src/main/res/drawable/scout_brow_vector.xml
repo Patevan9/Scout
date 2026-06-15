@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="160dp"
+    android:height="40dp"
+    android:viewportWidth="160"
+    android:viewportHeight="40">
+
+    <!-- A single smooth arch stroke -->
+    <!-- M=Start, Q=Curve To, Q=End -->
+    <!-- color is #0D47A1 (Dark Blue) -->
+    <path
+        android:strokeColor="#0D47A1"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:pathData="M 10,30 Q 80,5 150,30" />
+</vector>

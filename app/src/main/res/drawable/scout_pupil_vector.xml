@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. The Blue Iris (Outer Circle) -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#2196F3"/> <!-- Bright Android Blue -->
+            <stroke android:width="2dp" android:color="#1976D2"/> <!-- Darker Blue Outline -->
+        </shape>
+    </item>
+
+    <!-- 2. The Black Pupil (Center, slightly smaller) -->
+    <item android:top="25dp" android:bottom="25dp" android:left="25dp" android:right="25dp">
+        <shape android:shape="oval">
+            <solid android:color="#000000"/>
+        </shape>
+    </item>
+
+    <!-- 3. The Little White Sparkle (Top Right) -->
+    <item android:top="20dp" android:bottom="60dp" android:left="60dp" android:right="30dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF"/>
+            <size android:width="15dp" android:height="15dp"/>
+        </shape>
+    </item>
+
+</layer-list>

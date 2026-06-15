@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- LAYER 1: YOUR PHOTO -->
+    <!-- This grabs the 'eye_texture.png' you put in the folder -->
+    <item>
+        <bitmap
+            android:src="@drawable/eye_left"
+            android:gravity="fill"
+            android:filter="true" />
+    </item>
+
+    <!-- LAYER 2: The Black Pupil Hole (Center) -->
+    <!-- We draw a sharp black circle on top of the photo -->
+    <!-- Adjusted padding to 25dp so it fits the new larger eye size perfectly -->
+    <item android:top="25dp" android:bottom="25dp" android:left="25dp" android:right="25dp">
+        <shape android:shape="oval">
+            <solid android:color="#000000"/>
+        </shape>
+    </item>
+
+    <!-- LAYER 3: The "Inset" Shadow (Depth Ring) -->
+    <!-- This creates a dark edge so the photo blends nicely -->
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:gradientRadius="70%"
+                android:startColor="#00000000"
+                android:endColor="#CC000000" />
+        </shape>
+    </item>
+
+    <!-- LAYER 4: Glass Shine (Reflection) -->
+    <!-- Adds a wet look to the surface -->
+    <item android:top="10dp" android:left="15dp" android:right="15dp" android:bottom="40dp">
+        <shape android:shape="oval">
+            <gradient
+                android:angle="270"
+                android:startColor="#40FFFFFF"
+                android:endColor="#00FFFFFF"
+                android:type="linear"/>
+        </shape>
+    </item>
+
+</layer-list>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="40dp"
+    android:viewportWidth="100"
+    android:viewportHeight="40">
+
+    <!-- 1. The Inside (Black Void) -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M10,20 C10,0 90,0 90,20 C90,40 10,40 10,20 Z" />
+
+    <!-- 2. The Tongue (Bigger & Softer) -->
+    <!-- Color changed to #F8BBD0 (Pastel Pink) -->
+    <!-- Shape is wider (25 to 75) and taller (up to y=25) -->
+    <path
+        android:fillColor="#F8BBD0"
+        android:pathData="M25,30 Q50,22 75,30 Q75,35 50,35 Q25,35 25,30 Z" />
+
+    <!-- 3. The Lips / Outline (Dark Blue) -->
+    <path
+        android:strokeColor="#0D47A1"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M10,20 C10,0 90,0 90,20 C90,40 10,40 10,20 Z" />
+
+</vector>

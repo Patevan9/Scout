@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="50dp"
+    android:viewportWidth="100"
+    android:viewportHeight="50">
+
+    <!-- This draws a thick Blue Arch -->
+    <path
+        android:strokeColor="#1E3F66"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:pathData="M 10,40 Q 50,10 90,40" />
+</vector>
