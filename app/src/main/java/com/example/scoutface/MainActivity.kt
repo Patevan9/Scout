@@ -3395,9 +3395,53 @@ Respond only with Scout's next short reply.
 
     }
 
+    /**
+     * Keeps only the first [maxSentences] complete sentences of TinyLlama's
+     * raw output. TinyLlama sometimes keeps generating past a complete
+     * thought (rambling/hallucinated follow-on sentences) within the same
+     * reply, which can re-trigger the mic before Scout finishes the part
+     * that actually answers the user. If no sentence-ending punctuation is
+     * found, the text is returned unchanged.
+     */
+    private fun limitToSentences(text: String, maxSentences: Int = 2): String {
+
+        val trimmed = text.trim()
+
+        if (trimmed.isEmpty()) return trimmed
+
+        var count = 0
+
+        var lastEnd = -1
+
+        for (i in trimmed.indices) {
+
+            val c = trimmed[i]
+
+            if (c == '.' || c == '!' || c == '?') {
+
+                val next = if (i + 1 < trimmed.length) trimmed[i + 1] else ' '
+
+                if (c == '.' && next.isDigit()) continue
+
+                count++
+
+                lastEnd = i
+
+                if (count >= maxSentences) break
+
+            }
+
+        }
+
+        return if (lastEnd >= 0) trimmed.substring(0, lastEnd + 1).trim() else trimmed
+
+    }
+
     private fun cleanOfflineReply(reply: String): String {
 
-        val lower = reply.lowercase()
+        val limited = limitToSentences(reply, maxSentences = 2)
+
+        val lower = limited.lowercase()
 
 
         val badIdentity =
@@ -3484,7 +3528,7 @@ Respond only with Scout's next short reply.
 
 
 
-        return reply
+        return limited
 
     }
 
