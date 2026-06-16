@@ -380,6 +380,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val EMBED_INTERVAL_MS = 2_000L
 
+    private val embedRunning = AtomicBoolean(false)
+
     // Gaze hold to prevent snap-back on brief face detector drops
 
     @Volatile
@@ -1303,7 +1305,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 val embedNowMs = System.currentTimeMillis()
 
-                                if (embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS && largest != null) {
+                                if (embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS &&
+                                        largest != null &&
+                                        embedRunning.compareAndSet(false, true)) {
 
                                     lastEmbedMs = embedNowMs
 
@@ -1319,45 +1323,80 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val capturedHash = hashes.firstOrNull()
 
+                                    val uprW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
+
+                                    val uprH = if (capturedRotation == 90 || capturedRotation == 270) capW else capH
+
                                     embedExecutor.submit {
 
                                         try {
 
-                                            val uprightBitmap = if (capturedRotation == 0) {
+                                            val expand = (capturedBox.width() * 0.2f).toInt()
 
-                                                capturedBitmap
+                                            val uprL = (capturedBox.left - expand).coerceAtLeast(0)
 
-                                            } else {
+                                            val uprT = (capturedBox.top - expand).coerceAtLeast(0)
 
-                                                val m = Matrix()
+                                            val uprR = (capturedBox.right + expand).coerceAtMost(uprW)
 
-                                                m.postRotate(capturedRotation.toFloat())
+                                            val uprB = (capturedBox.bottom + expand).coerceAtMost(uprH)
 
-                                                Bitmap.createBitmap(capturedBitmap, 0, 0, capW, capH, m, false)
+                                            // Map bounding box from upright (display) coords back to
+                                            // sensor (bitmap) coords — avoids rotating the full frame.
+                                            val sL: Int; val sT: Int; val sR: Int; val sB: Int
+
+                                            when (capturedRotation) {
+
+                                                90 -> {
+                                                    // sensor_x = upright_y, sensor_y = capH-1-upright_x
+                                                    sL = uprT
+                                                    sT = (capH - 1 - uprR).coerceAtLeast(0)
+                                                    sR = uprB.coerceAtMost(capW)
+                                                    sB = (capH - 1 - uprL).coerceAtMost(capH)
+                                                }
+
+                                                270 -> {
+                                                    // sensor_x = capW-1-upright_y, sensor_y = upright_x
+                                                    sL = (capW - 1 - uprB).coerceAtLeast(0)
+                                                    sT = uprL
+                                                    sR = (capW - 1 - uprT).coerceAtMost(capW)
+                                                    sB = uprR.coerceAtMost(capH)
+                                                }
+
+                                                180 -> {
+                                                    sL = (capW - 1 - uprR).coerceAtLeast(0)
+                                                    sT = (capH - 1 - uprB).coerceAtLeast(0)
+                                                    sR = (capW - 1 - uprL).coerceAtMost(capW)
+                                                    sB = (capH - 1 - uprT).coerceAtMost(capH)
+                                                }
+
+                                                else -> {
+                                                    sL = uprL; sT = uprT; sR = uprR; sB = uprB
+                                                }
 
                                             }
 
-                                            val uprightW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
+                                            val cropW = sR - sL
 
-                                            val uprightH = if (capturedRotation == 90 || capturedRotation == 270) capW else capH
+                                            val cropH = sB - sT
 
-                                            val expand = (capturedBox.width() * 0.2f).toInt()
+                                            if (cropW > 0 && cropH > 0) {
 
-                                            val left = (capturedBox.left - expand).coerceAtLeast(0)
-
-                                            val top = (capturedBox.top - expand).coerceAtLeast(0)
-
-                                            val right = (capturedBox.right + expand).coerceAtMost(uprightW)
-
-                                            val bottom = (capturedBox.bottom + expand).coerceAtMost(uprightH)
-
-                                            if (right > left && bottom > top) {
-
-                                                val faceBitmap = Bitmap.createBitmap(
-
-                                                    uprightBitmap, left, top, right - left, bottom - top
-
+                                                // Crop just the face region from the sensor bitmap
+                                                val sensorCrop = Bitmap.createBitmap(
+                                                    capturedBitmap, sL, sT, cropW, cropH
                                                 )
+
+                                                // Rotate only the small crop to make the face upright
+                                                val faceBitmap = if (capturedRotation == 0) sensorCrop else {
+
+                                                    val m = Matrix()
+
+                                                    m.postRotate(capturedRotation.toFloat())
+
+                                                    Bitmap.createBitmap(sensorCrop, 0, 0, cropW, cropH, m, false)
+
+                                                }
 
                                                 val embedding = faceEmbedder.getEmbedding(faceBitmap)
 
@@ -1369,13 +1408,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 }
 
-                                                Log.d("ScoutFace", "Embedding stored: ${right - left}x${bottom - top}")
+                                                Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
 
                                             }
 
                                         } catch (e: Exception) {
 
                                             Log.e("ScoutFace", "Embedding error", e)
+
+                                        } finally {
+
+                                            embedRunning.set(false)
 
                                         }
 
