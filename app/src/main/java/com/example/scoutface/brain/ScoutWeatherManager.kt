@@ -139,7 +139,14 @@ class ScoutWeatherManager(
 
         if (!hasValidatedInternet()) {
             requestInFlight.set(false)
-            runOnMain { respond("I can't check the weather right now — I'm not connected to the internet.") }
+            val cached = prefs.getString(textKey, null)
+            runOnMain {
+                if (cached != null) {
+                    respond("I'm offline right now, but my last reading was: $cached")
+                } else {
+                    respond("I can't check the weather right now — I'm not connected to the internet.")
+                }
+            }
             return
         }
 
