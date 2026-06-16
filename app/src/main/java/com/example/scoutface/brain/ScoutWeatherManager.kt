@@ -140,9 +140,10 @@ class ScoutWeatherManager(
         if (!hasValidatedInternet()) {
             requestInFlight.set(false)
             val cached = prefs.getString(textKey, null)
+            val cachedTimeMs = prefs.getLong(ageKey, 0L)
             runOnMain {
                 if (cached != null) {
-                    respond("I'm offline right now, but my last reading was: $cached")
+                    respond("I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: $cached")
                 } else {
                     respond("I can't check the weather right now — I'm not connected to the internet.")
                 }
@@ -184,7 +185,8 @@ class ScoutWeatherManager(
                     runOnMain {
                         requestInFlight.set(false)
                         val cached = prefs.getString(textKey, null)
-                        if (cached != null) respond("I couldn't get a fresh reading. My last one: $cached")
+                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
+                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
                         else respond("I wasn't able to reach the weather service right now.")
                     }
                     return@Thread
@@ -219,7 +221,8 @@ class ScoutWeatherManager(
                         respond(result)
                     } else {
                         val cached = prefs.getString(textKey, null)
-                        if (cached != null) respond("I couldn't get a fresh reading. My last one: $cached")
+                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
+                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
                         else respond("I wasn't able to reach the weather service right now.")
                     }
                 }
@@ -420,5 +423,21 @@ class ScoutWeatherManager(
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
         return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart"
+    }
+
+    private fun formatCacheTime(timeMs: Long): String {
+        if (timeMs == 0L) return "an earlier check"
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = timeMs
+        val hourOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute   = cal.get(java.util.Calendar.MINUTE)
+        val hour12   = when {
+            hourOfDay == 0 -> 12
+            hourOfDay > 12 -> hourOfDay - 12
+            else           -> hourOfDay
+        }
+        val amPm      = if (hourOfDay < 12) "am" else "pm"
+        val minuteStr = if (minute < 10) "0$minute" else "$minute"
+        return "$hour12:$minuteStr$amPm"
     }
 }
