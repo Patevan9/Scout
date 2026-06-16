@@ -396,6 +396,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val FACE_LOST_HOLD_MS = 650L
 
+    @Volatile
+
+    private var faceAppearanceMs = 0L
+
+    @Volatile
+
+    private var greetedThisSession = false
+
+    @Volatile
+
+    private var faceLastSeenForGreetMs = 0L
+
+    private val GREET_STABILIZE_MS = 3_000L
+
+    private val GREET_RESET_ABSENCE_MS = 5_000L
+
     // =======================
 
     // COMPONENTS
@@ -1367,11 +1383,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 }
 
+                                faceLastSeenForGreetMs = now
+
+                                if (faceAppearanceMs == 0L) faceAppearanceMs = now
+
+                                if (!greetedThisSession &&
+                                        now - faceAppearanceMs >= GREET_STABILIZE_MS &&
+                                        !isSpeaking && !isListening) {
+
+                                    greetedThisSession = true
+
+                                    val embedding = lastFaceEmbedding
+
+                                    val matchHash = if (embedding != null) peopleDb.findBestMatch(embedding) else null
+
+                                    val greetName = if (matchHash != null) peopleDb.getName(matchHash) else null
+
+                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
+
+                                    respond(greeting)
+
+                                }
+
                             } else {
 
                                 lastFaceHashes = emptyList()
 
                                 presenceDecider.onFaceLost()
+
+                                if (faceLastSeenForGreetMs > 0L &&
+                                        now - faceLastSeenForGreetMs >= GREET_RESET_ABSENCE_MS) {
+
+                                    faceAppearanceMs = 0L
+
+                                    greetedThisSession = false
+
+                                }
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
@@ -2730,8 +2777,17 @@ Respond only with Scout's next short reply.
             val (factKey, value) = teach
 
             truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
-            if (factKey == FactKey.NAME && lastFaceHashes.size == 1) {
-                peopleDb.setName(lastFaceHashes[0], value)
+            if (factKey == FactKey.NAME) {
+                val embedding = lastFaceEmbedding
+                val targetHash: String? = if (embedding != null) {
+                    peopleDb.findBestMatch(embedding) ?: lastFaceHashes.firstOrNull()
+                } else if (lastFaceHashes.size == 1) {
+                    lastFaceHashes[0]
+                } else null
+                if (targetHash != null) {
+                    peopleDb.setName(targetHash, value)
+                    if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
+                }
             }
 
             val out = when (factKey) {
