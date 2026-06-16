@@ -1301,6 +1301,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val capH = bitmapH
 
+                                    val capturedHash = hashes.firstOrNull()
+
                                     embedExecutor.submit {
 
                                         try {
@@ -1345,7 +1347,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 lastFaceEmbedding = embedding
 
-                                                Log.d("ScoutFace", "Embedding ready: ${right - left}x${bottom - top}")
+                                                if (capturedHash != null) {
+
+                                                    peopleDb.storeEmbedding(capturedHash, embedding)
+
+                                                }
+
+                                                Log.d("ScoutFace", "Embedding stored: ${right - left}x${bottom - top}")
 
                                             }
 
