@@ -118,6 +118,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import android.graphics.Bitmap
+
+import android.graphics.Matrix
+
 import java.util.zip.ZipInputStream
 
 import kotlin.math.abs
@@ -361,6 +365,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastFaceHashes: List<String> = emptyList()
 
     private var lastHabitFaceLogMs = 0L
+
+    private lateinit var faceEmbedder: FaceEmbedder
+
+    private lateinit var embedExecutor: ExecutorService
+
+    @Volatile
+
+    private var lastEmbedMs = 0L
+
+    @Volatile
+
+    private var lastFaceEmbedding: FloatArray? = null
+
+    private val EMBED_INTERVAL_MS = 2_000L
 
     // Gaze hold to prevent snap-back on brief face detector drops
 
@@ -629,6 +647,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             try {
 
+                faceEmbedder.close()
+
+            } catch (_: Exception) {
+
+            }
+
+            try {
+
+                embedExecutor.shutdown()
+
+            } catch (_: Exception) {
+
+            }
+
+            try {
+
                 truthDb.close()
 
             } catch (_: Exception) {
@@ -704,6 +738,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
 
         labeler = ImageLabeling.getClient(ImageLabelerOptions.DEFAULT_OPTIONS)
+
+        faceEmbedder = FaceEmbedder(this)
+
+        embedExecutor = Executors.newSingleThreadExecutor()
 
     }
 
@@ -1039,49 +1077,55 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
 
                     .build()
 
                 analysis.setAnalyzer(cameraExecutor) { img ->
 
-                    val media = img.image
-
-                    if (media == null) {
-
-                        img.close()
-
-                        return@setAnalyzer
-
-                    }
-
                     val rotation = img.imageInfo.rotationDegrees
 
-                    val input = InputImage.fromMediaImage(media, rotation)
+                    val bitmapW = img.width
 
-                    val pending = AtomicInteger(2)
+                    val bitmapH = img.height
 
-                    val closed = AtomicBoolean(false)
+                    val plane = img.planes[0]
 
-                    fun closeIfDone() {
+                    val buffer = plane.buffer
 
-                        if (pending.decrementAndGet() <= 0) {
+                    val rowStride = plane.rowStride
 
-                            if (closed.compareAndSet(false, true)) {
+                    val bitmap = Bitmap.createBitmap(bitmapW, bitmapH, Bitmap.Config.ARGB_8888)
 
-                                try {
+                    if (rowStride == bitmapW * 4) {
 
-                                    img.close()
+                        bitmap.copyPixelsFromBuffer(buffer)
 
-                                } catch (_: Exception) {
+                    } else {
 
-                                }
+                        val tight = java.nio.ByteBuffer.allocateDirect(bitmapW * bitmapH * 4)
 
-                            }
+                        for (row in 0 until bitmapH) {
+
+                            buffer.position(row * rowStride)
+
+                            buffer.limit(row * rowStride + bitmapW * 4)
+
+                            tight.put(buffer)
 
                         }
 
+                        buffer.rewind()
+
+                        tight.rewind()
+
+                        bitmap.copyPixelsFromBuffer(tight)
+
                     }
+
+                    img.close()
+
+                    val input = InputImage.fromBitmap(bitmap, rotation)
 
                     labeler.process(input)
 
@@ -1113,8 +1157,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                         }
 
-                        .addOnCompleteListener { closeIfDone() }
-
                     faceDetector.process(input)
 
                         .addOnSuccessListener { faces ->
@@ -1137,11 +1179,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 val imgW =
 
-                                    if (rotation == 90 || rotation == 270) media.height else media.width
+                                    if (rotation == 90 || rotation == 270) bitmapH else bitmapW
 
                                 val imgH =
 
-                                    if (rotation == 90 || rotation == 270) media.width else media.height
+                                    if (rotation == 90 || rotation == 270) bitmapW else bitmapH
 
                                 if (b != null) {
 
@@ -1243,6 +1285,80 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 }
 
+                                val embedNowMs = System.currentTimeMillis()
+
+                                if (embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS && largest != null) {
+
+                                    lastEmbedMs = embedNowMs
+
+                                    val capturedBitmap = bitmap
+
+                                    val capturedBox = largest.boundingBox
+
+                                    val capturedRotation = rotation
+
+                                    val capW = bitmapW
+
+                                    val capH = bitmapH
+
+                                    embedExecutor.submit {
+
+                                        try {
+
+                                            val uprightBitmap = if (capturedRotation == 0) {
+
+                                                capturedBitmap
+
+                                            } else {
+
+                                                val m = Matrix()
+
+                                                m.postRotate(capturedRotation.toFloat())
+
+                                                Bitmap.createBitmap(capturedBitmap, 0, 0, capW, capH, m, false)
+
+                                            }
+
+                                            val uprightW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
+
+                                            val uprightH = if (capturedRotation == 90 || capturedRotation == 270) capW else capH
+
+                                            val expand = (capturedBox.width() * 0.2f).toInt()
+
+                                            val left = (capturedBox.left - expand).coerceAtLeast(0)
+
+                                            val top = (capturedBox.top - expand).coerceAtLeast(0)
+
+                                            val right = (capturedBox.right + expand).coerceAtMost(uprightW)
+
+                                            val bottom = (capturedBox.bottom + expand).coerceAtMost(uprightH)
+
+                                            if (right > left && bottom > top) {
+
+                                                val faceBitmap = Bitmap.createBitmap(
+
+                                                    uprightBitmap, left, top, right - left, bottom - top
+
+                                                )
+
+                                                val embedding = faceEmbedder.getEmbedding(faceBitmap)
+
+                                                lastFaceEmbedding = embedding
+
+                                                Log.d("ScoutFace", "Embedding ready: ${right - left}x${bottom - top}")
+
+                                            }
+
+                                        } catch (e: Exception) {
+
+                                            Log.e("ScoutFace", "Embedding error", e)
+
+                                        }
+
+                                    }
+
+                                }
+
                             } else {
 
                                 lastFaceHashes = emptyList()
@@ -1274,8 +1390,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             Log.e("ScoutCamera", "faceDetector failure", e)
 
                         }
-
-                        .addOnCompleteListener { closeIfDone() }
 
                 }
 
