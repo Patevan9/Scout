@@ -170,7 +170,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
-    private val apiKey: String = "AIzaSyB_s3oaUz9vxpBxMHmi-LsSPmNRitUv8Ak"
+    private val apiKey: String
+        get() = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI) ?: ""
 
     private val GEMINI_MODEL = "gemini-3.5-flash"
 
@@ -730,6 +731,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         faceView = findViewById(R.id.faceView)
 
         viewFinder = findViewById(R.id.viewFinder)
+
+        findViewById<View>(R.id.btnSettings)?.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
     }
 
