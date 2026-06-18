@@ -164,9 +164,6 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(toggleRow("Allow Spontaneous Comments", "Scout may share observations",
             memPrefs.getBoolean("spontaneous_enabled", true)
         ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Prism  ✦ Future", "Enhanced reasoning and visibility", checked = false, enabled = false) { })
-
         scroll.addView(body)
         root.addView(scroll)
         return root
