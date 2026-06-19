@@ -886,51 +886,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun startOfflineBrain() {
 
-        // context.filesDir sometimes resolves to /data/user/0/... on Android 13.
+        // TinyLlama (~700 MB) exceeds the available RAM budget on the Galaxy A32.
+        // Loading it causes LMKD to kill Scout within seconds of startup.
+        // Gemini handles all AI responses; re-enable this only on a higher-RAM device.
+        android.util.Log.i("ScoutBrain", "Offline brain skipped (insufficient RAM on this device)")
 
-        // The file was placed at /data/data/... via Device File Explorer.
-
-        // Both paths point to the same physical location but File.exists()
-
-        // may only see one. We check both and use whichever exists.
-
-        val candidates = listOf(
-
-            java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
-
-            java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
-
-        )
-
-        val modelFile = candidates.firstOrNull { it.exists() }
-
-        if (modelFile == null) {
-
-            android.util.Log.e("ScoutBrain", "TinyLlama not found in any location")
-
-            return
-
-        }
-
-        android.util.Log.e("ScoutBrain", "TinyLlama found at: ${modelFile.absolutePath}")
-
-        LlamaEngine.loadAsync(
-
-            modelFile = modelFile,
-
-            nCtx = 2048,
-
-            nThreads = 4
-
-        ) { success ->
-
-            android.util.Log.e(
-                "ScoutBrain",
-
-                if (success) "Offline brain ready" else "Offline brain load failed"
-            )
-
-        }
+        return
 
     }
 
