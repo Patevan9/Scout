@@ -177,6 +177,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
+    // EYE MODE GATING
+
+    // =======================
+
+    private val BOOT_GAZE_LOCK_MS = 2000L
+
+    @Volatile private var gazeEnabled = false
+
+    private var lastSentGazeX = 0f
+
+    private var lastSentGazeY = 0f
+
+    private val MIN_GAZE_DELTA = 3.0f
+
+    // =======================
+
     // FALLBACK DATASET URLS
 
     // =======================
@@ -840,6 +856,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun resumeSystems() {
 
+        gazeEnabled = false
+
+        handler.postDelayed({ gazeEnabled = true }, BOOT_GAZE_LOCK_MS)
+
         if (ContextCompat.checkSelfPermission(
 
                 this,
@@ -1214,9 +1234,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     var dy = (b.centerY().toFloat() - imgH / 2f) / (imgH / 2f)
 
-                                    if (abs(dx) < 0.045f) dx = 0f
+                                    if (abs(dx) < 0.08f) dx = 0f
 
-                                    if (abs(dy) < 0.045f) dy = 0f
+                                    if (abs(dy) < 0.08f) dy = 0f
 
                                     val correctedDx = when {
 
@@ -1256,9 +1276,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     lastGoodFaceSeenMs = now
 
-                                    runOnUiThread {
+                                    if (gazeEnabled && !isSpeaking && !isThinking) {
 
-                                        faceView.setGaze(lookX, lookY)
+                                        val movedEnough =
+                                            abs(lookX - lastSentGazeX) > MIN_GAZE_DELTA ||
+                                            abs(lookY - lastSentGazeY) > MIN_GAZE_DELTA
+
+                                        if (movedEnough) {
+
+                                            lastSentGazeX = lookX
+
+                                            lastSentGazeY = lookY
+
+                                            runOnUiThread { faceView.setGaze(lookX, lookY) }
+
+                                        }
 
                                     }
 
@@ -1470,15 +1502,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
-                                runOnUiThread {
+                                if (gazeEnabled && !isSpeaking && !isThinking) {
 
-                                    if (holdAge <= FACE_LOST_HOLD_MS) {
+                                    runOnUiThread {
 
-                                        faceView.setGaze(lastGoodGazeX, lastGoodGazeY)
+                                        if (holdAge <= FACE_LOST_HOLD_MS) {
 
-                                    } else {
+                                            faceView.setGaze(lastGoodGazeX, lastGoodGazeY)
 
-                                        faceView.setGaze(0f, 0f)
+                                        } else {
+
+                                            faceView.setGaze(0f, 0f)
+
+                                        }
 
                                     }
 
@@ -1507,6 +1543,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 )
 
                 Log.i("ScoutCamera", "Camera bound with analysis only.")
+
+                gazeEnabled = false
+
+                handler.postDelayed({ gazeEnabled = true }, BOOT_GAZE_LOCK_MS)
 
             } catch (e: Exception) {
 
