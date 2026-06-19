@@ -41,7 +41,7 @@ class FaceEmbedder(context: Context) {
         }
 
         val input = bitmapToInputBuffer(resized)
-        val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
+        val output = Array(2) { FloatArray(EMBEDDING_SIZE) }
 
         interpreter.run(input, output)
 
@@ -49,20 +49,22 @@ class FaceEmbedder(context: Context) {
     }
 
     private fun bitmapToInputBuffer(bitmap: Bitmap): ByteBuffer {
-        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3)
+        // Model was compiled with batch_size=2; allocate 2× and fill both slots
+        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3 * 2)
         buffer.order(ByteOrder.nativeOrder())
 
         val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
         bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
-        for (pixel in pixels) {
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-
-            buffer.putFloat((r - 127.5f) / 128f)
-            buffer.putFloat((g - 127.5f) / 128f)
-            buffer.putFloat((b - 127.5f) / 128f)
+        repeat(2) {
+            for (pixel in pixels) {
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                buffer.putFloat((r - 127.5f) / 128f)
+                buffer.putFloat((g - 127.5f) / 128f)
+                buffer.putFloat((b - 127.5f) / 128f)
+            }
         }
 
         buffer.rewind()
