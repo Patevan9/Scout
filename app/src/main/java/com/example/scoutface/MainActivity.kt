@@ -185,7 +185,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
-    private val BOOT_GAZE_LOCK_MS = 2000L
+    private val BOOT_GAZE_LOCK_MS = 3500L
 
     @Volatile private var gazeEnabled = false
 
