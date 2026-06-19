@@ -407,14 +407,16 @@ class SettingsActivity : AppCompatActivity() {
         col.addView(header)
         col.addView(lbl(sub, 12f, TXT_SEC).padded(dp(24), dp(2), 0, dp(8)))
         val steps = 30
+        val rangeMin = min
+        val rangeMax = max
         col.addView(SeekBar(this).apply {
-            max = steps
-            progress = ((cur - min) / (max - min) * steps).toInt().coerceIn(0, steps)
+            this.max = steps
+            progress = ((cur - rangeMin) / (rangeMax - rangeMin) * steps).toInt().coerceIn(0, steps)
             progressTintList = csl(ACCENT)
             thumbTintList = csl(ACCENT)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
-                    val v = (Math.round((min + p.toFloat() / steps * (max - min)) * 100f)) / 100f
+                    val v = (Math.round((rangeMin + p.toFloat() / steps * (rangeMax - rangeMin)) * 100f)) / 100f
                     valLabel.text = String.format("%.2f", v)
                     if (fromUser) prefs.edit().putFloat(key, v).apply()
                 }
@@ -437,7 +439,7 @@ class SettingsActivity : AppCompatActivity() {
         v.addView(div())
         v.addView(lbl(text, 12f, ACCENT).apply {
             (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(12)
-            lineSpacingMultiplier = 1.4f
+            setLineSpacing(0f, 1.4f)
         })
         return v
     }
@@ -448,7 +450,7 @@ class SettingsActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(20) }
-        v.addView(lbl(text, 13f, TXT_SEC).apply { lineSpacingMultiplier = 1.4f })
+        v.addView(lbl(text, 13f, TXT_SEC).apply { setLineSpacing(0f, 1.4f) })
         return v
     }
 
