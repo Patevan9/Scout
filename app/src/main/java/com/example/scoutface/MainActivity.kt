@@ -1181,6 +1181,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     val bitmap = Bitmap.createBitmap(bitmapW, bitmapH, Bitmap.Config.ARGB_8888)
 
+                    // Track async users of this bitmap; recycle when all are done.
+                    val bitmapRefs = AtomicInteger(2)  // labeler + faceDetector
+                    val maybeRecycleBitmap = {
+                        if (bitmapRefs.decrementAndGet() == 0) bitmap.recycle()
+                    }
+
                     if (rowStride == bitmapW * 4) {
 
                         bitmap.copyPixelsFromBuffer(buffer)
@@ -1233,11 +1239,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             lastSceneUpdatedMs = now
 
+                            maybeRecycleBitmap()
+
                         }
 
                         .addOnFailureListener { e ->
 
                             Log.e("ScoutCamera", "labeler failure", e)
+
+                            maybeRecycleBitmap()
 
                         }
 
@@ -1389,6 +1399,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     lastEmbedMs = embedNowMs
 
+                                    // Register embedExecutor as an additional holder of bitmap.
+                                    bitmapRefs.incrementAndGet()
+
                                     val capturedBitmap = bitmap
 
                                     val capturedBox = largest.boundingBox
@@ -1476,17 +1489,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 }
 
-                                                val embedding = faceEmbedder.getEmbedding(faceBitmap)
+                                                try {
 
-                                                lastFaceEmbedding = embedding
+                                                    val embedding = faceEmbedder.getEmbedding(faceBitmap)
 
-                                                if (capturedHash != null) {
+                                                    lastFaceEmbedding = embedding
 
-                                                    peopleDb.storeEmbedding(capturedHash, embedding)
+                                                    if (capturedHash != null) {
+
+                                                        peopleDb.storeEmbedding(capturedHash, embedding)
+
+                                                    }
+
+                                                    Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
+
+                                                } finally {
+
+                                                    // Recycle the face crop bitmaps — they are no longer needed.
+                                                    if (faceBitmap !== sensorCrop) sensorCrop.recycle()
+                                                    faceBitmap.recycle()
 
                                                 }
-
-                                                Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
 
                                             }
 
@@ -1497,6 +1520,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                         } finally {
 
                                             embedRunning.set(false)
+
+                                            maybeRecycleBitmap()
 
                                         }
 
@@ -1563,11 +1588,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             }
 
+                            maybeRecycleBitmap()
+
                         }
 
                         .addOnFailureListener { e ->
 
                             Log.e("ScoutCamera", "faceDetector failure", e)
+
+                            maybeRecycleBitmap()
 
                         }
 
