@@ -34,6 +34,10 @@ import android.util.Log
 
 import android.view.View
 
+import android.view.GestureDetector
+
+import android.view.MotionEvent
+
 import android.view.WindowInsets
 
 import android.view.WindowManager
@@ -463,6 +467,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var viewFinder: PreviewView
 
+    private lateinit var swipeDetector: GestureDetector
+
     private val handler = Handler(Looper.getMainLooper())
 
     // =======================
@@ -748,9 +754,83 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         viewFinder = findViewById(R.id.viewFinder)
 
-        findViewById<View>(R.id.btnSettings)?.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vX: Float, vY: Float): Boolean {
+
+                val dx = e2.x - (e1?.x ?: return false)
+
+                if (dx > 160f && vX > 400f && abs(vY) < abs(vX)) {
+
+                    startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+
+                    return true
+
+                }
+
+                return false
+
+            }
+
+        })
+
+        showSwipeHintIfNeeded()
+
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+
+        return swipeDetector.onTouchEvent(event) || super.onTouchEvent(event)
+
+    }
+
+    private fun showSwipeHintIfNeeded() {
+
+        if (prefs.getBoolean("swipe_hint_shown", false)) return
+
+        prefs.edit().putBoolean("swipe_hint_shown", true).apply()
+
+        handler.postDelayed({
+
+            val container = findViewById<android.widget.FrameLayout>(R.id.hintContainer)
+
+            val density = resources.displayMetrics.density
+
+            val hint = android.widget.TextView(this).apply {
+
+                text = "→  Swipe right for Settings"
+
+                textSize = 15f
+
+                setTextColor(android.graphics.Color.WHITE)
+
+                setBackgroundColor(android.graphics.Color.parseColor("#CC000E1A"))
+
+                setPadding((20 * density).toInt(), (12 * density).toInt(), (20 * density).toInt(), (12 * density).toInt())
+
+                val lp = android.widget.FrameLayout.LayoutParams(
+
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+
+                )
+
+                lp.gravity = android.view.Gravity.BOTTOM or android.view.Gravity.START
+
+                lp.setMargins((24 * density).toInt(), 0, 0, (40 * density).toInt())
+
+                layoutParams = lp
+
+            }
+
+            container?.addView(hint)
+
+            handler.postDelayed({ container?.removeView(hint) }, 4500L)
+
+        }, 3000L)
 
     }
 
@@ -1744,7 +1824,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     "ok", "okay",
 
-                    "approve"
+                    "approve",
+
+                    "settings"
 
                 )
 
@@ -2721,6 +2803,16 @@ Respond only with Scout's next short reply.
     }
 
     private fun handleQuery(qNorm: String) {
+
+        if (qNorm == "settings" || qNorm.contains("open settings") || qNorm.contains("go to settings")) {
+
+            respond("Opening settings!")
+
+            handler.postDelayed({ startActivity(Intent(this, SettingsActivity::class.java)) }, 600L)
+
+            return
+
+        }
 
         if (!presenceDecider.shouldRespondToInput(qNorm)) return
 
