@@ -2242,8 +2242,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         wantListening = false
 
         isThinking = false
+        isSpeaking = true
 
         faceView.setThinking(false)
+        faceView.setSpeaking(true)
 
         stopListeningSafe()
 
