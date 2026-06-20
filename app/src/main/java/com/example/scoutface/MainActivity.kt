@@ -1167,6 +1167,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 analysis.setAnalyzer(cameraExecutor) { img ->
 
+                    // Free the OS camera buffer immediately when Scout is thinking
+                    // (Gemini in-flight) or speaking (TTS). ML Kit inference is the
+                    // largest transient memory consumer, and gaze/greet logic is
+                    // already gated off during these states anyway.
+                    if (isThinking || isSpeaking) {
+                        img.close()
+                        return@setAnalyzer
+                    }
+
                     val rotation = img.imageInfo.rotationDegrees
 
                     val bitmapW = img.width
@@ -2347,7 +2356,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun handleUnknownIntent(qNorm: String) {
 
-        val convo = convoDb.getLastTurns(limit = 10)
+        val convo = convoDb.getLastTurns(limit = 6)
 
         val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo)
 
