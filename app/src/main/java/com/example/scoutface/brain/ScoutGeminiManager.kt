@@ -163,7 +163,7 @@ class ScoutGeminiManager(
                     }
                 }
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("ScoutGemini", "Gemini thread crashed", e)
                 runOnMain {
                     requestInFlight.set(false)

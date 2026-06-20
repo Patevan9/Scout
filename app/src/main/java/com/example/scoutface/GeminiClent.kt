@@ -125,7 +125,7 @@ class GeminiClient(
                 requestMethod = "POST"
                 doOutput = true
                 connectTimeout = 20_000
-                readTimeout = 60_000
+                readTimeout = 30_000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("x-goog-api-key", key)
             }
@@ -154,6 +154,10 @@ class GeminiClient(
                     )
                 )
                 .put("contents", contents)
+                .put(
+                    "generationConfig",
+                    JSONObject().put("maxOutputTokens", 150)
+                )
 
             OutputStreamWriter(conn.outputStream).use {
                 it.write(payload.toString())
