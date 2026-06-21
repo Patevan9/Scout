@@ -84,7 +84,7 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.65f): String? {
+    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.75f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT face_hash, embedding FROM people WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != '';",

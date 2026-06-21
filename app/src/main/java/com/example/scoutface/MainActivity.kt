@@ -3004,6 +3004,11 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
+            } else if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
+                // Register the face of the family member currently in view.
+                // "this is my son Elijah" / "this is my wife Diana" while they
+                // stand in front of Scout gives them their own named face entry.
+                registerFamilyMemberFace(value)
             }
 
             val out = when (factKey) {
@@ -3028,6 +3033,21 @@ Respond only with Scout's next short reply.
 
         return false
 
+    }
+
+    private fun registerFamilyMemberFace(name: String) {
+        val faceHash = lastFaceHashes.firstOrNull() ?: return
+        val embedding = lastFaceEmbedding
+        // If the current face is already a different known person, don’t overwrite them.
+        val existingMatch = if (embedding != null) peopleDb.findBestMatch(embedding) else null
+        val existingName = if (existingMatch != null) peopleDb.getName(existingMatch) else null
+        if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
+            return
+        }
+        val targetHash = existingMatch ?: faceHash
+        peopleDb.touchSeen(targetHash)
+        peopleDb.setName(targetHash, name)
+        if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
     }
 
     private fun finishThinking() {
