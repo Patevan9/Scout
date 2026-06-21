@@ -69,12 +69,16 @@ class VisionAnswerBuilder(
             }
 
             faceCount == 2 -> {
-                val extra = when {
+                val dogLine = when {
                     seesDog && !dogKnownName.isNullOrBlank() -> " ${dogKnownName} is nearby too."
                     seesDog -> " I also see a dog nearby."
                     else -> ""
                 }
-                "I see two people.$extra"
+                if (!knownFaceName.isNullOrBlank()) {
+                    "I can see $knownFaceName and one other person.$dogLine"
+                } else {
+                    "I see two people.$dogLine"
+                }
             }
 
             faceCount == 1 -> {

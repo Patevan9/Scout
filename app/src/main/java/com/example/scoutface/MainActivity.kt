@@ -409,6 +409,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     @Volatile
 
+    private var pendingFaceIntroName: String? = null
+
+    @Volatile
+
     private var lastAnalysisMs = 0L
 
     private val ANALYSIS_MIN_INTERVAL_MS = 150L
@@ -1533,14 +1537,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                     } else null
 
                                                     if (!resolvedName.isNullOrBlank()) {
-                                                        // Known person — refresh their embedding with current data
-                                                        // and update the cached name for VisionAnswerBuilder.
+                                                        // Known person — refresh their embedding and cache name.
                                                         lastKnownFaceName = resolvedName
                                                         peopleDb.storeEmbedding(nameMatchHash!!, embedding)
-                                                    } else if (capturedHash != null) {
-                                                        // Unknown face — store embedding for greeting flow
-                                                        // (used by greetedThisSession check below).
-                                                        peopleDb.storeEmbedding(capturedHash, embedding)
+                                                        pendingFaceIntroName = null
+                                                    } else {
+                                                        // Unknown face — check for a pending introduction.
+                                                        val pendingName = pendingFaceIntroName
+                                                        if (pendingName != null && capturedHash != null) {
+                                                            // Someone was introduced while another person was
+                                                            // the primary face. This unknown face is probably them.
+                                                            peopleDb.touchSeen(capturedHash)
+                                                            peopleDb.setName(capturedHash, pendingName)
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                            lastKnownFaceName = pendingName
+                                                            pendingFaceIntroName = null
+                                                        } else if (capturedHash != null) {
+                                                            // Truly unknown — store embedding for greeting flow.
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                        }
                                                     }
 
                                                     Log.d("ScoutFace", "Embedding: name=$resolvedName")
@@ -3005,10 +3020,13 @@ Respond only with Scout's next short reply.
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
             } else if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
-                // Register the face of the family member currently in view.
-                // "this is my son Elijah" / "this is my wife Diana" while they
-                // stand in front of Scout gives them their own named face entry.
-                registerFamilyMemberFace(value)
+                val faceRegistered = registerFamilyMemberFace(value)
+                if (!faceRegistered) {
+                    // Someone else was in the primary camera position — Scout can't learn
+                    // this face yet. Ask the person to face Scout alone momentarily.
+                    respond("I'll remember $value. When $value faces me alone, I'll learn to recognize them.")
+                    return true
+                }
             }
 
             val out = when (factKey) {
@@ -3035,19 +3053,25 @@ Respond only with Scout's next short reply.
 
     }
 
-    private fun registerFamilyMemberFace(name: String) {
-        val faceHash = lastFaceHashes.firstOrNull() ?: return
+    // Returns true if the face was registered immediately, false if pending (another person
+    // was the primary face — Elijah needs to face Scout alone to complete registration).
+    private fun registerFamilyMemberFace(name: String): Boolean {
+        val faceHash = lastFaceHashes.firstOrNull() ?: return false
         val embedding = lastFaceEmbedding
-        // If the current face is already a different known person, don’t overwrite them.
         val existingMatch = if (embedding != null) peopleDb.findBestMatch(embedding) else null
         val existingName = if (existingMatch != null) peopleDb.getName(existingMatch) else null
         if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
-            return
+            // Largest face is a different known person — set pending.
+            // Next time an unknown face is the primary face, it gets this name.
+            pendingFaceIntroName = name
+            return false
         }
         val targetHash = existingMatch ?: faceHash
         peopleDb.touchSeen(targetHash)
         peopleDb.setName(targetHash, name)
         if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
+        pendingFaceIntroName = null
+        return true
     }
 
     private fun finishThinking() {
