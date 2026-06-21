@@ -156,7 +156,7 @@ class GeminiClient(
                 .put("contents", contents)
                 .put(
                     "generationConfig",
-                    JSONObject().put("maxOutputTokens", 150)
+                    JSONObject().put("maxOutputTokens", 250)
                 )
 
             OutputStreamWriter(conn.outputStream).use {

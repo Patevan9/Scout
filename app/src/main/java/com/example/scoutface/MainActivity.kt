@@ -1523,23 +1523,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     lastFaceEmbedding = embedding
 
-                                                    if (capturedHash != null) {
-
-                                                        peopleDb.storeEmbedding(capturedHash, embedding)
-
-                                                    }
-
+                                                    // findBestMatch BEFORE storeEmbedding — avoids self-match.
+                                                    // findBestMatch only scans named rows, so unnamed hash
+                                                    // rows from previous frames cannot win the comparison.
                                                     val nameMatchHash = peopleDb.findBestMatch(embedding)
 
-                                                    if (nameMatchHash != null) {
+                                                    val resolvedName = if (nameMatchHash != null) {
+                                                        peopleDb.getName(nameMatchHash)
+                                                    } else null
 
-                                                        val resolvedName = peopleDb.getName(nameMatchHash)
-
-                                                        if (!resolvedName.isNullOrBlank()) lastKnownFaceName = resolvedName
-
+                                                    if (!resolvedName.isNullOrBlank()) {
+                                                        // Known person — refresh their embedding with current data
+                                                        // and update the cached name for VisionAnswerBuilder.
+                                                        lastKnownFaceName = resolvedName
+                                                        peopleDb.storeEmbedding(nameMatchHash!!, embedding)
+                                                    } else if (capturedHash != null) {
+                                                        // Unknown face — store embedding for greeting flow
+                                                        // (used by greetedThisSession check below).
+                                                        peopleDb.storeEmbedding(capturedHash, embedding)
                                                     }
 
-                                                    Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
+                                                    Log.d("ScoutFace", "Embedding: name=$resolvedName")
 
                                                 } finally {
 
