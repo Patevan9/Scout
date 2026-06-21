@@ -15,7 +15,8 @@ class VisionAnswerBuilder(
         lastSceneUpdatedMs: Long,
         lastFaceCount: Int,
         lastFaceHashes: List<String>,
-        lastSceneLabels: List<Pair<String, Float>>
+        lastSceneLabels: List<Pair<String, Float>>,
+        knownFaceName: String? = null
     ): String {
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
@@ -77,10 +78,8 @@ class VisionAnswerBuilder(
             }
 
             faceCount == 1 -> {
-                val knownName = faceHashes.firstOrNull()
-                    ?.let { peopleDb.getName(it) }
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() }
+                val knownName = (knownFaceName?.trim()?.takeIf { it.isNotBlank() }
+                    ?: faceHashes.firstOrNull()?.let { peopleDb.getName(it) }?.trim()?.takeIf { it.isNotBlank() })
 
                 val objectLine = when {
                     seesDog && !dogKnownName.isNullOrBlank() -> " ${dogKnownName} is nearby too."

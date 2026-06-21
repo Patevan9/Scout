@@ -399,9 +399,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastFaceEmbedding: FloatArray? = null
 
+    @Volatile
+
+    private var lastKnownFaceName: String? = null
+
     private val EMBED_INTERVAL_MS = 2_000L
 
     private val embedRunning = AtomicBoolean(false)
+
+    @Volatile
+
+    private var lastAnalysisMs = 0L
+
+    private val ANALYSIS_MIN_INTERVAL_MS = 150L
 
     // Gaze hold to prevent snap-back on brief face detector drops
 
@@ -1176,6 +1186,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         return@setAnalyzer
                     }
 
+                    // Throttle ML Kit to ~7fps to reduce memory pressure on A32.
+                    // Skipped frames cost nothing — just close the buffer and return.
+                    val analysisNow = System.currentTimeMillis()
+                    if (analysisNow - lastAnalysisMs < ANALYSIS_MIN_INTERVAL_MS) {
+                        img.close()
+                        return@setAnalyzer
+                    }
+                    lastAnalysisMs = analysisNow
+
                     val rotation = img.imageInfo.rotationDegrees
 
                     val bitmapW = img.width
@@ -1510,6 +1529,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     }
 
+                                                    val nameMatchHash = peopleDb.findBestMatch(embedding)
+
+                                                    if (nameMatchHash != null) {
+
+                                                        val resolvedName = peopleDb.getName(nameMatchHash)
+
+                                                        if (!resolvedName.isNullOrBlank()) lastKnownFaceName = resolvedName
+
+                                                    }
+
                                                     Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
 
                                                 } finally {
@@ -1563,6 +1592,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             } else {
 
                                 lastFaceHashes = emptyList()
+
+                                lastKnownFaceName = null
 
                                 presenceDecider.onFaceLost()
 
@@ -2348,7 +2379,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastSceneUpdatedMs = lastSceneUpdatedMs,
             lastFaceCount = lastFaceCount,
             lastFaceHashes = lastFaceHashes,
-            lastSceneLabels = lastSceneLabels
+            lastSceneLabels = lastSceneLabels,
+            knownFaceName = lastKnownFaceName
         )
 
         respond(out)
