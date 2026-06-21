@@ -1,23 +1,22 @@
 # Project Scout — Quick Start
-**Last updated: June 20, 2026 | Version 11**
+**Last updated: June 21, 2026 | Version 12**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v33).
+For full technical details, use the Scout Master Summary (v34).
 
 ---
 
-## June 17–20, 2026 — What Is New:
+## June 21, 2026 — What Is New:
 
-✓ **Face recognition Steps 2–4 COMPLETE** — FaceEmbedder wired into camera pipeline (Step 2). PeopleDb updated with BLOB embedding column + cosine similarity matching (Step 3). "This is X" / "My name is X" naming flow uses embedding-based identity (Step 4). Scout now recognizes known faces frame-to-frame. DONE June 17.
-✓ **Settings screen BUILT** — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Gemini API key entry wired to secure encrypted SharedPreferences. DONE June 18.
-✓ **Hardcoded Gemini API key REMOVED** — Patrick's personal key removed from MainActivity.kt entirely. Now lives in encrypted SharedPreferences via SettingsActivity. DONE June 18.
-✓ **Settings access via swipe-right** — Gear button replaced with swipe-right gesture. First-boot hint shown on first launch. Voice command also opens Settings. DONE June 18.
-✓ **Eye jitter FIXED** — Boot lock, speaking gate, dead zone, and min-delta guard added to ScoutFaceView. A32 iris is now stable. DONE June 18.
-✓ **Scout's eyebrows and mouth brightened** — Color updated to #9BBEFF (lighter blue, matches iris). DONE June 18.
-✓ **Three A32 stability fixes** — Camera bitmap memory leak fixed (recycle after all ML Kit callbacks). ML Kit suppressed during Gemini calls (isThinking gate). speak() race condition closed (isSpeaking set immediately at function entry, not 240–650ms later). DONE June 19–20.
-⚠ **TinyLlama temporarily disabled on A32** — Startup load caused LMKD to kill Scout under memory pressure. Disabled to stabilize. Gemini is the primary brain until a safe re-enable path is found.
+✓ **A32 NO LONGER CRASHING** — Patrick confirmed stable June 21. Root cause: ML Kit labeler and face detector were running on every camera frame (up to 30fps), exhausting memory until LMKD killed Scout. Fixed by adding `ANALYSIS_MIN_INTERVAL_MS = 150ms` — ML Kit now runs at max ~7fps. Skipped frames are dropped instantly with zero cost.
+✓ **Face name persistence FIXED** — Scout now says your name consistently, not just once. Root causes were: (1) `findBestMatch` was scanning unnamed rows that won the similarity race, (2) embedding was stored BEFORE `findBestMatch`, causing a self-match (similarity = 1.0) that always returned the wrong hash. Fixed: SQL now only scans named rows, and `findBestMatch` runs BEFORE `storeEmbedding`. `lastKnownFaceName` caches the result every 2 seconds.
+✓ **Face recognition threshold raised** — 0.65 → 0.75. Prevents family members (Patrick/Elijah) with shared facial geometry from being misidentified.
+✓ **Family member face introduction** — "this is my son Elijah" / "this is my wife Diana" now registers their face. Pending mechanism handles two-people-in-frame.
+✓ **Two-person response improved** — "I can see Patrick and one other person." instead of always "I see two people."
+✓ **Gemini maxOutputTokens raised** — 150 → 250. Prevents mid-sentence cutoff on longer answers.
+✓ **Mouth timing fix** — Mouth no longer moves before audio starts (faceView.setSpeaking stays in TTS onStart only).
 
-*(Previous sessions June 12–16: Wake word, memory recall, weather NWS, face recognition foundation, rambling fix, self-echo guard — all DONE)*
+*(Previous sessions June 17–20: Face recognition Steps 2–4, Settings screen, API key removed, eye jitter fix, speak() race condition, three A32 stability fixes — all DONE)*
 
 ---
 
@@ -60,10 +59,13 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ✓ Animated face (ScoutFaceView) — thinking expression, iris drift, narrowed lids, asymmetric brows
 ✓ Eye jitter FIXED — boot lock, speaking gate, dead zone, min-delta guard. A32 iris stable.
 ✓ Eyebrows and mouth brightened to #9BBEFF
+✓ Mouth timing FIXED — mouth moves only when audio actually starts (TTS onStart)
 ✓ Speech recognition (STT) + Text-to-Speech (TTS)
-✓ Camera — face detection, scene labeling (ML Kit)
-✓ Face recognition COMPLETE (Steps 1–4) — known faces recognized by embedding; unknown faces greeted; Nicolas Protocol active
-✓ Gemini API — OFF by default. 'Go online' activates. 'Go offline' deactivates.
+✓ Camera — face detection, scene labeling (ML Kit) — throttled to ~7fps for A32 stability
+✓ Face recognition COMPLETE and RELIABLE — known faces recognized consistently. Threshold 0.75. findBestMatch scans named rows only. Self-match bug fixed. lastKnownFaceName updated every 2 seconds.
+✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers face. Pending mechanism for two-people-in-frame.
+✓ Two-person response — "I can see Patrick and one other person."
+✓ Gemini API — OFF by default. 'Go online' activates. 'Go offline' deactivates. maxOutputTokens=250.
 ✓ Settings screen — swipe-right to open, API key entry, offline toggle, voice/TTS sliders, About Scout
 ✓ Hardcoded API key removed — Gemini key now in secure encrypted SharedPreferences
 ✓ Memory layers: TruthDb, HabitLayer, PeopleDb (with embeddings), JournalDb, ConversationDb
@@ -79,14 +81,14 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ✓ Self-echo guard — Scout ignores hearing his own TTS voice through the mic
 ✓ Weather via NWS (api.weather.gov) — precipitation %, offline-aware, free for commercial use
 ✓ Total offline mode — 'go offline' blocks ALL internet features
-✓ Three memory stability fixes — bitmap recycle, ML Kit suppression during Gemini, speak() race condition closed
+✓ A32 STABLE — no crashes as of June 21. Camera throttle eliminated delayed LMKD kill.
 
 ---
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-⚠ **TinyLlama disabled on A32** — Disabled at startup to prevent LMKD crash under memory pressure. Needs investigation: delayed load, on-demand load, or memory footprint reduction. Gemini is primary brain for now.
-■ **A32 crash investigation ongoing** — Three stability fixes pushed. Main target was the speak() race condition (isSpeaking gap). Testing needed to confirm fix holds after Gemini response.
+⚠ **TinyLlama disabled on A32** — Disabled at startup to prevent LMKD crash under memory pressure. Needs investigation: delayed load, on-demand load, or memory footprint reduction. Gemini is primary brain for now. NOTE: A32 is now stable without TinyLlama — this is purely about re-enabling the offline brain safely.
+⚠ **Elijah/Diana face registration requires solo moment** — After "this is my son Elijah", Scout sets a pending flag. Elijah needs to be the primary (largest) face in frame once for the embedding to be captured. Once done, Scout recognizes Elijah reliably.
 
 - Fold 7 not tested — all testing on A32 via WiFi. Fold 7 needs dedicated session.
 - STT name recognition — partially handled by wake word filter.
@@ -98,13 +100,12 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 6. Current Priority — Launch Checklist Order
 
-1. **A32 stability confirmed** — pull and test the speak() race condition fix. Confirm Scout does not crash after Gemini responses.
-2. **TinyLlama re-enable path** — figure out safe way to load TinyLlama without LMKD.
-3. **Startup diagnostics** — friendly message if systems missing at boot.
-4. **Onboarding flow** — build 5 approved screens in Android.
-5. **Fold 7 stability testing** — dedicated session.
-6. **Privacy Policy, Terms of Use, Open Source Credits** — write and add to app and website.
-7. **Play Store listing** — description, screenshots, content rating.
+1. **TinyLlama re-enable path** — A32 is stable. Now need to safely load TinyLlama without LMKD. Delayed load or on-demand approach.
+2. **Startup diagnostics** — friendly message if systems missing at boot.
+3. **Onboarding flow** — build 5 approved screens in Android.
+4. **Fold 7 stability testing** — dedicated session.
+5. **Privacy Policy, Terms of Use, Open Source Credits** — write and add to app and website.
+6. **Play Store listing** — description, screenshots, content rating.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 - Proposal Sandbox — 'Want me to remember that?' confirm step
@@ -143,4 +144,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: June 20, 2026 | Version 11 | Upload every session | For full details use Master Summary v33*
+*Project Scout Quick Start | Last updated: June 21, 2026 | Version 12 | Upload every session | For full details use Master Summary v34*

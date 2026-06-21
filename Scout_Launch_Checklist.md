@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 20, 2026 | Version 5**
+**What Scout needs to be worth $9.99 | Updated June 21, 2026 | Version 6**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -12,8 +12,8 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Eye jitter FIXED — Boot lock, speaking gate, dead zone, min-delta guard. A32 iris stable. DONE June 18.
 ✓ Scout eyebrows and mouth brightened to #9BBEFF. DONE June 18.
 ✓ Voice — speaks and listens. Android STT + TTS, works offline.
-✓ Camera awareness — Scout sees faces and scenes.
-✓ Offline brain — TinyLlama 1.1B runs fully on the phone. No internet required. (Temporarily disabled on A32 while LMKD crash investigated — see Must Fix below.)
+✓ Camera awareness — Scout sees faces and scenes. Throttled to ~7fps for A32 memory health. DONE June 21.
+✓ Offline brain — TinyLlama 1.1B runs fully on the phone. No internet required. (Temporarily disabled on A32 while re-enable path is designed — see Must Fix below.)
 ✓ Flexible memory — Scout learns and recalls any fact reliably.
 ✓ Identity answers — Scout answers 'are you my friend?' as Scout, not a generic AI.
 ✓ Weather — Current, tonight, tomorrow, 7-day, precipitation %. Via NWS (api.weather.gov). Free for commercial use. Offline with honest refusal.
@@ -30,11 +30,15 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Self-echo guard — Scout no longer picks up his own TTS voice as a new question. DONE June 15.
 ✓ Face recognition Step 1 — MobileFaceNet.tflite bundled (MIT licensed, ~5MB). FaceEmbedder.kt created. DONE June 15.
 ✓ Face recognition Steps 2–4 COMPLETE — FaceEmbedder wired into camera. PeopleDb stores BLOB embeddings. Naming flow uses embedding-based identity. Known face recognized. Unknown face greeted. Nicolas Protocol active. DONE June 17.
+✓ Face recognition RELIABLE — findBestMatch scans named rows only. Threshold raised to 0.75. Self-match bug fixed (findBestMatch before storeEmbedding). Scout says your name consistently, not just once. DONE June 21.
+✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers their face. Pending mechanism handles two-people-in-frame gracefully. DONE June 21.
+✓ Two-person response — Scout says "I can see Patrick and one other person" instead of just "I see two people." DONE June 21.
 ✓ Naming phrases expanded — "this is X", "I am X", "you see X" recognized as name-teaching phrases. DONE June 15.
 ✓ THIRD_PARTY_NOTICES.md created — start of Open Source Credits. DONE June 15.
 ✓ Hardcoded Gemini API key REMOVED — Patrick's personal key removed from MainActivity.kt. Now in encrypted SharedPreferences. DONE June 18.
 ✓ Settings screen BUILT — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Swipe-right gesture + first-boot hint + voice command to open. DONE June 18.
-✓ Three A32 stability fixes — camera bitmap recycle, ML Kit suppression during Gemini, speak() race condition closed. DONE June 19–20.
+✓ Four A32 stability fixes — camera bitmap recycle, ML Kit suppression during Gemini, speak() race condition closed, camera frame throttle (150ms). DONE June 19–21.
+✓ A32 NO LONGER CRASHING — Patrick confirmed stable June 21. Delayed LMKD kill after Gemini responses eliminated.
 
 ---
 
@@ -42,9 +46,10 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 
 These are the real blockers. Scout cannot ship without these.
 
-### 1. A32 stability — TinyLlama LMKD crash ■ URGENT
+### 1. A32 stability — TinyLlama re-enable path ■ URGENT
 
 - TinyLlama startup load caused LMKD to kill Scout under memory pressure on A32. Temporarily disabled.
+- A32 is now stable WITHOUT TinyLlama (camera throttle fixed the crash).
 - Gemini is the primary brain right now, but TinyLlama is a core launch feature — offline families need it.
 - Need: delayed load after boot settles, on-demand load, or memory footprint reduction strategy.
 ■ MainActivity.kt + LlamaEngine.kt — dedicated investigation session
@@ -69,7 +74,7 @@ These are the real blockers. Scout cannot ship without these.
 
 ### 5. A32 stability testing — Ongoing
 
-- All work tested on A32 as each feature is added.
+- All work tested on A32 as each feature is added. No crashes as of June 21.
 ■ Ongoing — continue testing as new features are added
 
 ---
@@ -149,10 +154,10 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, a brain, memory, weather, a wake word, full face recognition, and a settings screen. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, a brain, memory, weather, a wake word, full reliable face recognition for the whole family, and a settings screen. The A32 is stable. The gap between today and the Play Store is focused sessions — not months.
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated June 20, 2026 | Version 5 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated June 21, 2026 | Version 6 | For Patrick, Diana, Elijah, and Scout*

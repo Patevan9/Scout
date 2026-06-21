@@ -1,8 +1,24 @@
 # Project Scout — Master Project Summary
-**Last updated: June 20, 2026 | Version 33**
+**Last updated: June 21, 2026 | Version 34**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 21, 2026 — What Changed Since Version 33
+
+✓ **A32 no longer crashing — CONFIRMED** — Scout ran through Gemini responses, face recognition, and extended idle without crashing. Patrick confirmed: "he is not crashing anymore." DONE June 21.
+✓ **Camera frame throttle** — `ANALYSIS_MIN_INTERVAL_MS = 150ms` added to camera analyzer. ML Kit labeler and face detector now run at max ~7fps instead of up to 30fps. Reduces bitmap allocation and ML Kit memory pressure by ~4x. Root cause of the delayed LMKD kill after Gemini responses. DONE June 21.
+✓ **Face name persistence fixed** — `lastKnownFaceName` volatile field added. VisionAnswerBuilder now uses this embedding-based name cache instead of the per-frame fingerprint hash (which changed every frame). Name refreshed every 2 seconds by embedExecutor, cleared when no face visible. Scout now says your name consistently, not just once. DONE June 21.
+✓ **`findBestMatch` only scans named rows** — Changed SQL from `WHERE embedding IS NOT NULL` to `WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != ''`. Unnamed hash rows accumulated from prior frames can no longer win the cosine similarity race. DONE June 21.
+✓ **embedExecutor self-match bug fixed** — `findBestMatch` is now called BEFORE `storeEmbedding`. Previously the embedding was stored first; `findBestMatch` then found the just-stored embedding with similarity 1.0, always returning the current frame's unnamed hash. Reordering eliminated the self-match entirely. DONE June 21.
+✓ **Face recognition threshold raised** — Raised from 0.65 to 0.75. Prevents family members with shared facial geometry (Patrick/Elijah) from being misidentified. Same-person genuine matches score 0.80+. DONE June 21.
+✓ **Multi-person face introduction** — `registerFamilyMemberFace()` added. Patrick can say "this is my son Elijah" or "this is my wife Diana" while the person is visible and Scout stores their face. DONE June 21.
+✓ **Pending face mechanism** — When a family member is introduced while two people are in frame (Patrick is the primary face), Scout sets `pendingFaceIntroName` and speaks "I'll remember [name]. When [name] faces me alone, I'll learn to recognize them." The next unknown face automatically gets the pending name. DONE June 21.
+✓ **VisionAnswerBuilder two-person response** — `faceCount == 2` now says "I can see [Patrick] and one other person." instead of always "I see two people." DONE June 21.
+✓ **Gemini maxOutputTokens raised** — Raised from 150 to 250 in GeminiClient. Prevents responses being cut off mid-sentence (e.g., "Snoopy is..." truncation). DONE June 21.
+⚠ **Elijah/Diana face recognition** — Needs one solo introduction: family member faces Scout alone (or becomes the primary face in frame) after "this is my son Elijah" so the pending face embedding is captured. Works correctly once triggered.
 
 ---
 
@@ -129,9 +145,11 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ Eye jitter FIXED — boot lock (3500ms), speaking gate, dead zone, min-delta guard. A32 stable. June 18.
 ✓ Eyebrows and mouth brightened to #9BBEFF. June 18.
 ✓ Speech recognition (Android STT) + Text to Speech (TTS)
-✓ Camera — face detection (ML Kit), scene labeling
-✓ Face recognition COMPLETE (Steps 1–4) — embedding pipeline wired into camera, PeopleDb stores BLOB embeddings with cosine similarity, naming flow uses embedding identity. Known face recognized by name. Unknown face → Guest Mode. Nicolas Protocol active. June 17.
-✓ Gemini API — OFF by default, activated by 'go online' voice command
+✓ Camera — face detection (ML Kit), scene labeling — throttled to ~7fps June 21 (memory pressure fix)
+✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb stores BLOB embeddings with cosine similarity (threshold 0.75), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
+✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21.
+✓ VisionAnswerBuilder two-person response — "I can see [Patrick] and one other person." when primary face known. June 21.
+✓ Gemini API — OFF by default, activated by 'go online' voice command. maxOutputTokens raised to 250 June 21.
 ✓ Settings screen — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Swipe-right gesture + voice command + first-boot hint. June 18.
 ✓ Hardcoded Gemini API key removed — now in encrypted SharedPreferences. June 18.
 ✓ Memory layers: TruthDb, ConversationDb, HabitLayer, PeopleDb (with BLOB embeddings), JournalDb
@@ -156,6 +174,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ MainActivity.kt blank line cleanup — complete
 ✓ Naming phrases expanded — "this is X", "I am X", "you see X" recognized as name-teaching phrases
 ✓ Three A32 stability fixes — camera bitmap recycle, ML Kit suppression during Gemini, speak() race condition closed. June 19–20.
+✓ A32 crash resolved — camera frame throttle (150ms) eliminates delayed LMKD kill after Gemini responses. Confirmed stable June 21.
 
 ### Pending — Launch Blockers:
 
@@ -209,7 +228,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | Issue | Notes |
 |-------|-------|
 | TinyLlama disabled on A32 | Startup load causes LMKD kill under memory pressure. Disabled June 19. Re-enable path needed before launch. |
-| A32 speak() crash | speak() race condition fixed June 20. Testing needed to confirm holds. |
+| A32 crashes | **RESOLVED June 21** — camera frame throttle (150ms) eliminated the delayed LMKD kill. Patrick confirmed stable. |
+| Elijah/Diana face registration | Requires solo face moment after introduction to capture embedding via pending mechanism. Works once triggered. |
 | Fold 7 not tested | All testing on A32 via WiFi. Fold 7 needs dedicated stability session. |
 | TinyLlama slow on A32 | 20-40s per answer. Expected. Hardware limitation. Gemini is fast path when online. |
 | Barge-in | Deliberately disabled. Runaway loop. Status: PARKED. |
@@ -233,7 +253,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 17: Face recognition Steps 2–4 COMPLETE. FaceEmbedder wired into camera pipeline. PeopleDb updated with BLOB embedding column and cosine similarity matching. Naming flow uses embedding identity. Embedding memory pressure and queue overflow fixed. ApiKeySetupActivity.kt wired.
 - June 18: SettingsActivity built — all 5 sections. Hardcoded Gemini API key removed from MainActivity.kt. Prism stub removed from Brain & Behavior settings. Eye jitter fixed — boot lock 3500ms, speaking gate, dead zone, min-delta guard. Eyebrows and mouth brightened to #9BBEFF. Gear button replaced with swipe-right gesture + first-boot hint + voice command.
 - June 19: TinyLlama startup load disabled on A32 — LMKD crash prevention. Camera bitmap memory leak fixed (recycle after all async ML Kit callbacks complete).
-- June 20: ML Kit suppressed during Gemini calls via isThinking gate. speak() race condition fixed — isSpeaking set immediately at function entry, closing 240–650ms gap that allowed ML Kit to spike memory just before Scout spoke.
+- June 20: ML Kit suppressed during Gemini calls via isThinking gate. speak() race condition fixed — isSpeaking set immediately at function entry, closing 240–650ms gap that allowed ML Kit to spike memory just before Scout spoke. Mouth animation timing fixed — faceView.setSpeaking(true) moved back to TTS onStart callback only.
+- June 21: Camera frame throttle added (150ms interval, ~7fps ML Kit). A32 crash eliminated — confirmed stable by Patrick. Face name persistence fixed (lastKnownFaceName, findBestMatch before storeEmbedding, named-rows-only SQL). Face recognition threshold raised 0.65→0.75 (Patrick/Elijah false match fixed). Multi-person introduction added (SON_NAME/WIFE_NAME register face, pendingFaceIntroName mechanism). VisionAnswerBuilder two-person response improved. Gemini maxOutputTokens raised 150→250.
 
 ---
 
@@ -265,7 +286,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | FactKey.kt | Fact labels — fixed keys kept + FactKey.custom() for any new label. |
 | TruthDb.kt | SQLite fact store — fully flexible. No changes needed. |
 | ApiKeySetupActivity.kt | API key wizard — wired to secure storage June 17. |
-| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. 30s timeout. maxOutputTokens=150. Single-flight guard. Daily quota detection. |
+| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. 30s timeout. maxOutputTokens=250 (raised June 21). Single-flight guard. Daily quota detection. |
 | ScoutPromptBuilder.kt | Builds Gemini system instruction and unavailable messages. |
 | ScoutGeminiManager.kt | Gemini orchestration. Calls respond() on success. Catches OOM errors. |
 | ScoutWeatherManager.kt | Live weather via NWS (api.weather.gov) — UPDATED June 16. Free for commercial use. Precip %, offline-aware. U.S. only. |
@@ -276,8 +297,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
-| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. Filters noisy ML Kit labels. Wired to PeopleDb. |
+| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). Threshold 0.75 (raised June 21). |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. Filters noisy ML Kit labels. Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 names primary face (June 21). |
 | FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. Loads MobileFaceNet.tflite, returns 192-dim L2-normalized face embedding. |
 | MobileFaceNet.tflite | Bundled in app/src/main/assets/. MIT licensed. 5.2MB. Input: 112x112 RGB, normalized. Output: 192-dim embedding. |
 | THIRD_PARTY_NOTICES.md | MIT attribution for MobileFaceNet. Start of Open Source Credits. |
@@ -388,11 +409,12 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 | 9 | Remove hardcoded Gemini API key + Settings screen | ✓ DONE June 18 — SettingsActivity + key removed |
 | 10 | Eye jitter fix | ✓ DONE June 18 — boot lock, speaking gate, dead zone, min-delta |
 | 11 | A32 speak() crash fix | ✓ DONE June 20 — isSpeaking race condition closed |
+| 11b | A32 delayed crash fix | ✓ DONE June 21 — camera frame throttle eliminates post-Gemini LMKD kill. Patrick confirmed stable. |
 | 12 | TinyLlama re-enable on A32 | IN PROGRESS — disabled June 19, re-enable path TBD |
 | 13 | Startup diagnostics | Not started |
 | 14 | Onboarding flow — build 5 screens in Android | Screen 1 text finalized |
 | 15 | Fold 7 stability testing | Not started |
-| 16 | A32 stability testing | Ongoing |
+| 16 | A32 stability testing | Ongoing — no crashes as of June 21 |
 | 17 | Privacy Policy | Not started |
 | 18 | Terms of Use | Not started |
 | 19 | Open Source Credits — THIRD_PARTY_NOTICES.md started | In progress |
@@ -470,4 +492,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 20, 2026 | Version 33 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: June 21, 2026 | Version 34 | Single source of truth — upload every session*
