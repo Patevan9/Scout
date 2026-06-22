@@ -25,7 +25,11 @@ object TeachExtractor {
         "cool", "awesome", "amazing", "weird", "crazy", "funny",
         "interesting", "nice", "terrible", "annoying", "perfect", "stupid",
         "dumb", "silly", "important", "true", "false", "real", "fake",
-        "different", "new", "old", "big", "small", "broken", "working"
+        "different", "new", "old", "big", "small", "broken", "working",
+        "now", "today", "then", "soon", "later", "again", "still", "next",
+        "last", "already", "yet", "always", "never", "just", "only",
+        "anymore", "sometimes", "often", "lately", "recently", "currently",
+        "here", "there", "away", "out", "up", "down"
     )
 
     fun extract(input: String): Pair<String, String>? {
