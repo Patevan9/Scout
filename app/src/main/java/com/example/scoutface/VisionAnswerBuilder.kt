@@ -16,7 +16,8 @@ class VisionAnswerBuilder(
         lastFaceCount: Int,
         lastFaceHashes: List<String>,
         lastSceneLabels: List<Pair<String, Float>>,
-        knownFaceName: String? = null
+        knownFaceName: String? = null,
+        pendingIntroName: String? = null
     ): String {
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
@@ -74,10 +75,12 @@ class VisionAnswerBuilder(
                     seesDog -> " I also see a dog nearby."
                     else -> ""
                 }
-                if (!knownFaceName.isNullOrBlank()) {
-                    "I can see $knownFaceName and one other person.$dogLine"
-                } else {
-                    "I see two people.$dogLine"
+                when {
+                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
+                        "I can see you, $knownFaceName and $pendingIntroName.$dogLine"
+                    !knownFaceName.isNullOrBlank() ->
+                        "I can see you, $knownFaceName and someone else.$dogLine"
+                    else -> "I see two people.$dogLine"
                 }
             }
 
@@ -94,7 +97,7 @@ class VisionAnswerBuilder(
                 }
 
                 if (knownName != null) {
-                    "I can see $knownName.$objectLine"
+                    "I can see you, $knownName.$objectLine"
                 } else {
                     "I see one person in front of me.$objectLine"
                 }

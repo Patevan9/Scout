@@ -2399,7 +2399,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastFaceCount = lastFaceCount,
             lastFaceHashes = lastFaceHashes,
             lastSceneLabels = lastSceneLabels,
-            knownFaceName = lastKnownFaceName
+            knownFaceName = lastKnownFaceName,
+            pendingIntroName = pendingFaceIntroName
         )
 
         respond(out)
