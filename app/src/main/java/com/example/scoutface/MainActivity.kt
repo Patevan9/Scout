@@ -3030,6 +3030,7 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
+                lastKnownFaceName = value
                 respond("Okay. I’ll remember your name is $value.")
                 return true
             }
