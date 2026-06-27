@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val apiKey: String
         get() = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI) ?: ""
 
-    private val GEMINI_MODEL = "gemini-3.5-flash"
+    private val GEMINI_MODEL = "gemini-2.0-flash"
 
     // =======================
 
@@ -3089,6 +3089,8 @@ Respond only with Scout's next short reply.
     }
 
     private fun finishThinking() {
+        isThinking = false
+        faceView.setThinking(false)
     }
 
     private fun isGeminiEnabled(): Boolean =
