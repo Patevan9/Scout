@@ -1,8 +1,18 @@
 # Project Scout — Master Project Summary
-**Last updated: June 21, 2026 | Version 34**
+**Last updated: June 27, 2026 | Version 35**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 27, 2026 — What Changed Since Version 34
+
+✓ **Wrong-name teaching with 2 people in frame FIXED** — Saying "this is my wife Diana" was sometimes stored as the primary user's name (Scout replied "I'll remember your name is Diana"). STT occasionally drops "my wife", making it sound like "this is Diana" → FactKey.NAME. Fixed by guard in `handleTeaching()`: if primary user already known AND incoming name differs AND 2+ faces in frame → treat as secondary person introduction, not primary user rename. DONE June 27.
+✓ **ML Kit label whitelist** — Replaced old blacklist approach with OBJECT_WHITELIST in VisionAnswerBuilder.kt (~80 real household objects). Old blacklist couldn't block labels like "aerospace engineer", "dude", "vacation". Now only known household objects reach Scout's voice. DONE June 27.
+✓ **`lastKnownFaceName` set immediately after teaching** — Previously set only by the embedExecutor background cycle (2s interval). If Patrick said "what do you see?" within 2 seconds of "I am Patrick", Scout still said "I see one person." Fixed by setting `lastKnownFaceName = value` immediately inside handleTeaching(). DONE June 27.
+✓ **`finishThinking()` was empty no-op — FIXED** — Critical bug: `isThinking` was set to `true` in `handleQuery()` but never cleared when Gemini was blocked (cooldown, duplicate, quota message already suppressed). Face locked in thinking mode permanently. Camera dropped all frames (`isThinking || isSpeaking` gate at analyzer). Mic never restarted. Fixed by making `finishThinking()` actually call `isThinking = false` + `faceView.setThinking(false)`. DONE June 27.
+✓ **Testing moved to Fold 7** — Patrick is now building and testing on Samsung Galaxy Fold 7 (12GB RAM) instead of the A32. A32 remains stable as of June 21 but Fold 7 is now primary.
 
 ---
 
@@ -73,8 +83,8 @@ Scout is a calm family companion robot running on a Samsung Galaxy phone mounted
 |------|--------|
 | Package | com.example.scoutface |
 | Language | Kotlin + C++ NDK |
-| Primary device | Samsung Galaxy A32 — stress-test device, all testing via WiFi |
-| Dev device | Samsung Galaxy Fold 7 (wireless via WiFi from Android Studio) |
+| Primary device | Samsung Galaxy Fold 7 — primary test device as of June 27 (12GB RAM) |
+| Stress-test device | Samsung Galaxy A32 — stable as of June 21, still used for low-RAM validation |
 | Future hardware | KEYESTUDIO Mini Tank Kit V2 chassis via Bluetooth (opt-in) |
 | Ship target | Google Play Store — 7-day free trial, then $9.99 one-time purchase. No subscriptions. Ever. |
 | Website | lippy-robotics.gt.tc |
@@ -149,7 +159,11 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb stores BLOB embeddings with cosine similarity (threshold 0.75), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
 ✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21.
 ✓ VisionAnswerBuilder two-person response — "I can see [Patrick] and one other person." when primary face known. June 21.
-✓ Gemini API — OFF by default, activated by 'go online' voice command. maxOutputTokens raised to 250 June 21.
+✓ Wrong-name teaching with 2 people in frame fixed — handleTeaching() guard prevents "this is my wife Diana" being stored as primary user rename. June 27.
+✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder.kt. ~80 household objects. Garbage labels gone. June 27.
+✓ lastKnownFaceName set immediately on teaching — Scout says your name right away, not 2 seconds later. June 27.
+✓ finishThinking() fixed — was empty no-op. Now clears isThinking + faceView state. Fixes permanent stuck-thinking when Gemini blocked. June 27.
+✓ Gemini API — OFF by default, activated by 'go online' voice command. maxOutputTokens raised to 250 June 21. Model: gemini-3.5-flash.
 ✓ Settings screen — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Swipe-right gesture + voice command + first-boot hint. June 18.
 ✓ Hardcoded Gemini API key removed — now in encrypted SharedPreferences. June 18.
 ✓ Memory layers: TruthDb, ConversationDb, HabitLayer, PeopleDb (with BLOB embeddings), JournalDb
@@ -230,7 +244,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | TinyLlama disabled on A32 | Startup load causes LMKD kill under memory pressure. Disabled June 19. Re-enable path needed before launch. |
 | A32 crashes | **RESOLVED June 21** — camera frame throttle (150ms) eliminated the delayed LMKD kill. Patrick confirmed stable. |
 | Elijah/Diana face registration | Requires solo face moment after introduction to capture embedding via pending mechanism. Works once triggered. |
-| Fold 7 not tested | All testing on A32 via WiFi. Fold 7 needs dedicated stability session. |
+| Fold 7 now primary device | Switched June 27. A32 still used for low-RAM validation. |
 | TinyLlama slow on A32 | 20-40s per answer. Expected. Hardware limitation. Gemini is fast path when online. |
 | Barge-in | Deliberately disabled. Runaway loop. Status: PARKED. |
 | STT name recognition | 'Scout' misheard as 'Gal', 'Scott', 'Out'. Partially handled by wake word filter. |
@@ -255,6 +269,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 19: TinyLlama startup load disabled on A32 — LMKD crash prevention. Camera bitmap memory leak fixed (recycle after all async ML Kit callbacks complete).
 - June 20: ML Kit suppressed during Gemini calls via isThinking gate. speak() race condition fixed — isSpeaking set immediately at function entry, closing 240–650ms gap that allowed ML Kit to spike memory just before Scout spoke. Mouth animation timing fixed — faceView.setSpeaking(true) moved back to TTS onStart callback only.
 - June 21: Camera frame throttle added (150ms interval, ~7fps ML Kit). A32 crash eliminated — confirmed stable by Patrick. Face name persistence fixed (lastKnownFaceName, findBestMatch before storeEmbedding, named-rows-only SQL). Face recognition threshold raised 0.65→0.75 (Patrick/Elijah false match fixed). Multi-person introduction added (SON_NAME/WIFE_NAME register face, pendingFaceIntroName mechanism). VisionAnswerBuilder two-person response improved. Gemini maxOutputTokens raised 150→250.
+- June 27: Testing moved to Fold 7 (12GB RAM). Wrong-name teaching bug fixed (2-person frame guard in handleTeaching). ML Kit label blacklist replaced with OBJECT_WHITELIST in VisionAnswerBuilder (~80 household objects). lastKnownFaceName now set immediately after name teaching (not 2s later). finishThinking() fixed — was empty no-op causing permanent stuck-thinking when Gemini blocked.
 
 ---
 

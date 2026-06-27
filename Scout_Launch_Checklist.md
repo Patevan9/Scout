@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 21, 2026 | Version 6**
+**What Scout needs to be worth $9.99 | Updated June 27, 2026 | Version 7**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -33,6 +33,10 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Face recognition RELIABLE — findBestMatch scans named rows only. Threshold raised to 0.75. Self-match bug fixed (findBestMatch before storeEmbedding). Scout says your name consistently, not just once. DONE June 21.
 ✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers their face. Pending mechanism handles two-people-in-frame gracefully. DONE June 21.
 ✓ Two-person response — Scout says "I can see Patrick and one other person" instead of just "I see two people." DONE June 21.
+✓ Wrong-name teaching fixed — 2-person frame guard prevents "this is my wife Diana" being stored as primary user rename. DONE June 27.
+✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder. Garbage labels gone. DONE June 27.
+✓ finishThinking() fixed — was empty no-op. Scout no longer freezes in thinking mode. DONE June 27.
+✓ Testing moved to Fold 7 — Samsung Galaxy Fold 7 (12GB RAM) is now primary test device. DONE June 27.
 ✓ Naming phrases expanded — "this is X", "I am X", "you see X" recognized as name-teaching phrases. DONE June 15.
 ✓ THIRD_PARTY_NOTICES.md created — start of Open Source Credits. DONE June 15.
 ✓ Hardcoded Gemini API key REMOVED — Patrick's personal key removed from MainActivity.kt. Now in encrypted SharedPreferences. DONE June 18.
@@ -66,11 +70,11 @@ These are the real blockers. Scout cannot ship without these.
 - Screen counter and progress dots must be driven by the same variable — never hardcoded in two places.
 ■ New OnboardingActivity.kt — one focused session
 
-### 4. Fold 7 stability testing — Confirms Scout works on flagship device
+### 4. Fold 7 stability testing — Ongoing
 
-- All testing so far on A32 via WiFi. Fold 7 needs a dedicated session.
-- Test voice, memory, offline brain, face recognition, weather, wake word on Fold 7.
-■ Dedicated test session on Fold 7 — no code, just validation
+- Fold 7 is now the primary test device as of June 27. Building and testing there.
+- Continue validating voice, memory, face recognition, weather, wake word on each build.
+■ Ongoing as new features are built
 
 ### 5. A32 stability testing — Ongoing
 
@@ -160,4 +164,4 @@ Scout already has a face, a voice, a brain, memory, weather, a wake word, full r
 
 ---
 
-*Project Scout Launch Checklist | Updated June 21, 2026 | Version 6 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated June 27, 2026 | Version 7 | For Patrick, Diana, Elijah, and Scout*

@@ -1,8 +1,20 @@
 # Project Scout — Quick Start
-**Last updated: June 21, 2026 | Version 12**
+**Last updated: June 27, 2026 | Version 13**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v34).
+For full technical details, use the Scout Master Summary (v35).
+
+---
+
+## June 27, 2026 — What Is New:
+
+✓ **Wrong-name teaching with 2 people in frame FIXED** — "This is my wife Diana" was sometimes stored as the primary user's name. STT drops "my wife" → Scout heard "this is Diana" → FactKey.NAME. Guard added: if primary user already known + different name + 2+ faces → secondary introduction, not primary rename.
+✓ **ML Kit label whitelist** — OBJECT_WHITELIST in VisionAnswerBuilder.kt replaces old blacklist. Only ~80 real household objects reach Scout's voice. Garbage labels ("aerospace engineer", "dude", "vacation") gone.
+✓ **`lastKnownFaceName` set immediately on name teaching** — "I am Patrick" → Scout says your name right away on next "what do you see?", not 2 seconds later.
+✓ **`finishThinking()` fixed — critical bug** — Was a completely empty function. `isThinking` got stuck `true` whenever Gemini was blocked (cooldown, duplicate prompt, quota message already suppressed). Face frozen in thinking mode, camera stopped, mic never restarted. Now actually clears `isThinking = false` + `faceView.setThinking(false)`.
+✓ **Primary test device: Fold 7** — Patrick now building and testing on Samsung Galaxy Fold 7 (12GB RAM). A32 remains stable but Fold 7 is now primary.
+
+*(Previous session June 21: A32 crash eliminated, face name persistence fixed, family face introduction, two-person response, Gemini maxOutputTokens 250 — all DONE)*
 
 ---
 
@@ -37,8 +49,8 @@ Patrick Lippy — creator and developer of Scout. NOT a professional programmer.
 Scout is a calm family companion robot running on a Samsung Galaxy phone in landscape mode as a permanent face display. Animated eyes, speaks, listens, sees via camera, remembers the family.
 
 - Package: com.example.scoutface | Language: Kotlin + C++ NDK
-- Primary test device: Samsung Galaxy A32 — all testing via WiFi through Android Studio
-- Dev device: Samsung Galaxy Fold 7 — not yet stability tested
+- Primary test device: Samsung Galaxy Fold 7 — as of June 27 (12GB RAM)
+- Stress-test device: Samsung Galaxy A32 — stable as of June 21, still used for low-RAM validation
 - App: 7-day free trial, then $9.99 one-time. No automatic charges. No subscriptions. Ever.
 - Brains: TinyLlama 1.1B (offline, default — temporarily disabled on A32) + user's own free Gemini key (online, opt-in)
 - Website: lippy-robotics.gt.tc | Company: Lippy Robotics
@@ -82,6 +94,10 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ✓ Weather via NWS (api.weather.gov) — precipitation %, offline-aware, free for commercial use
 ✓ Total offline mode — 'go offline' blocks ALL internet features
 ✓ A32 STABLE — no crashes as of June 21. Camera throttle eliminated delayed LMKD kill.
+✓ Wrong-name teaching fixed — 2-person frame guard in handleTeaching(). June 27.
+✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder. Garbage labels gone. June 27.
+✓ lastKnownFaceName set immediately on teaching. June 27.
+✓ finishThinking() actually clears thinking state — was empty no-op causing stuck-thinking. June 27.
 
 ---
 
@@ -90,7 +106,8 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ⚠ **TinyLlama disabled on A32** — Disabled at startup to prevent LMKD crash under memory pressure. Needs investigation: delayed load, on-demand load, or memory footprint reduction. Gemini is primary brain for now. NOTE: A32 is now stable without TinyLlama — this is purely about re-enabling the offline brain safely.
 ⚠ **Elijah/Diana face registration requires solo moment** — After "this is my son Elijah", Scout sets a pending flag. Elijah needs to be the primary (largest) face in frame once for the embedding to be captured. Once done, Scout recognizes Elijah reliably.
 
-- Fold 7 not tested — all testing on A32 via WiFi. Fold 7 needs dedicated session.
+- Face recognition breaks on slight head turns — position-based hash still used as fallback. Embedding-based matching (findBestMatch) improves over time as embeddings accumulate.
+- Elijah/Diana face registration requires solo face moment after introduction.
 - STT name recognition — partially handled by wake word filter.
 - Live news — future feature.
 - Barge-in — deliberately disabled. PARKED.
@@ -103,7 +120,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 1. **TinyLlama re-enable path** — A32 is stable. Now need to safely load TinyLlama without LMKD. Delayed load or on-demand approach.
 2. **Startup diagnostics** — friendly message if systems missing at boot.
 3. **Onboarding flow** — build 5 approved screens in Android.
-4. **Fold 7 stability testing** — dedicated session.
+4. **Fold 7 stability testing** — now primary device. Ongoing.
 5. **Privacy Policy, Terms of Use, Open Source Credits** — write and add to app and website.
 6. **Play Store listing** — description, screenshots, content rating.
 
@@ -144,4 +161,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: June 21, 2026 | Version 12 | Upload every session | For full details use Master Summary v34*
+*Project Scout Quick Start | Last updated: June 27, 2026 | Version 13 | Upload every session | For full details use Master Summary v35*
