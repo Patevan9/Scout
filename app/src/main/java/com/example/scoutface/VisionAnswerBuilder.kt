@@ -3,6 +3,42 @@ package com.example.scoutface
 import com.example.scoutface.brain.FactKey
 import java.util.Locale
 
+private val OBJECT_WHITELIST = setOf(
+    // furniture
+    "chair", "sofa", "couch", "table", "desk", "bed", "bench", "shelf", "cabinet",
+    "drawer", "bookcase", "wardrobe", "dresser", "stool",
+    // lighting
+    "lamp", "light", "candle", "lantern",
+    // kitchen
+    "cup", "mug", "glass", "bottle", "plate", "bowl", "pot", "pan", "knife", "fork",
+    "spoon", "kettle", "blender", "microwave", "oven", "refrigerator", "toaster",
+    "cutting board", "coffee maker", "sink", "faucet",
+    // electronics
+    "phone", "laptop", "computer", "tablet", "television", "tv", "monitor",
+    "keyboard", "mouse", "remote", "speaker", "headphones", "camera", "clock",
+    "charger", "cable",
+    // food & drink
+    "apple", "banana", "orange", "food", "fruit", "vegetable", "bread", "sandwich",
+    "pizza", "burger", "coffee", "tea", "water", "juice", "beer", "wine", "can",
+    "cookie", "cake", "egg",
+    // clothing & accessories
+    "hat", "jacket", "shirt", "bag", "backpack", "handbag", "purse", "wallet",
+    "umbrella", "shoe", "boot", "glasses", "watch",
+    // books & stationery
+    "book", "magazine", "newspaper", "notebook", "pen", "pencil", "paper",
+    // home decor & misc
+    "plant", "flower", "vase", "mirror", "window", "door", "key", "toy",
+    "ball", "box", "basket", "pillow", "blanket", "rug", "mat", "towel",
+    "soap", "frame", "picture",
+    // vehicles (seen outdoors)
+    "car", "truck", "bus", "bicycle", "bike", "motorcycle",
+    // pets (included here but filtered out of speech output — handled separately)
+    "dog", "cat", "puppy", "kitten", "bird", "fish",
+    // tools & household
+    "scissors", "hammer", "screwdriver", "drill", "broom", "mop", "vacuum",
+    "hanger", "switch", "outlet", "pipe"
+)
+
 class VisionAnswerBuilder(
     private val truthDb: TruthDb,
     private val peopleDb: PeopleDb,
@@ -33,33 +69,15 @@ class VisionAnswerBuilder(
 
         val dogKnownName = truthDb.getFactValue(entityUserPrimary, FactKey.DOG_NAME)
 
+        val seesDog = labels.any { it.first.lowercase() == "dog" || it.first.lowercase() == "puppy" }
+        val seesCat = labels.any { it.first.lowercase() == "cat" || it.first.lowercase() == "kitten" }
+
         val filteredObjects = labels
-            .map { it.first }
-            .filterNot {
-    it == "person" ||
-    it == "human face" ||
-    it == "face" ||
-    it == "head" ||
-    it == "selfie" ||
-    it == "fun" ||
-    it == "tableware" ||
-    it == "photograph" ||
-    it == "photo" ||
-    it == "smile" ||
-    it == "gesture" ||
-    it == "hair" ||
-    it == "sunglasses" ||
-    it == "eyewear" ||
-    it == "glasses" ||
-    it == "room" ||
-    it == "indoor" ||
-    it == "interior"
-}
+            .map { it.first.lowercase() }
+            .filter { it in OBJECT_WHITELIST }
+            .filterNot { it == "dog" || it == "puppy" || it == "cat" || it == "kitten" }
             .distinct()
             .take(3)
-
-        val seesDog = labels.any { it.first == "dog" || it.first == "puppy" }
-        val seesCat = labels.any { it.first == "cat" || it.first == "kitten" }
 
         return when {
             faceCount >= 3 -> {

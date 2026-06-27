@@ -3008,8 +3008,18 @@ Respond only with Scout's next short reply.
 
             val (factKey, value) = teach
 
-            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
             if (factKey == FactKey.NAME) {
+                val knownPrimaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+                // 2+ faces in frame and primary user already known — a different name means
+                // someone else is being introduced, not the primary user renaming themselves.
+                if (!knownPrimaryName.isNullOrBlank() &&
+                    !value.equals(knownPrimaryName, ignoreCase = true) &&
+                    lastFaceCount >= 2) {
+                    registerFamilyMemberFace(value)
+                    respond("Okay. I’ll remember $value.")
+                    return true
+                }
+                truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
                 val embedding = lastFaceEmbedding
                 val targetHash: String? = if (embedding != null) {
                     peopleDb.findBestMatch(embedding) ?: lastFaceHashes.firstOrNull()
@@ -3020,19 +3030,21 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
-            } else if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
+                respond("Okay. I’ll remember your name is $value.")
+                return true
+            }
+
+            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+
+            if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
                 val faceRegistered = registerFamilyMemberFace(value)
                 if (!faceRegistered) {
-                    // Someone else was in the primary camera position — Scout can't learn
-                    // this face yet. Ask the person to face Scout alone momentarily.
-                    respond("I'll remember $value. When $value faces me alone, I'll learn to recognize them.")
+                    respond("I’ll remember $value. When $value faces me alone, I’ll learn to recognize them.")
                     return true
                 }
             }
 
             val out = when (factKey) {
-
-                FactKey.NAME -> "Okay. I’ll remember your name is $value."
 
                 FactKey.WIFE_NAME -> "Okay. I’ll remember your wife’s name is $value."
 
