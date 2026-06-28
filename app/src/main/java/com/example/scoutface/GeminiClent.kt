@@ -82,7 +82,7 @@ class GeminiClient(
     // The daily quota resets at midnight Pacific. 6 hours is a
     // reasonable retry window — if the quota is still gone when we
     // try again, we set another 6-hour cooldown automatically.
-    private val DAILY_QUOTA_COOLDOWN_MS = 6L * 60L * 60L * 1000L  // 6 hours
+    private val DAILY_QUOTA_COOLDOWN_MS = 60L * 60L * 1000L  // 1 hour — retry sooner
 
 
     // =======================
