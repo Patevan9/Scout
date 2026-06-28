@@ -328,6 +328,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastMeaningfulResponseMs = 0L
     private val REPEAT_CACHE_TTL_MS = 4L * 60L * 1_000L
 
+    private var pendingBrainSource = ""
+
     private val MIC_RESUME_COOLDOWN_MS = 650L
 
     private val LISTEN_RESTART_DELAY_MS = 150L
@@ -2408,6 +2410,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastMeaningfulResponseMs = System.currentTimeMillis()
         }
 
+        // Show which brain answered — helpful during testing
+        val src = pendingBrainSource
+        if (src.isNotBlank()) {
+            pendingBrainSource = ""
+            android.widget.Toast.makeText(this, src, android.widget.Toast.LENGTH_SHORT).show()
+        }
+
     }
 
     private fun handleDownloadIntent(which: String) {
@@ -2455,10 +2464,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val convo = convoDb.getLastTurns(limit = 6)
 
-        val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo) {
-            // Gemini failed (timeout, error, quota) — try TinyLlama on main thread
-            tryTinyLlamaOrFallback(qNorm)
-        }
+        val usedGemini = scoutGeminiManager.tryGemini(
+            qNorm, convo,
+            onAnswered = { pendingBrainSource = "Gemini (online)" },
+            onFailed   = { tryTinyLlamaOrFallback(qNorm) }
+        )
 
         if (usedGemini) return
 
@@ -2528,6 +2538,7 @@ Respond only with Scout's next short reply.
 
                 runOnUiThread {
                     if (!reply.isNullOrBlank()) {
+                        pendingBrainSource = "TinyLlama (offline)"
                         respond(cleanOfflineReply(reply.trim()))
                     } else {
                         respond("I'm not sure about that one.")

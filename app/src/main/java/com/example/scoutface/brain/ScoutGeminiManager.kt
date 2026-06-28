@@ -86,6 +86,7 @@ class ScoutGeminiManager(
     fun tryGemini(
         qNorm: String,
         conversation: List<Pair<String, String>>,
+        onAnswered: (() -> Unit)? = null,
         onFailed: (() -> Unit)? = null
     ): Boolean {
 
@@ -166,6 +167,7 @@ class ScoutGeminiManager(
                         unavailableLastSpokenMs = 0L
                         lastGeminiReply   = out
                         lastGeminiReplyMs = System.currentTimeMillis()
+                        onAnswered?.invoke()
                         respond(out)
                     } else {
                         // Gemini returned nothing — quota, timeout, or error.
