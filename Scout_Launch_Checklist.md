@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 27, 2026 | Version 7**
+**What Scout needs to be worth $9.99 | Updated June 28, 2026 | Version 8**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -13,7 +13,7 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Scout eyebrows and mouth brightened to #9BBEFF. DONE June 18.
 ✓ Voice — speaks and listens. Android STT + TTS, works offline.
 ✓ Camera awareness — Scout sees faces and scenes. Throttled to ~7fps for A32 memory health. DONE June 21.
-✓ Offline brain — TinyLlama 1.1B runs fully on the phone. No internet required. (Temporarily disabled on A32 while re-enable path is designed — see Must Fix below.)
+✓ Offline brain — TinyLlama 1.1B runs fully on the phone. No internet required. RE-ENABLED June 28 with safe delayed load strategy (90s delay, 800MB RAM check, nCtx=512, nThreads=2). On-demand load also added as Gemini fallback.
 ✓ Flexible memory — Scout learns and recalls any fact reliably.
 ✓ Identity answers — Scout answers 'are you my friend?' as Scout, not a generic AI.
 ✓ Weather — Current, tonight, tomorrow, 7-day, precipitation %. Via NWS (api.weather.gov). Free for commercial use. Offline with honest refusal.
@@ -36,13 +36,21 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Wrong-name teaching fixed — 2-person frame guard prevents "this is my wife Diana" being stored as primary user rename. DONE June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder. Garbage labels gone. DONE June 27.
 ✓ finishThinking() fixed — was empty no-op. Scout no longer freezes in thinking mode. DONE June 27.
-✓ Testing moved to Fold 7 — Samsung Galaxy Fold 7 (12GB RAM) is now primary test device. DONE June 27.
 ✓ Naming phrases expanded — "this is X", "I am X", "you see X" recognized as name-teaching phrases. DONE June 15.
 ✓ THIRD_PARTY_NOTICES.md created — start of Open Source Credits. DONE June 15.
 ✓ Hardcoded Gemini API key REMOVED — Patrick's personal key removed from MainActivity.kt. Now in encrypted SharedPreferences. DONE June 18.
 ✓ Settings screen BUILT — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Swipe-right gesture + first-boot hint + voice command to open. DONE June 18.
 ✓ Four A32 stability fixes — camera bitmap recycle, ML Kit suppression during Gemini, speak() race condition closed, camera frame throttle (150ms). DONE June 19–21.
 ✓ A32 NO LONGER CRASHING — Patrick confirmed stable June 21. Delayed LMKD kill after Gemini responses eliminated.
+✓ TinyLlama re-enabled with safe delayed load — 90s startup delay, 800MB RAM guard, nCtx=512, nThreads=2. On-demand load fires when Gemini fails. DONE June 28.
+✓ TinyLlama automatic Gemini fallback — onFailed callback in tryGemini() triggers tryTinyLlamaOrFallback(). If Gemini times out or returns nothing, Scout automatically tries TinyLlama. DONE June 28.
+✓ Gemini timeouts reduced — connectTimeout 10s (was 20s), readTimeout 12s (was 30s). Faster fallback to TinyLlama on slow responses. DONE June 28.
+✓ "Repeat that" intent — isRepeatRequest() detects "repeat that", "say that again", "what did you say?", etc. Replays last meaningful answer from 4-minute cache. Works offline without re-running any brain. DONE June 28.
+✓ Brain source Toast — after each answer, Toast shows "Gemini (online)" or "TinyLlama (offline)" for testing. DONE June 28.
+✓ Gemini default fixed — isGeminiEnabled() was defaulting to false (always OFF). Fixed to true so Gemini works on fresh install when a key is saved. DONE June 28.
+✓ Gemini daily quota cooldown reduced — 6 hours → 1 hour. Faster dev recovery after quota exhaustion. DONE June 28.
+✓ Face greeting fires once per launch — was resetting every 5 seconds when face briefly left frame (greetedThisSession = false reset removed). Now fires once per app boot only. DONE June 28.
+✓ STT reliability improved — EXTRA_PREFER_OFFLINE=true (avoids Samsung network STT dependency), 10-second silence window (was shorter), ERROR_RECOGNIZER_BUSY (error 8) gets 600ms delay before restart instead of immediate retry. DONE June 28.
 
 ---
 
@@ -50,19 +58,18 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 
 These are the real blockers. Scout cannot ship without these.
 
-### 1. A32 stability — TinyLlama re-enable path ■ URGENT
+### 1. A32 stability — TinyLlama re-enable path ✓ DONE June 28
 
-- TinyLlama startup load caused LMKD to kill Scout under memory pressure on A32. Temporarily disabled.
-- A32 is now stable WITHOUT TinyLlama (camera throttle fixed the crash).
-- Gemini is the primary brain right now, but TinyLlama is a core launch feature — offline families need it.
-- Need: delayed load after boot settles, on-demand load, or memory footprint reduction strategy.
-■ MainActivity.kt + LlamaEngine.kt — dedicated investigation session
+- TinyLlama re-enabled with delayed load strategy: 90s delay after boot, 800MB RAM guard, nCtx=512, nThreads=2.
+- On-demand load also wired as Gemini fallback — if Gemini fails and TinyLlama hasn't loaded yet, tryLoadOfflineBrain() fires and Scout says "warming up."
+- Still needs real-world A32 testing to confirm the LMKD crash does not return.
+■ MainActivity.kt + LlamaEngine.kt — monitor on A32 builds
 
-### 2. Startup diagnostics — Makes Scout start cleanly every time
+### 2. Startup diagnostics — Makes Scout start cleanly every time ■ NEXT
 
 - Scout checks at startup that brain is loaded, TTS is ready, STT is available.
 - If something is missing, Scout says something friendly rather than crashing or freezing.
-■ MainActivity.kt — startup check block
+■ MainActivity.kt — startup check block — THIS IS NEXT
 
 ### 3. Onboarding flow — First impression matters
 
@@ -72,13 +79,14 @@ These are the real blockers. Scout cannot ship without these.
 
 ### 4. Fold 7 stability testing — Ongoing
 
-- Fold 7 is now the primary test device as of June 27. Building and testing there.
-- Continue validating voice, memory, face recognition, weather, wake word on each build.
+- Fold 7 is listed as primary test device. Current testing session happening on A32.
+- Build and validate voice, memory, face recognition, weather, wake word on each device.
 ■ Ongoing as new features are built
 
 ### 5. A32 stability testing — Ongoing
 
 - All work tested on A32 as each feature is added. No crashes as of June 21.
+- TinyLlama re-enabled June 28 — monitor for LMKD under memory pressure.
 ■ Ongoing — continue testing as new features are added
 
 ---
@@ -123,6 +131,8 @@ Required to submit to Google Play.
 - Content rating questionnaire — Scout is family-safe. Straightforward.
 - Short description — 60 characters max: 'A calm AI companion for your whole family. Private. Local. Yours.'
 
+**⚠ 16KB page size warning** — ML Kit and TensorFlow Lite native libraries will need version updates before Play Store submission. Required versions: `mlkit:face-detection:16.1.6`, `mlkit:image-labeling:17.0.7`, `tensorflow-lite:2.14.0`. Google Play enforces 16KB page alignment starting 2025. Address in a dedicated session before submission.
+
 ---
 
 ## ■ Post-Trial Strategy
@@ -153,15 +163,18 @@ Required to submit to Google Play.
 - Full Settings screen expansion
 - Calendar integration
 - Voice recognition (Scout 2.0+) — advisory layer alongside face recognition
+- "Test Connection" button in Settings — verify API key without burning quota
 
 ---
 
 ## The bottom line
 
-Scout already has a face, a voice, a brain, memory, weather, a wake word, full reliable face recognition for the whole family, and a settings screen. The A32 is stable. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, full reliable face recognition for the whole family, and a settings screen. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
+
+**Next session: Startup diagnostics (#2 on Must Fix list) — friendly messages if brain, TTS, or STT missing at boot. Then: Onboarding flow (#3).**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated June 27, 2026 | Version 7 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated June 28, 2026 | Version 8 | For Patrick, Diana, Elijah, and Scout*

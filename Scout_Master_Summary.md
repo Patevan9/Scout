@@ -1,8 +1,25 @@
 # Project Scout — Master Project Summary
-**Last updated: June 27, 2026 | Version 35**
+**Last updated: June 28, 2026 | Version 36**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 28, 2026 — What Changed Since Version 35
+
+✓ **TinyLlama re-enabled with safe delayed load** — `startOfflineBrain()` restored. `tryLoadOfflineBrain()` helper added: 90-second startup delay, 800MB RAM guard (`availMem < 800MB → skip`), `nCtx=512` (reduced KV cache), `nThreads=2`. Model loaded from `filesDir/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`. TinyLlama is back as the offline brain. Needs A32 real-world confirmation that LMKD crash does not return. DONE June 28.
+✓ **TinyLlama automatic Gemini fallback** — `tryGemini()` now takes `onAnswered: (() -> Unit)?` and `onFailed: (() -> Unit)?` callbacks. When Gemini times out, 503s, or returns nothing, `onFailed` fires `tryTinyLlamaOrFallback(qNorm)`. Extracted helper shared by: direct path (Gemini disabled/no key/no internet) AND the Gemini `onFailed` path. Scout no longer silently fails when Gemini is down. DONE June 28.
+✓ **Gemini timeouts reduced** — `connectTimeout = 10_000` (was 20,000), `readTimeout = 12_000` (was 30,000) in `GeminiClient.kt`. Was causing 30-second `SocketTimeoutException` hangs before TinyLlama fallback could kick in. DONE June 28.
+✓ **"Repeat that" / "what did you say?" intent** — `isRepeatRequest()` added just before `handleQuery()`. Detects "repeat that", "say that again", "what did you say", "what was that", "pardon", "sorry what", and similar. `respond()` now caches the last meaningful answer (5+ words, `lastMeaningfulResponse`, 4-minute TTL `REPEAT_CACHE_TTL_MS`). Intent routed early in `handleQuery()` before any brain call — works offline instantly. DONE June 28.
+✓ **Brain source Toast** — `pendingBrainSource` variable set before `respond()` ("Gemini (online)" or "TinyLlama (offline)"). Toast shown inside `respond()` after each answer. For testing — helps Patrick identify which brain is actually responding. DONE June 28.
+✓ **Gemini default fixed** — `isGeminiEnabled()` was using `getBoolean(PREF_GEMINI_ENABLED, false)`. Default `false` meant Gemini was always blocked on fresh install even with a valid key saved. Fixed to `getBoolean(PREF_GEMINI_ENABLED, true)`. Note: Settings "Offline Mode" toggle correctly inverts `gemini_enabled` in `scout_memory` SharedPrefs. DONE June 28.
+✓ **Gemini daily quota cooldown reduced** — `DAILY_QUOTA_COOLDOWN_MS = 60L * 60L * 1000L` (1 hour, was 6 hours) in `GeminiClent.kt`. Faster dev recovery after quota exhaustion from testing. DONE June 28.
+✓ **Face greeting fires once per launch** — `greetedThisSession` was being reset to `false` every 5 seconds of face absence (when `GREET_RESET_ABSENCE_MS` elapsed). This caused the greeting to fire again every time the face briefly left frame. Fixed by removing the `greetedThisSession = false` reset block. Now only `faceAppearanceMs` is reset on absence. Scout greets once per boot only. DONE June 28.
+✓ **STT reliability improved** — `RecognizerIntent` now includes `EXTRA_PREFER_OFFLINE = true` (avoids Samsung network STT dependency), `SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS = 10_000L` (longer silence window), `SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS = 7_000L`. `onError()` handles `ERROR_RECOGNIZER_BUSY` (error 8) with a 600ms delay before restart instead of immediate retry. DONE June 28.
+✓ **Duplicate prompt serves cached Gemini answer** — Was saying "I heard that. I don't want to ask online twice." Now: on duplicate within the `duplicatePromptWindowMs` window, checks `lastGeminiReply` (4-minute TTL) and serves it if available. Allows through if no cache (resets `lastPromptMs = 0L` to bypass the guard). DONE June 28.
+✓ **speakUnavailableIfNeeded() made public** — Needed so the fallback chain in `tryTinyLlamaOrFallback()` can call it from `MainActivity` when neither brain is available. DONE June 28.
+✓ **Testing confirmed on A32** — Patrick confirmed active development and testing is on Samsung Galaxy A32. Fold 7 is listed as primary but A32 is the current working device.
 
 ---
 
@@ -12,7 +29,7 @@ This is the single source of truth.
 ✓ **ML Kit label whitelist** — Replaced old blacklist approach with OBJECT_WHITELIST in VisionAnswerBuilder.kt (~80 real household objects). Old blacklist couldn't block labels like "aerospace engineer", "dude", "vacation". Now only known household objects reach Scout's voice. DONE June 27.
 ✓ **`lastKnownFaceName` set immediately after teaching** — Previously set only by the embedExecutor background cycle (2s interval). If Patrick said "what do you see?" within 2 seconds of "I am Patrick", Scout still said "I see one person." Fixed by setting `lastKnownFaceName = value` immediately inside handleTeaching(). DONE June 27.
 ✓ **`finishThinking()` was empty no-op — FIXED** — Critical bug: `isThinking` was set to `true` in `handleQuery()` but never cleared when Gemini was blocked (cooldown, duplicate, quota message already suppressed). Face locked in thinking mode permanently. Camera dropped all frames (`isThinking || isSpeaking` gate at analyzer). Mic never restarted. Fixed by making `finishThinking()` actually call `isThinking = false` + `faceView.setThinking(false)`. DONE June 27.
-✓ **Testing moved to Fold 7** — Patrick is now building and testing on Samsung Galaxy Fold 7 (12GB RAM) instead of the A32. A32 remains stable as of June 21 but Fold 7 is now primary.
+✓ **Testing moved to Fold 7** — Listed in docs as primary device switch. Patrick is currently actively testing on A32 (confirmed June 28).
 
 ---
 
@@ -42,7 +59,7 @@ This is the single source of truth.
 ✓ **Settings access redesigned** — Gear button removed. Swipe-right gesture opens Settings. First-boot hint shown on first launch. Voice command also opens Settings. DONE June 18.
 ✓ **Eye jitter FIXED** — Boot lock (3500ms gaze stabilization), speaking gate, dead zone, and min-delta guard added to ScoutFaceView iris pipeline. A32 iris is now stable. DONE June 18.
 ✓ **Scout eyebrows and mouth brightened** — Color updated to #9BBEFF (lighter blue, matches iris). DONE June 18.
-✓ **TinyLlama startup disabled on A32** — Startup load caused LMKD to kill Scout under memory pressure. Disabled as emergency stabilization. Gemini is primary brain. Re-enable path TBD. DONE June 19.
+✓ **TinyLlama startup disabled on A32** — Startup load caused LMKD to kill Scout under memory pressure. Disabled as emergency stabilization. RE-ENABLED June 28 with safe delayed load. DONE June 19.
 ✓ **Camera bitmap memory leak fixed** — Bitmap objects now properly recycled after all async ML Kit callbacks complete, not prematurely. DONE June 19.
 ✓ **ML Kit suppressed during Gemini calls** — isThinking flag gates camera analyzer during Gemini API calls. Reduces peak memory usage during AI processing. DONE June 19.
 ✓ **speak() race condition FIXED** — isSpeaking = true now set immediately at function entry (not 240–650ms later when TTS onStart fires). Closes the window where ML Kit could run unconstrained just as Scout was starting to speak, causing a memory spike and LMKD kill. DONE June 20.
@@ -83,8 +100,8 @@ Scout is a calm family companion robot running on a Samsung Galaxy phone mounted
 |------|--------|
 | Package | com.example.scoutface |
 | Language | Kotlin + C++ NDK |
-| Primary device | Samsung Galaxy Fold 7 — primary test device as of June 27 (12GB RAM) |
-| Stress-test device | Samsung Galaxy A32 — stable as of June 21, still used for low-RAM validation |
+| Active test device | Samsung Galaxy A32 — current active development and testing as of June 28 |
+| Listed primary device | Samsung Galaxy Fold 7 (12GB RAM) — needs dedicated stability testing session |
 | Future hardware | KEYESTUDIO Mini Tank Kit V2 chassis via Bluetooth (opt-in) |
 | Ship target | Google Play Store — 7-day free trial, then $9.99 one-time purchase. No subscriptions. Ever. |
 | Website | lippy-robotics.gt.tc |
@@ -111,9 +128,9 @@ Scout should NOT: Constantly praise the user. Act overly excited. Feel fake or s
 
 **Post-trial:** After 7 days, advanced features lock but Scout stays installed. Still shows his face. Still greets the family. Trial end message: 'Thank you for spending time with Scout. Scout is still growing and receiving updates. If you'd like to continue the journey, you can unlock the full version at any time.'
 
-**Baseline Brain:** TinyLlama 1.1B Chat Q4_K_M (~669 MB) — default, offline, always included. (Temporarily disabled on A32 for stability — re-enable path TBD.)
+**Baseline Brain:** TinyLlama 1.1B Chat Q4_K_M (~669 MB) — default, offline, always included. Re-enabled June 28 with safe delayed load (90s, 800MB RAM guard, nCtx=512).
 
-**Optional Gemini:** Users add their own free Gemini key in Settings. OFF by default. Scout NEVER ships with a bundled key.
+**Optional Gemini:** Users add their own free Gemini key in Settings. ON by default when a key is saved (fixed June 28 — was always OFF). Scout NEVER ships with a bundled key.
 
 ---
 
@@ -155,15 +172,20 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ Eye jitter FIXED — boot lock (3500ms), speaking gate, dead zone, min-delta guard. A32 stable. June 18.
 ✓ Eyebrows and mouth brightened to #9BBEFF. June 18.
 ✓ Speech recognition (Android STT) + Text to Speech (TTS)
+✓ STT reliability improved — EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. June 28.
 ✓ Camera — face detection (ML Kit), scene labeling — throttled to ~7fps June 21 (memory pressure fix)
 ✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb stores BLOB embeddings with cosine similarity (threshold 0.75), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
 ✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21.
 ✓ VisionAnswerBuilder two-person response — "I can see [Patrick] and one other person." when primary face known. June 21.
+✓ Face greeting fires once per launch — greetedThisSession reset removed. June 28.
 ✓ Wrong-name teaching with 2 people in frame fixed — handleTeaching() guard prevents "this is my wife Diana" being stored as primary user rename. June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder.kt. ~80 household objects. Garbage labels gone. June 27.
 ✓ lastKnownFaceName set immediately on teaching — Scout says your name right away, not 2 seconds later. June 27.
 ✓ finishThinking() fixed — was empty no-op. Now clears isThinking + faceView state. Fixes permanent stuck-thinking when Gemini blocked. June 27.
-✓ Gemini API — OFF by default, activated by 'go online' voice command. maxOutputTokens raised to 250 June 21. Model: gemini-3.5-flash.
+✓ Gemini API — ON by default when key is saved (default fixed June 28). Timeout 10s/12s. maxOutputTokens=250. Activated by 'go online' voice command. Model: gemini-3.5-flash. Daily quota cooldown 1 hour.
+✓ TinyLlama 1.1B offline brain — RE-ENABLED June 28 with delayed load (90s), 800MB RAM guard, nCtx=512, nThreads=2. Automatic Gemini fallback via onFailed callback. On-demand load fires when Gemini fails and TinyLlama not yet loaded.
+✓ "Repeat that" intent — isRepeatRequest() + lastMeaningfulResponse cache (4-min TTL). Replays last 5-word+ answer instantly from any brain. June 28.
+✓ Brain source Toast — "Gemini (online)" / "TinyLlama (offline)" shown after each answer for testing. June 28.
 ✓ Settings screen — SettingsActivity with 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Swipe-right gesture + voice command + first-boot hint. June 18.
 ✓ Hardcoded Gemini API key removed — now in encrypted SharedPreferences. June 18.
 ✓ Memory layers: TruthDb, ConversationDb, HabitLayer, PeopleDb (with BLOB embeddings), JournalDb
@@ -179,7 +201,6 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ Person detection — VisionAnswerBuilder wired to PeopleDb. Scout reports person count cleanly
 ✓ Weather — current, tonight, tomorrow, 7-day, precipitation % via NWS (api.weather.gov) — free for commercial use
 ✓ ScoutPresenceDecider — four time-of-day modes
-✓ OFFLINE BRAIN — TinyLlama 1.1B on-device (temporarily disabled on A32 — LMKD crash prevention)
 ✓ Identity questions hardcoded — routing expanded
 ✓ Total offline mode — 'go offline' blocks ALL internet features
 ✓ Thinking-state expression — drift, narrowed lids, asymmetric brows
@@ -192,16 +213,13 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 ### Pending — Launch Blockers:
 
-■ **TinyLlama re-enable path on A32 — URGENT.**
-  - Disabled at startup to prevent LMKD kill under memory pressure.
-  - Options: delayed load after boot settles, on-demand load when needed, memory footprint reduction.
-  - TinyLlama is a core feature — offline families without a Gemini key need it.
+■ **Startup diagnostics** — friendly message if brain, TTS, or STT missing at startup. (MainActivity.kt) — NEXT
+■ **Onboarding flow** — build 5 approved screens as OnboardingActivity.kt.
+■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
+■ **16KB page size warning** — ML Kit + TensorFlow Lite native libraries need version updates before Play Store submission (`mlkit:face-detection:16.1.6`, `mlkit:image-labeling:17.0.7`, `tensorflow-lite:2.14.0`). Address before submission.
 
-■ **Remove hardcoded Gemini API key** — DONE June 18. SettingsActivity built and wired.
-
-- Startup diagnostics — friendly message if brain, TTS, or STT missing at startup.
-- Fold 7 stability testing — all testing on A32. Fold 7 needs dedicated session.
-- Onboarding flow — 5 screens designed, need building in Android.
+- Privacy Policy, Terms of Use, Open Source Credits — write and add to app + website.
+- Play Store listing — description, screenshots, content rating, privacy policy link.
 - Proposal Sandbox — 'Want me to remember that?' confirm step.
 - Permanent vs temporary memory sorting.
 - Caring follow-up loop.
@@ -241,15 +259,16 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 | Issue | Notes |
 |-------|-------|
-| TinyLlama disabled on A32 | Startup load causes LMKD kill under memory pressure. Disabled June 19. Re-enable path needed before launch. |
+| TinyLlama A32 real-world confirmation needed | Re-enabled June 28 with delayed load + RAM guard. Not yet confirmed that LMKD crash does not return under memory pressure. |
 | A32 crashes | **RESOLVED June 21** — camera frame throttle (150ms) eliminated the delayed LMKD kill. Patrick confirmed stable. |
 | Elijah/Diana face registration | Requires solo face moment after introduction to capture embedding via pending mechanism. Works once triggered. |
-| Fold 7 now primary device | Switched June 27. A32 still used for low-RAM validation. |
+| A32 active test device | Patrick confirmed June 28: testing is on A32. Fold 7 listed as primary but needs a dedicated session. |
 | TinyLlama slow on A32 | 20-40s per answer. Expected. Hardware limitation. Gemini is fast path when online. |
 | Barge-in | Deliberately disabled. Runaway loop. Status: PARKED. |
 | STT name recognition | 'Scout' misheard as 'Gal', 'Scott', 'Out'. Partially handled by wake word filter. |
 | Live news | Neither brain reads live news. Future news feed needed. |
 | ScoutFaceView dead code | Line 1023: doubled condition. Line 709: unused browAsym. Harmless but messy. |
+| 16KB page size | ML Kit + TensorFlow Lite native libraries require version updates before Play Store submission. Address before submission. |
 
 ---
 
@@ -269,7 +288,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 19: TinyLlama startup load disabled on A32 — LMKD crash prevention. Camera bitmap memory leak fixed (recycle after all async ML Kit callbacks complete).
 - June 20: ML Kit suppressed during Gemini calls via isThinking gate. speak() race condition fixed — isSpeaking set immediately at function entry, closing 240–650ms gap that allowed ML Kit to spike memory just before Scout spoke. Mouth animation timing fixed — faceView.setSpeaking(true) moved back to TTS onStart callback only.
 - June 21: Camera frame throttle added (150ms interval, ~7fps ML Kit). A32 crash eliminated — confirmed stable by Patrick. Face name persistence fixed (lastKnownFaceName, findBestMatch before storeEmbedding, named-rows-only SQL). Face recognition threshold raised 0.65→0.75 (Patrick/Elijah false match fixed). Multi-person introduction added (SON_NAME/WIFE_NAME register face, pendingFaceIntroName mechanism). VisionAnswerBuilder two-person response improved. Gemini maxOutputTokens raised 150→250.
-- June 27: Testing moved to Fold 7 (12GB RAM). Wrong-name teaching bug fixed (2-person frame guard in handleTeaching). ML Kit label blacklist replaced with OBJECT_WHITELIST in VisionAnswerBuilder (~80 household objects). lastKnownFaceName now set immediately after name teaching (not 2s later). finishThinking() fixed — was empty no-op causing permanent stuck-thinking when Gemini blocked.
+- June 27: Wrong-name teaching bug fixed (2-person frame guard in handleTeaching). ML Kit label blacklist replaced with OBJECT_WHITELIST in VisionAnswerBuilder (~80 household objects). lastKnownFaceName now set immediately after name teaching (not 2s later). finishThinking() fixed — was empty no-op causing permanent stuck-thinking when Gemini blocked. Testing listed as moved to Fold 7.
+- June 28: TinyLlama re-enabled — 90s delayed load, 800MB RAM guard, nCtx=512, nThreads=2. tryLoadOfflineBrain() helper added (startup + on-demand path). Gemini timeouts reduced (10s/12s). onFailed/onAnswered callbacks added to tryGemini(). tryTinyLlamaOrFallback() extracted — TinyLlama now automatic Gemini fallback. "Repeat that" intent added (isRepeatRequest(), lastMeaningfulResponse cache, 4-min TTL). Brain source Toast added ("Gemini (online)" / "TinyLlama (offline)"). Gemini default fixed (isGeminiEnabled() was always false). Daily quota cooldown reduced 6h→1h. Face greeting reset removed — greets once per boot only. STT improved: EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. Duplicate prompt now serves cached Gemini reply. speakUnavailableIfNeeded() made public. Testing confirmed on A32.
 
 ---
 
@@ -293,7 +313,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 | File | Description |
 |------|-------------|
-| MainActivity.kt | Main app — all logic. Hardcoded API key REMOVED June 18. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. isSpeaking set immediately in speak() — race condition fix June 20. |
+| MainActivity.kt | Main app — all logic. Hardcoded API key REMOVED June 18. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. isSpeaking set immediately in speak() — race condition fix June 20. tryLoadOfflineBrain() added June 28 (delayed + on-demand TinyLlama load). isRepeatRequest() + lastMeaningfulResponse cache June 28. tryTinyLlamaOrFallback() extracted June 28. pendingBrainSource + brain Toast June 28. greetedThisSession reset removed June 28. STT EXTRA_PREFER_OFFLINE + silence/busy fixes June 28. |
 | ScoutFaceView.kt | Custom face canvas — all visual animation. Thinking expression updated June 8. Eye jitter fixed June 18 (boot lock, speaking gate, dead zone, min-delta). Eyebrows/mouth #9BBEFF June 18. |
 | SettingsActivity.kt | NEW June 18 — 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Gemini key entry, offline toggle, pitch/speed sliders. Opened via swipe-right + voice command + first-boot hint. |
 | ScoutIntentRouter.kt | Intent routing — IDENTITY + RECALL_FACT added. Online/disconnect phrases. |
@@ -301,19 +321,19 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | FactKey.kt | Fact labels — fixed keys kept + FactKey.custom() for any new label. |
 | TruthDb.kt | SQLite fact store — fully flexible. No changes needed. |
 | ApiKeySetupActivity.kt | API key wizard — wired to secure storage June 17. |
-| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. 30s timeout. maxOutputTokens=250 (raised June 21). Single-flight guard. Daily quota detection. |
+| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. connectTimeout=10s, readTimeout=12s (reduced June 28). maxOutputTokens=250 (raised June 21). Daily quota cooldown 1 hour (was 6h, reduced June 28). Single-flight guard. Daily quota detection (isDailyQuotaInError). |
 | ScoutPromptBuilder.kt | Builds Gemini system instruction and unavailable messages. |
-| ScoutGeminiManager.kt | Gemini orchestration. Calls respond() on success. Catches OOM errors. |
+| brain/ScoutGeminiManager.kt | Gemini orchestration. onAnswered/onFailed callbacks added June 28. lastGeminiReply cache (4-min TTL) — serves duplicate prompts June 28. speakUnavailableIfNeeded() made public June 28. Quota message discipline — says "unavailable" once per cooldown window, then stays quiet. |
 | ScoutWeatherManager.kt | Live weather via NWS (api.weather.gov) — UPDATED June 16. Free for commercial use. Precip %, offline-aware. U.S. only. |
 | ScoutPresenceDecider.kt | Social timing layer. |
-| LlamaEngine.kt | Offline brain JNI wrapper — WORKING. Startup load disabled on A32 June 19 (LMKD prevention). |
+| LlamaEngine.kt | Offline brain JNI wrapper — WORKING. Re-enabled June 28: loadAsync called with nCtx=512, nThreads=2. |
 | OfflinePromptBuilder.kt | TinyLlama prompt formatter. |
 | scout_llama_jni.cpp | C++ JNI bridge — compiled into libscout_llama.so. |
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
 | PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). Threshold 0.75 (raised June 21). |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. Filters noisy ML Kit labels. Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 names primary face (June 21). |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 names primary face (June 21). |
 | FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. Loads MobileFaceNet.tflite, returns 192-dim L2-normalized face embedding. |
 | MobileFaceNet.tflite | Bundled in app/src/main/assets/. MIT licensed. 5.2MB. Input: 112x112 RGB, normalized. Output: 192-dim embedding. |
 | THIRD_PARTY_NOTICES.md | MIT attribution for MobileFaceNet. Start of Open Source Credits. |
@@ -390,6 +410,7 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 
 - Voice Recognition (Future) — Optional voice enrollment for family members. Advisory only — does not replace TruthDb or user-confirmed identity. Not for launch or 1.1.
 - Fun startup/loading messages — Rotating, self-aware, Scout-voiced lines for the first-launch brain download screen.
+- "Test Connection" button in Settings — verify API key without burning quota (add small sentinel request).
 
 ---
 
@@ -425,16 +446,17 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 | 10 | Eye jitter fix | ✓ DONE June 18 — boot lock, speaking gate, dead zone, min-delta |
 | 11 | A32 speak() crash fix | ✓ DONE June 20 — isSpeaking race condition closed |
 | 11b | A32 delayed crash fix | ✓ DONE June 21 — camera frame throttle eliminates post-Gemini LMKD kill. Patrick confirmed stable. |
-| 12 | TinyLlama re-enable on A32 | IN PROGRESS — disabled June 19, re-enable path TBD |
-| 13 | Startup diagnostics | Not started |
-| 14 | Onboarding flow — build 5 screens in Android | Screen 1 text finalized |
-| 15 | Fold 7 stability testing | Not started |
-| 16 | A32 stability testing | Ongoing — no crashes as of June 21 |
+| 12 | TinyLlama re-enable on A32 | ✓ DONE June 28 — 90s delay, 800MB RAM guard, nCtx=512. On-demand Gemini fallback. Needs A32 real-world confirmation. |
+| 13 | Startup diagnostics | ■ NEXT — friendly message if brain/TTS/STT missing at boot |
+| 14 | Onboarding flow — build 5 screens in Android | Not started |
+| 15 | Fold 7 stability testing | Not started — A32 is current test device |
+| 16 | A32 stability testing | Ongoing — no crashes as of June 21. TinyLlama re-enabled June 28, monitoring. |
 | 17 | Privacy Policy | Not started |
 | 18 | Terms of Use | Not started |
 | 19 | Open Source Credits — THIRD_PARTY_NOTICES.md started | In progress |
 | 20 | Weather API licensing | ✓ RESOLVED June 16 — switched to NWS, free for commercial use |
 | 21 | Play Store listing — description, screenshots, rating | Not started |
+| 22 | 16KB page size — ML Kit + TF Lite library updates | Not started — required before submission |
 
 ---
 
@@ -507,4 +529,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 21, 2026 | Version 34 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: June 28, 2026 | Version 36 | Single source of truth — upload every session*
