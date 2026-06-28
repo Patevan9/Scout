@@ -3119,12 +3119,17 @@ Respond only with Scout's next short reply.
                 }
 
                 val knownPrimaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
-                // 2+ faces in frame and primary user already known — a different name means
-                // someone else is being introduced, not the primary user renaming themselves.
+                // Primary user already known and the new name is different — someone else
+                // is introducing themselves. Route to family member registration when:
+                //   - 2+ faces in frame (always safe — can’t be primary user renaming)
+                //   - OR 1 face + non-explicit phrase ("I am Diana", not "my name is Diana")
+                //     so Diana can introduce herself while alone without overwriting Patrick.
                 if (!knownPrimaryName.isNullOrBlank() &&
                     !value.equals(knownPrimaryName, ignoreCase = true) &&
-                    lastFaceCount >= 2) {
-                    registerFamilyMemberFace(value)
+                    lastFaceCount >= 1 &&
+                    (lastFaceCount >= 2 || !isExplicitPhrase)) {
+                    val registered = registerFamilyMemberFace(value)
+                    if (registered) lastKnownFaceName = value
                     respond("Okay. I’ll remember $value.")
                     return true
                 }
