@@ -4,39 +4,173 @@ import com.example.scoutface.brain.FactKey
 import java.util.Locale
 
 private val OBJECT_WHITELIST = setOf(
-    // furniture
-    "chair", "sofa", "couch", "table", "desk", "bed", "bench", "shelf", "cabinet",
-    "drawer", "bookcase", "wardrobe", "dresser", "stool",
+    // seating
+    "sofa", "couch", "loveseat", "recliner", "chair", "armchair", "rocker",
+    "ottoman", "bench", "stool", "daybed", "futon", "beanbag", "deckchair",
+    // tables, desks & storage
+    "table", "desk", "nightstand", "sideboard", "buffet", "hutch",
+    "cabinet", "dresser", "drawer", "bookshelf", "bookcase", "shelf",
+    "wardrobe", "armoire", "closet", "trunk", "chest", "vanity", "footstool",
+    // bedroom
+    "bed", "mattress", "headboard", "footboard", "bunk bed", "bunkbed", "crib",
+    "hamper", "laundry",
+    // textiles & soft furnishings
+    "mirror", "rug", "carpet", "curtain", "blind", "cushion", "pillow",
+    "blanket", "quilt", "comforter", "sheet", "towel", "washcloth",
+    "tablecloth", "coaster", "bathmat", "doormat", "mat",
     // lighting
-    "lamp", "light", "candle", "lantern",
-    // kitchen
-    "cup", "mug", "glass", "bottle", "plate", "bowl", "pot", "pan", "knife", "fork",
-    "spoon", "kettle", "blender", "microwave", "oven", "refrigerator", "toaster",
-    "cutting board", "coffee maker", "sink", "faucet",
-    // electronics
-    "phone", "laptop", "computer", "tablet", "television", "tv", "monitor",
-    "keyboard", "mouse", "remote", "speaker", "headphones", "camera", "clock",
-    "charger", "cable",
-    // food & drink
-    "apple", "banana", "orange", "food", "fruit", "vegetable", "bread", "sandwich",
-    "pizza", "burger", "coffee", "tea", "water", "juice", "beer", "wine", "can",
-    "cookie", "cake", "egg",
-    // clothing & accessories
-    "hat", "jacket", "shirt", "bag", "backpack", "handbag", "purse", "wallet",
-    "umbrella", "shoe", "boot", "glasses", "watch",
-    // books & stationery
-    "book", "magazine", "newspaper", "notebook", "pen", "pencil", "paper",
-    // home decor & misc
-    "plant", "flower", "vase", "mirror", "window", "door", "key", "toy",
-    "ball", "box", "basket", "pillow", "blanket", "rug", "mat", "towel",
-    "soap", "frame", "picture",
-    // vehicles (seen outdoors)
-    "car", "truck", "bus", "bicycle", "bike", "motorcycle",
-    // pets (included here but filtered out of speech output — handled separately)
-    "dog", "cat", "puppy", "kitten", "bird", "fish",
-    // tools & household
-    "scissors", "hammer", "screwdriver", "drill", "broom", "mop", "vacuum",
-    "hanger", "switch", "outlet", "pipe"
+    "lamp", "light", "lantern", "candle", "chandelier", "nightlight", "spotlight",
+    // climate & air
+    "fan", "heater", "fireplace", "humidifier", "dehumidifier", "purifier",
+    "diffuser", "air conditioner", "airconditioner", "thermostat",
+    // TV & audio
+    "television", "tv", "monitor", "speaker", "soundbar", "subwoofer",
+    "receiver", "radio", "projector", "remote",
+    // computers & peripherals
+    "phone", "tablet", "laptop", "computer", "keyboard", "mouse", "printer",
+    "router", "modem", "charger", "cable", "cord", "plug", "adapter",
+    "extension cord", "extensioncord", "power strip", "powerstrip",
+    "headphones", "earbuds", "microphone", "webcam", "scanner", "tripod",
+    "camera", "clock", "alarm", "doorbell", "console",
+    // security & safety
+    "detector", "extinguisher", "safe", "lockbox", "lock box",
+    // kitchen appliances
+    "microwave", "oven", "stove", "cooktop", "refrigerator", "freezer",
+    "dishwasher", "toaster", "blender", "kettle", "coffee maker", "coffeemaker",
+    "mixer", "grinder", "juicer", "crockpot", "air fryer", "airfryer",
+    "vacuum", "robot",
+    // cookware & utensils
+    "pan", "pot", "skillet", "wok", "lid", "spatula", "ladle", "whisk", "tongs",
+    "knife", "fork", "spoon", "cutting board",
+    // tableware & containers
+    "plate", "bowl", "cup", "mug", "glass", "pitcher", "bottle", "thermos",
+    "napkin", "tray", "basket", "container", "jar", "can", "box",
+    "sink", "faucet",
+    // fruits
+    "apple", "banana", "orange", "grape", "pear", "peach", "plum",
+    "melon", "watermelon", "pineapple", "mango",
+    "berry", "strawberry", "blueberry", "raspberry",
+    // vegetables
+    "carrot", "potato", "onion", "pepper", "broccoli", "lettuce",
+    "cucumber", "tomato", "corn", "bean", "pea",
+    // grains & baked goods
+    "rice", "pasta", "bread", "bagel", "biscuit", "cracker",
+    "cookie", "cake", "pie", "donut", "muffin",
+    // meals & proteins
+    "pizza", "burger", "sandwich", "sausage", "bacon", "ham",
+    "chicken", "turkey", "beef", "steak", "fish", "shrimp", "egg",
+    // dairy
+    "cheese", "butter", "yogurt", "milk",
+    // drinks & snacks
+    "juice", "water", "coffee", "tea", "soda", "cola", "lemonade",
+    "beer", "wine", "snack", "candy", "chocolate",
+    // general food labels
+    "food", "fruit", "vegetable",
+    // bags & carry
+    "bag", "backpack", "handbag", "purse", "suitcase", "briefcase",
+    "wallet", "lanyard", "keychain", "key", "keys",
+    // clothing — tops
+    "shirt", "tshirt", "t-shirt", "blouse", "sweater", "hoodie", "jacket", "coat", "vest",
+    // clothing — bottoms & full
+    "dress", "skirt", "jeans", "pants", "shorts", "leggings",
+    // underwear & sleep
+    "socks", "underwear", "bra", "pajamas", "robe",
+    // footwear
+    "shoe", "shoes", "sneakers", "boot", "boots", "sandals", "slippers", "cleat",
+    // clothing accessories
+    "hat", "cap", "scarf", "glove", "gloves", "belt", "tie", "umbrella", "hanger",
+    // jewelry
+    "watch", "bracelet", "necklace", "ring", "earring", "brooch", "locket", "pendant",
+    // cosmetics & grooming
+    "lipstick", "mascara", "eyeliner", "foundation", "powder", "blush",
+    "concealer", "palette",
+    "hair dryer", "hairdryer", "straightener", "curler", "clippers",
+    "comb", "brush", "razor",
+    // eyewear & mobility aids
+    "glasses", "sunglasses", "cane", "walker", "wheelchair", "crutches",
+    // bathroom fixtures
+    "toilet", "bathtub", "shower", "plunger", "bidet",
+    "soap dish", "soapdish", "toilet paper", "toiletpaper", "tissue",
+    "medicine cabinet", "medicinecabinet", "scale", "washbasin",
+    "loofah", "squeegee",
+    // toiletries
+    "soap", "shampoo", "conditioner", "toothbrush", "toothpaste",
+    "mouthwash", "floss", "deodorant", "perfume", "cologne", "toiletry",
+    // medical
+    "medicine", "bandage", "thermometer",
+    // books & paper
+    "book", "notebook", "magazine", "newspaper", "notepad", "journal",
+    "sketchbook", "calendar", "bookmark", "album", "paper",
+    // office supplies
+    "binder", "folder", "envelope", "stapler", "staples", "paperclip", "pushpin",
+    "whiteboard", "clipboard", "calculator", "document", "receipt",
+    "pen", "pencil", "marker", "eraser", "crayon", "highlighter",
+    // home decor
+    "plant", "flower", "vase", "wreath", "statue", "figurine",
+    "painting", "poster", "picture", "frame",
+    "window", "door", "switch", "outlet", "pipe",
+    // bins & storage
+    "toy box", "toybox", "bin",
+    // pets
+    "dog", "puppy", "cat", "kitten", "bird", "parrot", "hamster",
+    "rabbit", "guinea pig", "guineapig", "ferret", "lizard", "turtle",
+    "goldfish", "fish",
+    "tank", "aquarium", "leash", "collar", "harness",
+    "feeder", "crate", "kennel", "carrier",
+    "bone", "treat", "scratcher", "perch", "litter box", "litterbox",
+    // toys & games
+    "toy", "ball", "doll", "action figure", "actionfigure",
+    "block", "blocks", "puzzle", "board game", "boardgame", "card game", "cardgame",
+    "paint", "playdough", "play dough",
+    "train", "airplane", "helicopter", "rocket",
+    "plushie", "teddy bear", "teddybear",
+    // baby & nursery
+    "baby", "bassinet", "playpen", "diaper", "wipes", "bib", "pacifier",
+    "rattle", "teether", "onesie", "car seat", "carseat",
+    "high chair", "highchair", "changing table", "changingtable",
+    "baby gate", "babygate", "mobile",
+    // musical instruments
+    "guitar", "violin", "cello", "trumpet", "trombone", "clarinet",
+    "flute", "saxophone", "ukulele", "banjo", "mandolin", "accordion",
+    "harmonica", "drum", "xylophone", "amplifier",
+    // sports & fitness
+    "basketball", "football", "baseball", "soccer ball", "soccerball",
+    "volleyball", "tennis ball", "tennisball",
+    "frisbee", "kite", "helmet", "bat", "puck", "skate", "snowboard", "skis",
+    "dumbbell", "barbell", "treadmill", "elliptical", "bench press", "benchpress",
+    "yoga mat", "yogamat", "medicine ball", "medicineball", "goal", "net",
+    // ride-on & outdoor toys
+    "scooter", "bicycle", "bike", "tricycle", "wagon", "stroller",
+    // vehicles
+    "car", "truck", "bus", "motorcycle", "suv", "van", "pickup",
+    "tractor", "atv", "rv", "camper", "trailer",
+    "boat", "canoe", "kayak", "jet ski", "jetski",
+    // outdoor & yard
+    "mailbox", "grill", "smoker", "cooler", "wheelbarrow", "planter",
+    "birdhouse", "bird feeder", "birdfeeder", "fountain", "swing",
+    "hammock", "patio", "shovel", "bucket", "hose", "sprinkler", "rake",
+    "mower", "lawn mower", "blower",
+    // tools & workshop
+    "ladder", "toolbox", "tool box", "hammer", "screwdriver", "wrench",
+    "drill", "saw", "mallet", "chisel", "level", "sander", "clamp",
+    "workbench", "vise", "compressor", "generator", "welder", "anvil",
+    "chain saw", "chainsaw", "hedge trimmer", "hedgetrimmer", "edger", "ax",
+    "screw", "nail", "bolt", "nut", "tool belt", "toolbelt",
+    // cleaning
+    "broom", "mop", "dustpan", "sponge", "detergent", "scissors",
+    // office equipment
+    "filing cabinet", "filingcabinet",
+    // electrical
+    "light bulb", "lightbulb",
+    // navigation & reference
+    "globe", "map", "telescope", "binoculars", "compass",
+    "clock radio", "clockradio", "weather station", "weatherstation",
+    // holiday & seasonal
+    "stocking", "ornament", "garland", "menorah", "dreidel",
+    "pumpkin", "jack-o-lantern", "jackolantern", "cornstalk",
+    "firework", "gift", "present", "ribbon", "bow", "wrapping paper", "wrappingpaper",
+    // misc household
+    "flashlight", "battery"
 )
 
 class VisionAnswerBuilder(
