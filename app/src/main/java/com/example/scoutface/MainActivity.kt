@@ -3190,7 +3190,7 @@ Respond only with Scout's next short reply.
     }
 
     private fun isGeminiEnabled(): Boolean =
-        prefs.getBoolean(PREF_GEMINI_ENABLED, false)
+        prefs.getBoolean(PREF_GEMINI_ENABLED, true)
 
     // =======================
     // ONLINE MODE COMMAND
