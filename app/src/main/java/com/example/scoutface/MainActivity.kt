@@ -3009,6 +3009,23 @@ Respond only with Scout's next short reply.
             val (factKey, value) = teach
 
             if (factKey == FactKey.NAME) {
+                // Hard blocklist — words that can never be a person’s name.
+                // Catches garbled STT output regardless of which pattern matched.
+                val blockedNames = setOf(
+                    "scout", "time", "okay", "ok", "what", "about", "the", "this",
+                    "that", "it", "no", "yes", "yeah", "nope", "not", "now", "then",
+                    "on", "off", "good", "great", "fine", "sure", "right", "wrong",
+                    "true", "false", "something", "nothing", "anything", "everything",
+                    "someone", "nobody", "you", "me", "us", "them", "him", "her",
+                    "we", "i", "here", "there", "where", "when", "why", "how",
+                    "today", "tomorrow", "yesterday", "later", "soon", "never", "always",
+                    "out", "up", "down", "in", "go", "going", "coming", "back",
+                    "just", "still", "already", "again", "next", "last", "only"
+                )
+                if (value.lowercase() in blockedNames) {
+                    return false
+                }
+
                 // Background speech guard: loose patterns ("i am X", "this is X") can
                 // fire during the 30-second conversation window without Scout’s name.
                 // Only block when it’s NOT an explicit phrase AND no face is visible.
