@@ -2445,20 +2445,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val convo = convoDb.getLastTurns(limit = 6)
 
-        val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo)
+        val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo) {
+            // Gemini failed (timeout, error, quota) — try TinyLlama on main thread
+            tryTinyLlamaOrFallback(qNorm)
+        }
 
         if (usedGemini) return
 
+        // Gemini not available (disabled / no key / no internet) — go straight to TinyLlama
+        tryTinyLlamaOrFallback(qNorm)
+
+    }
+
+    private fun tryTinyLlamaOrFallback(qNorm: String) {
+
         if (LlamaEngine.isReady) {
 
-            val userName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+            val convo = convoDb.getLastTurns(limit = 2)
 
+            val userName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-
-            val nameLine = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
+            val nameLine  = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
 
             val system = """
-
 ${nameLine}You are $scoutName.
 
 You are a warm, calm family companion robot who lives with the family.
@@ -2480,40 +2489,25 @@ If unsure, say you do not know yet.
 Give a direct, friendly answer in one or two short complete sentences.
 
 Respond only with Scout's next short reply.
-
 """.trimIndent()
 
             val sb = StringBuilder()
-
             sb.append("<|system|>\n$system</s>\n")
-
             sb.append("<|user|>\nCan you hear me?</s>\n")
-
             sb.append("<|assistant|>\nI hear you. I'm right here.</s>\n")
-
             sb.append("<|user|>\nAre you my friend?</s>\n")
-
             sb.append("<|assistant|>\nI'm happy when you're around.</s>\n")
-
             sb.append("<|user|>\nAre you happy?</s>\n")
-
             sb.append("<|assistant|>\nRight now? Yes. I think so.</s>\n")
-
             sb.append("<|user|>\nWhat happens when I leave?</s>\n")
-
             sb.append("<|assistant|>\nI'll be here when you get back.</s>\n")
-
             sb.append("<|user|>\nHello</s>\n")
-
             sb.append("<|assistant|>\nHello. Good to have you here.</s>\n")
 
-            for ((role, text) in convo.takeLast(2)) {
-
+            for ((role, text) in convo) {
                 if (text.isBlank()) continue
-
                 if (role.lowercase() == "user") sb.append("<|user|>\n$text</s>\n")
                 else sb.append("<|assistant|>\n$text</s>\n")
-
             }
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
@@ -2523,17 +2517,11 @@ Respond only with Scout's next short reply.
                 val reply = LlamaEngine.generate(sb.toString(), nPredict = 64)
 
                 runOnUiThread {
-
                     if (!reply.isNullOrBlank()) {
-
                         respond(cleanOfflineReply(reply.trim()))
-
                     } else {
-
                         respond("I'm not sure about that one.")
-
                     }
-
                 }
 
             }.start()
@@ -2541,8 +2529,6 @@ Respond only with Scout's next short reply.
             return
 
         }
-
-// Model still loading
 
         if (LlamaEngine.isLoading) {
 
@@ -2552,35 +2538,19 @@ Respond only with Scout's next short reply.
 
         }
 
-// On-demand load: Gemini is down and TinyLlama hasn't started yet — trigger now.
+        // On-demand load: neither Gemini nor TinyLlama ready — trigger load now.
+        tryLoadOfflineBrain()
 
-        if (!LlamaEngine.isReady && !LlamaEngine.isLoading) {
+        if (LlamaEngine.isLoading) {
 
-            tryLoadOfflineBrain()
+            respond("My offline brain is warming up. Ask me again in just a moment.")
 
-            if (LlamaEngine.isLoading) {
-
-                respond("My offline brain is warming up. Ask me again in just a moment.")
-
-                return
-
-            }
+            return
 
         }
 
-// Full fallback — model unavailable or file not found
-
-        val response = when ((0..2).random()) {
-
-            0 -> "I'm sorry, I didn't quite catch that. Can you say it again?"
-
-            1 -> "Hmm. I'm not sure I understood. Could you rephrase that?"
-
-            else -> "I'm not sure about that one."
-
-        }
-
-        respond(response)
+        // Nothing available — speak the Gemini unavailable message or random fallback
+        scoutGeminiManager.speakUnavailableIfNeeded()
 
     }
 

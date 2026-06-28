@@ -124,8 +124,8 @@ class GeminiClient(
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
-                connectTimeout = 20_000
-                readTimeout = 30_000
+                connectTimeout = 10_000
+                readTimeout = 12_000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("x-goog-api-key", key)
             }

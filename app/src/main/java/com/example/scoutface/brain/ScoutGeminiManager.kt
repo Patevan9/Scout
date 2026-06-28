@@ -82,7 +82,8 @@ class ScoutGeminiManager(
 
     fun tryGemini(
         qNorm: String,
-        conversation: List<Pair<String, String>>
+        conversation: List<Pair<String, String>>,
+        onFailed: (() -> Unit)? = null
     ): Boolean {
 
         val enabled   = isGeminiEnabled()
@@ -157,9 +158,10 @@ class ScoutGeminiManager(
                         unavailableLastSpokenMs = 0L
                         respond(out)
                     } else {
-                        // Gemini returned nothing — quota or error.
-                        // Only announce this if we haven't said so recently.
-                        speakUnavailableIfNeeded()
+                        // Gemini returned nothing — quota, timeout, or error.
+                        // Let caller try TinyLlama first; only speak unavailable if
+                        // no fallback was provided or the fallback didn't handle it.
+                        if (onFailed != null) onFailed.invoke() else speakUnavailableIfNeeded()
                     }
                 }
 
@@ -167,7 +169,7 @@ class ScoutGeminiManager(
                 Log.e("ScoutGemini", "Gemini thread crashed", e)
                 runOnMain {
                     requestInFlight.set(false)
-                    speakUnavailableIfNeeded()
+                    if (onFailed != null) onFailed.invoke() else speakUnavailableIfNeeded()
                 }
             }
         }.start()
@@ -187,7 +189,7 @@ class ScoutGeminiManager(
      * Uses a longer repeat gap for daily quota exhaustion since
      * that won't clear for hours.
      */
-    private fun speakUnavailableIfNeeded() {
+    fun speakUnavailableIfNeeded() {
         val now = System.currentTimeMillis()
 
         val repeatGap = if (geminiClient.isDailyQuotaExhausted()) {
