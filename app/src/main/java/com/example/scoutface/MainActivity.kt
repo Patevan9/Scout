@@ -1775,6 +1775,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
 
+            // Prefer offline recognition so a brief network hiccup does not
+            // cause silent failures — Samsung has offline models available.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+
+            // Keep listening for up to 10 seconds of silence before giving up.
+            // Default is ~5s which cuts sessions too short on a quiet room.
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 10_000L)
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 7_000L)
+
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -1851,7 +1860,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 faceView.setMicLevel(0f)
 
-                scheduleListenRestart()
+                // ERROR_RECOGNIZER_BUSY (8) means two sessions overlapped.
+                // Give the engine 600ms to fully close before restarting.
+                if (error == 8) {
+                    handler.postDelayed({ scheduleListenRestart(immediate = true) }, 600L)
+                } else {
+                    scheduleListenRestart()
+                }
 
             }
 
