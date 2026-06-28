@@ -900,12 +900,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun startOfflineBrain() {
 
-        // TinyLlama (~700 MB) exceeds the available RAM budget on the Galaxy A32.
-        // Loading it causes LMKD to kill Scout within seconds of startup.
-        // Gemini handles all AI responses; re-enable this only on a higher-RAM device.
-        android.util.Log.i("ScoutBrain", "Offline brain skipped (insufficient RAM on this device)")
+        // Delay 90 seconds so startup memory spike (camera, ML Kit, Gemini) settles
+        // before we add ~800MB for TinyLlama. Immediate load was killing Scout on A32.
+        handler.postDelayed({ tryLoadOfflineBrain() }, 90_000L)
+        android.util.Log.i("ScoutBrain", "Offline brain load scheduled for 90s after startup")
 
-        return
+    }
+
+    private fun tryLoadOfflineBrain() {
+
+        if (LlamaEngine.isReady || LlamaEngine.isLoading) return
+
+        val actMgr = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actMgr.getMemoryInfo(memInfo)
+        val freeMb = memInfo.availMem / 1_048_576L
+        android.util.Log.i("ScoutBrain", "Free RAM before TinyLlama load: ${freeMb}MB")
+
+        if (freeMb < 800L) {
+            android.util.Log.e("ScoutBrain", "Skipping TinyLlama — only ${freeMb}MB free (need 800MB)")
+            return
+        }
+
+        val candidates = listOf(
+            java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
+            java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
+        )
+        val modelFile = candidates.firstOrNull { it.exists() }
+        if (modelFile == null) {
+            android.util.Log.e("ScoutBrain", "TinyLlama model file not found in any location")
+            return
+        }
+
+        android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
+
+        // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
+        // uses 2 conversation turns, so 512 tokens is more than enough.
+        LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+            android.util.Log.i("ScoutBrain",
+                if (success) "Offline brain ready" else "Offline brain load failed")
+        }
 
     }
 
@@ -2518,7 +2552,23 @@ Respond only with Scout's next short reply.
 
         }
 
-// Full fallback
+// On-demand load: Gemini is down and TinyLlama hasn't started yet — trigger now.
+
+        if (!LlamaEngine.isReady && !LlamaEngine.isLoading) {
+
+            tryLoadOfflineBrain()
+
+            if (LlamaEngine.isLoading) {
+
+                respond("My offline brain is warming up. Ask me again in just a moment.")
+
+                return
+
+            }
+
+        }
+
+// Full fallback — model unavailable or file not found
 
         val response = when ((0..2).random()) {
 
