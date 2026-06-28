@@ -1656,14 +1656,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 presenceDecider.onFaceLost()
 
-                                if (faceLastSeenForGreetMs > 0L &&
-                                        now - faceLastSeenForGreetMs >= GREET_RESET_ABSENCE_MS) {
-
-                                    faceAppearanceMs = 0L
-
-                                    greetedThisSession = false
-
-                                }
+                                // greetedThisSession intentionally NOT reset here.
+                                // Scout greets once per app launch when he first sees a face.
+                                // ScoutPresenceDecider handles the 30-min absence greeting separately.
+                                faceAppearanceMs = 0L
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
