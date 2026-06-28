@@ -1956,12 +1956,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 habitLayer.logUtterance(normalized, lastFaceHashes.firstOrNull())
 
-                val scoutName = truthDb.getFactValue("scout", "name") ?: "scout"
+                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
                 val nameLower = scoutName.lowercase()
-                val hearsHisName =
-                    normalized.contains(nameLower) || normalized.contains("scout") || normalized.contains(
-                        "gal"
-                    ) || normalized.contains("scott") || normalized.contains("out")
+                val hearsHisName = normalized.contains(nameLower) ||
+                    (nameLower == "scout" && (
+                        normalized.contains("gal") ||
+                        normalized.contains("scott") ||
+                        normalized.contains("out")
+                    ))
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
                 if (!hearsHisName && !inConvoWindow) {

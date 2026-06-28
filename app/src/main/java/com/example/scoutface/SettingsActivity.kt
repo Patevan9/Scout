@@ -8,6 +8,9 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -21,6 +24,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var memPrefs: SharedPreferences
 
     private val screenStack = ArrayDeque<String>()
+
+    private var tts: TextToSpeech? = null
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private var previewRunnable: Runnable? = null
 
     private val BG       = Color.parseColor("#0D1728")
     private val BG_ROW   = Color.parseColor("#19293F")
@@ -48,7 +55,28 @@ class SettingsActivity : AppCompatActivity() {
         memPrefs   = getSharedPreferences("scout_memory", Context.MODE_PRIVATE)
         container  = FrameLayout(this).apply { setBackgroundColor(BG) }
         setContentView(container)
+        tts = TextToSpeech(this) { /* init silent — ready by the time the user touches sliders */ }
         push(S_MAIN)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        previewRunnable?.let { previewHandler.removeCallbacks(it) }
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+    }
+
+    private fun speakPreview(full: Boolean) {
+        val pitch = scoutPrefs.getFloat("voice_pitch", 1.0f)
+        val speed = scoutPrefs.getFloat("voice_speed", 1.0f)
+        val name  = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
+        val phrase = if (full) "Hello. My name is $name." else "Hello."
+        tts?.let {
+            it.setPitch(pitch)
+            it.setSpeechRate(speed)
+            it.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, "preview")
+        }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -121,9 +149,9 @@ class SettingsActivity : AppCompatActivity() {
         val name = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
         body.addView(navRow("Robot Name", name, "This is how Scout introduces himself") { push(S_ROBOT) })
         body.addView(div())
-        body.addView(sliderRow("🎵", "Voice Pitch",  "Adjust how high or low Scout's voice sounds", "voice_pitch",  scoutPrefs, 0.5f, 2.0f, 1.0f))
+        body.addView(sliderRow("🎵", "Voice Pitch",  "Adjust how high or low Scout's voice sounds", "voice_pitch",  scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true))
         body.addView(div())
-        body.addView(sliderRow("⚡", "Voice Speed",  "Adjust how fast or slow Scout speaks",        "voice_speed",  scoutPrefs, 0.5f, 2.0f, 1.0f))
+        body.addView(sliderRow("⚡", "Voice Speed",  "Adjust how fast or slow Scout speaks",        "voice_speed",  scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true))
         body.addView(div())
         body.addView(navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") })
         body.addView(footerNote("✦  More voice tone options coming in a future update!"))
@@ -268,6 +296,12 @@ class SettingsActivity : AppCompatActivity() {
             val n = edit.text.toString().trim()
             if (n.isNotEmpty()) {
                 scoutPrefs.edit().putString("robot_name", n).apply()
+                // Also update TruthDb so the wake word and identity responses use the new name
+                try {
+                    val db = TruthDb(this)
+                    db.upsertFact("scout", "name", n, 1.0f, "user_setting")
+                    db.close()
+                } catch (_: Exception) { }
                 toast("Name saved as \"$n\"")
                 pop()
             } else {
@@ -395,7 +429,7 @@ class SettingsActivity : AppCompatActivity() {
         return row
     }
 
-    private fun sliderRow(icon: String, title: String, sub: String, key: String, prefs: SharedPreferences, min: Float, max: Float, def: Float): View {
+    private fun sliderRow(icon: String, title: String, sub: String, key: String, prefs: SharedPreferences, min: Float, max: Float, def: Float, preview: Boolean = false): View {
         val col = vCol(BG_ROW).padded(dp(20), dp(14), dp(20), dp(14))
         val header = hRow(Color.TRANSPARENT).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(lbl("$icon  $title", 15f, TXT).apply {
@@ -418,10 +452,23 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
                     val v = (Math.round((rangeMin + p.toFloat() / steps * (rangeMax - rangeMin)) * 100f)) / 100f
                     valLabel.text = String.format("%.2f", v)
-                    if (fromUser) prefs.edit().putFloat(key, v).apply()
+                    if (fromUser) {
+                        prefs.edit().putFloat(key, v).apply()
+                        if (preview) {
+                            previewRunnable?.let { previewHandler.removeCallbacks(it) }
+                            previewRunnable = Runnable { speakPreview(false) }
+                            previewHandler.postDelayed(previewRunnable!!, 350L)
+                        }
+                    }
                 }
                 override fun onStartTrackingTouch(sb: SeekBar) {}
-                override fun onStopTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {
+                    if (preview) {
+                        previewRunnable?.let { previewHandler.removeCallbacks(it) }
+                        previewRunnable = null
+                        speakPreview(true)
+                    }
+                }
             })
         })
         return col
