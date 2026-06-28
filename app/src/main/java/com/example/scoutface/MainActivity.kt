@@ -3009,6 +3009,19 @@ Respond only with Scout's next short reply.
             val (factKey, value) = teach
 
             if (factKey == FactKey.NAME) {
+                // Background speech guard: loose patterns ("i am X", "this is X") can
+                // fire during the 30-second conversation window without Scout’s name.
+                // Only block when it’s NOT an explicit phrase AND no face is visible.
+                // Explicit phrases ("my name is X") are intentional and always allowed.
+                val isExplicitPhrase = qNorm.contains("my name is") ||
+                        qNorm.contains("i am named") ||
+                        qNorm.contains("im named")
+                val hearsScout = qNorm.contains("scout") || qNorm.contains("gal") ||
+                        qNorm.contains("scott")
+                if (!isExplicitPhrase && !hearsScout && lastFaceCount == 0) {
+                    return false
+                }
+
                 val knownPrimaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
                 // 2+ faces in frame and primary user already known — a different name means
                 // someone else is being introduced, not the primary user renaming themselves.
