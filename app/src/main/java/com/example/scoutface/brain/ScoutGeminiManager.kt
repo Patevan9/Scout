@@ -47,9 +47,12 @@ class ScoutGeminiManager(
     private var lastRequestStartedMs  = 0L
     private var lastPrompt            = ""
     private var lastPromptMs          = 0L
+    private var lastGeminiReply: String? = null
+    private var lastGeminiReplyMs     = 0L
 
-    private val minRequestGapMs         = 2_500L
-    private val duplicatePromptWindowMs = 45_000L
+    private val minRequestGapMs          = 2_500L
+    private val duplicatePromptWindowMs  = 45_000L
+    private val REPLY_CACHE_TTL_MS       = 4L * 60L * 1_000L
 
 
     // =======================
@@ -114,10 +117,16 @@ class ScoutGeminiManager(
         }
 
         if (qNorm == lastPrompt && now - lastPromptMs < duplicatePromptWindowMs) {
-            requestInFlight.set(false)
-            Log.e("ScoutGemini", "Blocked: duplicate prompt")
-            respond("I heard that. I don't want to ask online twice for the same thing.")
-            return true
+            val cached = lastGeminiReply
+            if (cached != null && now - lastGeminiReplyMs < REPLY_CACHE_TTL_MS) {
+                requestInFlight.set(false)
+                Log.e("ScoutGemini", "Duplicate prompt — replaying cached answer")
+                respond(cached)
+                return true
+            }
+            // No cached answer — let it through so the user gets a response
+            Log.e("ScoutGemini", "Duplicate prompt, no cache — allowing through")
+            lastPromptMs = 0L
         }
 
         if (now - lastRequestStartedMs < minRequestGapMs) {
@@ -153,9 +162,10 @@ class ScoutGeminiManager(
                     val out = reply?.trim().takeUnless { it.isNullOrBlank() }
 
                     if (out != null) {
-                        // Gemini answered — speak it and reset the unavailable timer
-                        // so the next failure gets a fresh announcement.
+                        // Gemini answered — cache it, reset unavailable timer.
                         unavailableLastSpokenMs = 0L
+                        lastGeminiReply   = out
+                        lastGeminiReplyMs = System.currentTimeMillis()
                         respond(out)
                     } else {
                         // Gemini returned nothing — quota, timeout, or error.

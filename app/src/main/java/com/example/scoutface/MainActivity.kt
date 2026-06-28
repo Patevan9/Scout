@@ -324,6 +324,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
+    private var lastMeaningfulResponse: String? = null
+    private var lastMeaningfulResponseMs = 0L
+    private val REPEAT_CACHE_TTL_MS = 4L * 60L * 1_000L
+
     private val MIC_RESUME_COOLDOWN_MS = 650L
 
     private val LISTEN_RESTART_DELAY_MS = 150L
@@ -2398,6 +2402,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         finishThinking()
 
+        // Cache for "repeat that" — only real answers (5+ words), not short status messages
+        if (out.trim().split(" ").size >= 5) {
+            lastMeaningfulResponse = out
+            lastMeaningfulResponseMs = System.currentTimeMillis()
+        }
+
     }
 
     private fun handleDownloadIntent(which: String) {
@@ -2874,6 +2884,20 @@ Respond only with Scout's next short reply.
 
     }
 
+    private fun isRepeatRequest(qNorm: String): Boolean {
+        return qNorm.contains("repeat that") ||
+               qNorm.contains("say that again") ||
+               qNorm.contains("what did you say") ||
+               qNorm.contains("what was that") ||
+               qNorm.contains("could you repeat") ||
+               qNorm.contains("can you repeat") ||
+               qNorm.contains("didn't catch that") ||
+               qNorm.contains("didnt catch that") ||
+               qNorm.contains("say it again") ||
+               qNorm == "pardon" ||
+               qNorm == "sorry what"
+    }
+
     private fun handleQuery(qNorm: String) {
 
         if (qNorm == "settings" || qNorm.contains("open settings") || qNorm.contains("go to settings")) {
@@ -2884,6 +2908,17 @@ Respond only with Scout's next short reply.
 
             return
 
+        }
+
+        // Repeat intent — works offline, no Gemini or TinyLlama needed
+        if (isRepeatRequest(qNorm)) {
+            val cached = lastMeaningfulResponse
+            if (cached != null && System.currentTimeMillis() - lastMeaningfulResponseMs < REPEAT_CACHE_TTL_MS) {
+                respond(cached)
+            } else {
+                respond("I don't have a recent answer to repeat.")
+            }
+            return
         }
 
         if (!presenceDecider.shouldRespondToInput(qNorm)) return
