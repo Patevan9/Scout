@@ -156,7 +156,7 @@ class GeminiClient(
                 .put("contents", contents)
                 .put(
                     "generationConfig",
-                    JSONObject().put("maxOutputTokens", 250)
+                    JSONObject().put("maxOutputTokens", 400)
                 )
 
             OutputStreamWriter(conn.outputStream).use {
@@ -203,12 +203,22 @@ class GeminiClient(
                 Log.e("ScoutGemini", "finishReason=$finishReason")
             }
 
-            val text = candidate
+            val rawText = candidate
                 ?.optJSONObject("content")
                 ?.optJSONArray("parts")
                 ?.optJSONObject(0)
                 ?.optString("text")
                 ?.trim()
+
+            // If Gemini hit the token limit mid-sentence, trim to the last
+            // complete sentence so Scout never speaks a dangling half-sentence.
+            val text = if (!rawText.isNullOrBlank() && finishReason == "MAX_TOKENS") {
+                val lastPunct = rawText.lastIndexOfAny(charArrayOf('.', '!', '?'))
+                if (lastPunct > 0) {
+                    Log.e("ScoutGemini", "MAX_TOKENS: trimming to last sentence end at $lastPunct")
+                    rawText.substring(0, lastPunct + 1)
+                } else rawText
+            } else rawText
 
             return if (text.isNullOrBlank()) {
                 Log.e("ScoutGemini", "Blank Gemini text. Raw=$raw")
