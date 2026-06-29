@@ -201,7 +201,16 @@ class ScoutGeminiManager(
      * Uses a longer repeat gap for daily quota exhaustion since
      * that won't clear for hours.
      */
-    fun speakUnavailableIfNeeded() {
+    /** Returns true if Gemini is currently in any cooldown window. */
+    fun isInCooldown(): Boolean = geminiClient.isInCooldown()
+
+    /**
+     * Speaks the Gemini unavailable message ONCE per cooldown window.
+     * Returns true if the message was spoken, false if it was suppressed
+     * (already announced recently). Callers use the return value to decide
+     * whether to also try a local fallback on the same turn.
+     */
+    fun speakUnavailableIfNeeded(): Boolean {
         val now = System.currentTimeMillis()
 
         val repeatGap = if (geminiClient.isDailyQuotaExhausted()) {
@@ -210,13 +219,15 @@ class ScoutGeminiManager(
             shortCooldownRepeatGapMs
         }
 
-        if (now - unavailableLastSpokenMs > repeatGap) {
+        return if (now - unavailableLastSpokenMs > repeatGap) {
             unavailableLastSpokenMs = now
             respond(ScoutPromptBuilder.buildOnlineUnavailableMessage(geminiClient))
+            true
         } else {
             // Already told the user — stay quiet this time.
             Log.e("ScoutGemini", "Quota message suppressed (already announced recently)")
             finishThinking()
+            false
         }
     }
 }

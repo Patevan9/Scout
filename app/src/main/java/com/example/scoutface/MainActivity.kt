@@ -2530,6 +2530,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun tryTinyLlamaOrFallback(qNorm: String) {
 
+        // When Gemini is in cooldown (quota or rate-limit), announce it once.
+        // speakUnavailableIfNeeded() has built-in suppression so it only speaks
+        // the first time in each cooldown window. If it spoke, return — the user
+        // needs to know before we silently answer from a different brain.
+        // On the next question the suppression kicks in and TinyLlama takes over.
+        if (scoutGeminiManager.isInCooldown()) {
+            if (scoutGeminiManager.speakUnavailableIfNeeded()) return
+        }
+
         if (LlamaEngine.isReady) {
 
             val convo = convoDb.getLastTurns(limit = 2)
