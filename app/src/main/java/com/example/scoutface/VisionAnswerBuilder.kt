@@ -187,7 +187,8 @@ class VisionAnswerBuilder(
         lastFaceHashes: List<String>,
         lastSceneLabels: List<Pair<String, Float>>,
         knownFaceName: String? = null,
-        pendingIntroName: String? = null
+        pendingIntroName: String? = null,
+        secondaryFaceName: String? = null
     ): String {
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
@@ -230,6 +231,8 @@ class VisionAnswerBuilder(
                 when {
                     !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
                         "I can see you, $knownFaceName and $pendingIntroName.$dogLine"
+                    !knownFaceName.isNullOrBlank() && !secondaryFaceName.isNullOrBlank() ->
+                        "I can see you, $knownFaceName and $secondaryFaceName.$dogLine"
                     !knownFaceName.isNullOrBlank() ->
                         "I can see you, $knownFaceName and someone else.$dogLine"
                     else -> "I see two people.$dogLine"

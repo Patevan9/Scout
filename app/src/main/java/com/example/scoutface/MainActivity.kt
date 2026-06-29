@@ -414,6 +414,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastKnownFaceName: String? = null
 
+    @Volatile
+
+    private var lastSecondaryFaceName: String? = null
+
     private val EMBED_INTERVAL_MS = 2_000L
 
     private val embedRunning = AtomicBoolean(false)
@@ -1342,15 +1346,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             lastFaceCount = faces.size
 
+                            if (faces.size < 2) lastSecondaryFaceName = null
+
                             lastFaceUpdatedMs = now
 
                             if (faces.isNotEmpty()) {
 
                                 val hashes = ArrayList<String>()
 
-                                val largest =
+                                val sortedFaces = faces.sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }
 
-                                    faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                                val largest = sortedFaces.firstOrNull()
+
+                                val secondFace = sortedFaces.getOrNull(1)
 
                                 val b = largest?.boundingBox
 
@@ -1497,6 +1505,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val capturedHash = hashes.firstOrNull()
 
+                                    val capturedSecondBox = secondFace?.boundingBox
+
                                     val uprW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
 
                                     val uprH = if (capturedRotation == 90 || capturedRotation == 270) capW else capH
@@ -1578,19 +1588,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     lastFaceEmbedding = embedding
 
-                                                    // findBestMatch BEFORE storeEmbedding — avoids self-match.
-                                                    // findBestMatch only scans named rows, so unnamed hash
-                                                    // rows from previous frames cannot win the comparison.
-                                                    val nameMatchHash = peopleDb.findBestMatch(embedding)
-
-                                                    val resolvedName = if (nameMatchHash != null) {
-                                                        peopleDb.getName(nameMatchHash)
-                                                    } else null
+                                                    // findBestMatchName (multi-embedding table) first for best accuracy,
+                                                    // then fall back to the single-embedding hash table.
+                                                    val resolvedNameFromMulti = peopleDb.findBestMatchName(embedding)
+                                                    val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
+                                                    val resolvedName = resolvedNameFromMulti
+                                                        ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
 
                                                     if (!resolvedName.isNullOrBlank()) {
-                                                        // Known person — refresh their embedding and cache name.
+                                                        // Known person — accumulate embedding and cache name.
                                                         lastKnownFaceName = resolvedName
-                                                        peopleDb.storeEmbedding(nameMatchHash!!, embedding)
+                                                        peopleDb.addNamedEmbedding(resolvedName, embedding)
+                                                        if (nameMatchHash != null) peopleDb.storeEmbedding(nameMatchHash, embedding)
                                                         pendingFaceIntroName = null
                                                     } else {
                                                         // Unknown face — check for a pending introduction.
@@ -1601,6 +1610,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                             peopleDb.touchSeen(capturedHash)
                                                             peopleDb.setName(capturedHash, pendingName)
                                                             peopleDb.storeEmbedding(capturedHash, embedding)
+                                                            peopleDb.addNamedEmbedding(pendingName, embedding)
                                                             lastKnownFaceName = pendingName
                                                             pendingFaceIntroName = null
                                                         } else if (capturedHash != null) {
@@ -1619,6 +1629,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 }
 
+                                            }
+
+                                            // Secondary face — runs in the same submit so no concurrency issue.
+                                            if (capturedSecondBox != null) {
+                                                try {
+                                                    val exp2 = (capturedSecondBox.width() * 0.2f).toInt()
+                                                    val uL2 = (capturedSecondBox.left - exp2).coerceAtLeast(0)
+                                                    val uT2 = (capturedSecondBox.top - exp2).coerceAtLeast(0)
+                                                    val uR2 = (capturedSecondBox.right + exp2).coerceAtMost(uprW)
+                                                    val uB2 = (capturedSecondBox.bottom + exp2).coerceAtMost(uprH)
+                                                    val sL2: Int; val sT2: Int; val sR2: Int; val sB2: Int
+                                                    when (capturedRotation) {
+                                                        90 -> { sL2 = uT2; sT2 = (capH - 1 - uR2).coerceAtLeast(0); sR2 = uB2.coerceAtMost(capW); sB2 = (capH - 1 - uL2).coerceAtMost(capH) }
+                                                        270 -> { sL2 = (capW - 1 - uB2).coerceAtLeast(0); sT2 = uL2; sR2 = (capW - 1 - uT2).coerceAtMost(capW); sB2 = uR2.coerceAtMost(capH) }
+                                                        180 -> { sL2 = (capW - 1 - uR2).coerceAtLeast(0); sT2 = (capH - 1 - uB2).coerceAtLeast(0); sR2 = (capW - 1 - uL2).coerceAtMost(capW); sB2 = (capH - 1 - uT2).coerceAtMost(capH) }
+                                                        else -> { sL2 = uL2; sT2 = uT2; sR2 = uR2; sB2 = uB2 }
+                                                    }
+                                                    val cW2 = sR2 - sL2
+                                                    val cH2 = sB2 - sT2
+                                                    if (cW2 > 0 && cH2 > 0) {
+                                                        val sc2 = Bitmap.createBitmap(capturedBitmap, sL2, sT2, cW2, cH2)
+                                                        val fb2 = if (capturedRotation == 0) sc2 else {
+                                                            val m = Matrix()
+                                                            m.postRotate(capturedRotation.toFloat())
+                                                            Bitmap.createBitmap(sc2, 0, 0, cW2, cH2, m, false)
+                                                        }
+                                                        try {
+                                                            val emb2 = faceEmbedder.getEmbedding(fb2)
+                                                            // Use slightly lower threshold for secondary crop — smaller, lower quality
+                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.80f)
+                                                            lastSecondaryFaceName = secName
+                                                            if (secName != null) peopleDb.addNamedEmbedding(secName, emb2)
+                                                            Log.d("ScoutFace", "Secondary face: name=$secName")
+                                                        } finally {
+                                                            if (fb2 !== sc2) sc2.recycle()
+                                                            fb2.recycle()
+                                                        }
+                                                    }
+                                                } catch (e2: Exception) {
+                                                    Log.e("ScoutFace", "Secondary embedding error", e2)
+                                                }
                                             }
 
                                         } catch (e: Exception) {
@@ -1649,9 +1700,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val embedding = lastFaceEmbedding
 
-                                    val matchHash = if (embedding != null) peopleDb.findBestMatch(embedding) else null
-
-                                    val greetName = if (matchHash != null) peopleDb.getName(matchHash) else null
+                                    val greetName = if (embedding != null) {
+                                        peopleDb.findBestMatchName(embedding)
+                                            ?: run {
+                                                val h = peopleDb.findBestMatch(embedding)
+                                                if (h != null) peopleDb.getName(h) else null
+                                            }
+                                    } else null
 
                                     val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
 
@@ -1664,6 +1719,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 lastFaceHashes = emptyList()
 
                                 lastKnownFaceName = null
+
+                                lastSecondaryFaceName = null
 
                                 presenceDecider.onFaceLost()
 
@@ -2504,7 +2561,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastFaceHashes = lastFaceHashes,
             lastSceneLabels = lastSceneLabels,
             knownFaceName = lastKnownFaceName,
-            pendingIntroName = pendingFaceIntroName
+            pendingIntroName = pendingFaceIntroName,
+            secondaryFaceName = lastSecondaryFaceName
         )
 
         respond(out)
@@ -3214,6 +3272,7 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
+                if (embedding != null) peopleDb.addNamedEmbedding(value, embedding)
                 lastKnownFaceName = value
                 respond("Okay. I’ll remember your name is $value.")
                 return true
@@ -3268,6 +3327,7 @@ Respond only with Scout's next short reply.
         peopleDb.touchSeen(targetHash)
         peopleDb.setName(targetHash, name)
         if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
+        if (embedding != null) peopleDb.addNamedEmbedding(name, embedding)
         pendingFaceIntroName = null
         return true
     }
