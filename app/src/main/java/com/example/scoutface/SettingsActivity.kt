@@ -153,6 +153,8 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(div())
         body.addView(sliderRow("⚡", "Voice Speed",  "Adjust how fast or slow Scout speaks",        "voice_speed",  scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true))
         body.addView(div())
+        body.addView(resetVoiceBtn())
+        body.addView(div())
         body.addView(navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") })
         body.addView(footerNote("✦  More voice tone options coming in a future update!"))
 
@@ -424,6 +426,36 @@ class SettingsActivity : AppCompatActivity() {
             setOnCheckedChangeListener { _, on ->
                 thumbTintList = csl(if (on) ACCENT else TXT_MUTE)
                 onChange(on)
+            }
+        })
+        return row
+    }
+
+    private fun resetVoiceBtn(): View {
+        val row = hRow(BG_ROW).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+        }
+        val col = vCol(Color.TRANSPARENT).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        col.addView(lbl("Reset Voice to Default", 15f, TXT))
+        col.addView(lbl("Pitch 1.00  ·  Speed 1.00", 12f, TXT_SEC).padded(0, dp(2), 0, 0))
+        row.addView(col)
+        row.addView(Button(this).apply {
+            text = "Reset"
+            textSize = 13f; isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#1E3D6E"))
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener {
+                scoutPrefs.edit().putFloat("voice_pitch", 1.0f).putFloat("voice_speed", 1.0f).apply()
+                speakPreview(true)
+                show(S_IDENTITY)
             }
         })
         return row
