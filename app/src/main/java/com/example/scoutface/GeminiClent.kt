@@ -125,7 +125,7 @@ class GeminiClient(
                 requestMethod = "POST"
                 doOutput = true
                 connectTimeout = 10_000
-                readTimeout = 12_000
+                readTimeout = 20_000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("x-goog-api-key", key)
             }
