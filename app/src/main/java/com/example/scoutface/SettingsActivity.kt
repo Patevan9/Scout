@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -29,14 +30,21 @@ class SettingsActivity : AppCompatActivity() {
     private val previewHandler = Handler(Looper.getMainLooper())
     private var previewRunnable: Runnable? = null
 
-    private val BG       = Color.parseColor("#0D1728")
-    private val BG_ROW   = Color.parseColor("#19293F")
-    private val ACCENT   = Color.parseColor("#4A8EFF")
-    private val DIM_BLUE = Color.parseColor("#1E3D6E")
-    private val TXT      = Color.WHITE
-    private val TXT_SEC  = Color.parseColor("#8AAFC8")
-    private val TXT_MUTE = Color.parseColor("#4A6280")
-    private val DIV      = Color.parseColor("#1A2D45")
+    private val BG           = Color.parseColor("#0D1728")
+    private val CARD         = Color.parseColor("#19293F")
+    private val ACCENT       = Color.parseColor("#4A8EFF")
+    private val DIM_BLUE     = Color.parseColor("#1E3D6E")
+    private val TXT          = Color.WHITE
+    private val TXT_SEC      = Color.parseColor("#8AAFC8")
+    private val TXT_MUTE     = Color.parseColor("#4A6280")
+    private val DIV          = Color.parseColor("#1A2D45")
+
+    // Subtle icon badge colors per section
+    private val IC_IDENTITY  = Color.parseColor("#1F3A70")
+    private val IC_BRAIN     = Color.parseColor("#3A2060")
+    private val IC_WORKBENCH = Color.parseColor("#153E3E")
+    private val IC_PRIVACY   = Color.parseColor("#153E20")
+    private val IC_EXTRAS    = Color.parseColor("#3E2E10")
 
     companion object {
         private const val S_MAIN      = "main"
@@ -112,18 +120,18 @@ class SettingsActivity : AppCompatActivity() {
         val root = vCol(BG).fillParent()
         root.addView(mainHeader())
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(24))
+        val body = vCol(BG).padded(dp(16), dp(8), dp(16), dp(32))
 
-        body.addView(sectionRow("👤", "1. Identity & Voice",  "Customize Scout's name and how he speaks", Color.parseColor("#1A2D4A")) { push(S_IDENTITY) })
-        body.addView(div())
-        body.addView(sectionRow("🧠", "2. Brain & Behavior",   "How Scout thinks and responds",           Color.parseColor("#221A0D")) { push(S_BRAIN) })
-        body.addView(div())
-        body.addView(sectionRow("🔧", "3. Builder's Workbench","Hardware, controls, and chassis",         Color.parseColor("#0D2326")) { push(S_WORKBENCH) })
-        body.addView(div())
-        body.addView(sectionRow("🛡️", "4. Privacy & Data",     "Manage Scout's memory and privacy",       Color.parseColor("#0D2A0D")) { push(S_PRIVACY) })
-        body.addView(div())
-        body.addView(sectionRow("⭐", "5. Extras & Support",   "Cosmetics, support, and more",            Color.parseColor("#2A2408")) { push(S_EXTRAS) })
-        body.addView(footerNote("💙  Scout is built for families.\nSafe, private, and always on your side."))
+        body.addView(sectionCard("👤", "Identity & Voice",    "Name, voice pitch, and speed",   IC_IDENTITY)  { push(S_IDENTITY) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🧠", "Brain & Behavior",    "How Scout thinks and responds",   IC_BRAIN)     { push(S_BRAIN) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🔧", "Builder's Workbench", "Hardware, controls, and chassis", IC_WORKBENCH) { push(S_WORKBENCH) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🛡️", "Privacy & Data",      "Memory and privacy controls",     IC_PRIVACY)   { push(S_PRIVACY) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("⭐", "Extras & Support",    "Cosmetics, licenses, and help",   IC_EXTRAS)    { push(S_EXTRAS) })
+        body.addView(footerNote("Scout is built for families — safe, private, and always on your side."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -131,10 +139,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun mainHeader(): View {
-        val v = vCol(BG).padded(dp(20), dp(52), dp(20), dp(16))
-        v.addView(lbl("Settings", 28f, TXT, bold = true))
-        v.addView(lbl("Customize Scout to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(14)))
-        v.addView(div())
+        val v = vCol(BG).padded(dp(20), dp(52), dp(20), dp(12))
+        v.addView(lbl("Settings", 26f, TXT, bold = true))
+        v.addView(lbl("Customize Scout to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(12)))
         return v
     }
 
@@ -142,22 +149,31 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun identityScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("👤", "1. Identity & Voice", "Customize Scout's name and how he speaks."))
+        root.addView(subHeader("Identity & Voice", "Customize Scout's name and how he speaks."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
         val name = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
-        body.addView(navRow("Robot Name", name, "This is how Scout introduces himself") { push(S_ROBOT) })
-        body.addView(div())
-        body.addView(sliderRow("🎵", "Voice Pitch",  "Adjust how high or low Scout's voice sounds", "voice_pitch",  scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true))
-        body.addView(div())
-        body.addView(sliderRow("⚡", "Voice Speed",  "Adjust how fast or slow Scout speaks",        "voice_speed",  scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true))
-        body.addView(div())
-        body.addView(resetVoiceBtn())
-        body.addView(div())
-        body.addView(navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") })
-        body.addView(footerNote("✦  More voice tone options coming in a future update!"))
 
+        body.addView(sectionLabel("IDENTITY"))
+        body.addView(cardGroup(
+            navRow("Robot Name", name, "How Scout introduces himself") { push(S_ROBOT) }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("VOICE"))
+        body.addView(cardGroup(
+            sliderRow("🎵", "Voice Pitch", "Adjust how high or low Scout's voice sounds", "voice_pitch", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            sliderRow("⚡", "Voice Speed", "Adjust how fast or slow Scout speaks", "voice_speed", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            resetVoiceRow()
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(cardGroup(
+            navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") }
+        ))
+
+        body.addView(footerNote("More voice tone options coming in a future update."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -167,33 +183,36 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun brainScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🧠", "2. Brain & Behavior", "How Scout thinks and responds."))
+        root.addView(subHeader("Brain & Behavior", "How Scout thinks and responds."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(toggleRow("Offline Mode", "Only use data stored on this device",
-            !memPrefs.getBoolean("gemini_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("gemini_enabled", !on).apply() })
-        body.addView(div())
-        body.addView(navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("API Key", "", "Connect Scout to online services") { push(S_APIKEY) })
-        body.addView(div())
-        body.addView(toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
-            scoutPrefs.getBoolean("kid_safe_filter", true)
-        ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Pet Safety Protocol Awareness", "Scout mentions pet safety when relevant",
-            scoutPrefs.getBoolean("pet_safety", true)
-        ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Presence Mode", "Scout adapts when you're nearby",
-            memPrefs.getBoolean("presence_mode_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Allow Spontaneous Comments", "Scout may share observations",
-            memPrefs.getBoolean("spontaneous_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() })
+        body.addView(sectionLabel("CONNECTION"))
+        body.addView(cardGroup(
+            toggleRow("Offline Mode", "Only use data stored on this device",
+                !memPrefs.getBoolean("gemini_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", !on).apply() },
+            navRow("API Key", "", "Connect Scout to online services") { push(S_APIKEY) },
+            navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("BEHAVIOR"))
+        body.addView(cardGroup(
+            toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
+                scoutPrefs.getBoolean("kid_safe_filter", true)
+            ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() },
+            toggleRow("Pet Safety Protocol Awareness", "Scout mentions pet safety when relevant",
+                scoutPrefs.getBoolean("pet_safety", true)
+            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() },
+            toggleRow("Presence Mode", "Scout adapts when you're nearby",
+                memPrefs.getBoolean("presence_mode_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
+            toggleRow("Allow Spontaneous Comments", "Scout may share observations",
+                memPrefs.getBoolean("spontaneous_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() }
+        ))
+
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -203,19 +222,20 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun workbenchScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🔧", "3. Builder's Workbench", "Hardware, controls, and chassis."))
+        root.addView(subHeader("Builder's Workbench", "Hardware, controls, and chassis."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(toggleRow("Enable Hardware Mode", "Use motors, sensors, and chassis",
-            scoutPrefs.getBoolean("hardware_mode", false)
-        ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() })
-        body.addView(div())
-        body.addView(navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") })
-        body.addView(footerNote("✦  More work and controls coming in a future update!"))
+        body.addView(sectionLabel("HARDWARE"))
+        body.addView(cardGroup(
+            toggleRow("Enable Hardware Mode", "Use motors, sensors, and chassis",
+                scoutPrefs.getBoolean("hardware_mode", false)
+            ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() },
+            navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") },
+            navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") }
+        ))
 
+        body.addView(footerNote("More hardware controls coming in a future update."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -225,23 +245,27 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun privacyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🛡️", "4. Privacy & Data", "Manage Scout's memory and privacy."))
+        root.addView(subHeader("Privacy & Data", "Manage Scout's memory and privacy."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") })
-        body.addView(div())
-        body.addView(navRow("Import Memory", "", "Load memory from a file to restore or transfer to this device") { toast("Memory Import coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Reset Memory Layers", "", "Clear Scout's memory") { confirmReset() })
-        body.addView(div())
-        body.addView(navRow("Camera Controls", "✦ Future", "Manage access controls") { toast("Camera Controls coming in a future update!") })
-        body.addView(div())
-        body.addView(toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
-            scoutPrefs.getBoolean("voice_cam_cmds", true)
-        ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() })
-        body.addView(footerNote("🔒  Your data stays private.\nAll memory files stay on your device unless you choose to share them."))
+        body.addView(sectionLabel("MEMORY"))
+        body.addView(cardGroup(
+            navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
+            navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
+            navRow("Reset Memory Layers", "", "Clear Scout's memory") { confirmReset() }
+        ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("CAMERA"))
+        body.addView(cardGroup(
+            navRow("Camera Controls", "✦ Future", "Manage access controls") { toast("Camera Controls coming in a future update!") },
+            toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
+                scoutPrefs.getBoolean("voice_cam_cmds", true)
+            ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
+        ))
+
+        body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -251,19 +275,24 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun extrasScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("⭐", "5. Extras & Support", "Cosmetics, support, and more."))
+        root.addView(subHeader("Extras & Support", "Cosmetics, support, and more."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(navRow("Cosmetics  ✦ Future", "", "Change Scout's backpack and look") { toast("Cosmetics coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Support", "", "Get help and connect to support") { showSupport() })
-        body.addView(div())
-        body.addView(navRow("About Scout", "", "Version and info") { showAbout() })
-        body.addView(div())
-        body.addView(navRow("Licenses", "", "Open source licenses") { showLicenses() })
-        body.addView(footerNote("💙  Thank you for supporting Scout!"))
+        body.addView(sectionLabel("COSMETICS"))
+        body.addView(cardGroup(
+            navRow("Cosmetics  ✦ Future", "", "Change Scout's backpack and look") { toast("Cosmetics coming in a future update!") }
+        ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("SUPPORT"))
+        body.addView(cardGroup(
+            navRow("Support", "", "Get help and connect to support") { showSupport() },
+            navRow("About Scout", "", "Version and info") { showAbout() },
+            navRow("Licenses", "", "Open source licenses") { showLicenses() }
+        ))
+
+        body.addView(footerNote("Thank you for supporting Scout!"))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -273,11 +302,21 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun robotNameScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("👤", "Robot Name", "This is how Scout introduces himself."))
+        root.addView(subHeader("Robot Name", "This is how Scout introduces himself."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(dp(20), dp(24), dp(20), dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(lbl("Robot Name", 13f, TXT_SEC).padded(0, 0, 0, dp(8)))
+        body.addView(sectionLabel("NAME"))
+
+        val cardWrap = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 14)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
 
         val cur = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
         val edit = EditText(this).apply {
@@ -286,14 +325,18 @@ class SettingsActivity : AppCompatActivity() {
             setTextColor(TXT)
             setHintTextColor(TXT_MUTE)
             hint = "Scout"
-            setBackgroundColor(BG_ROW)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = roundRect(BG, 10)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             setSelection(cur.length)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
-        body.addView(edit)
-        body.addView(lbl("Choose the name Scout will use when speaking to you and others.", 13f, TXT_SEC).padded(0, dp(10), 0, dp(20)))
+        cardWrap.addView(lbl("Robot Name", 12f, TXT_SEC).padded(0, 0, 0, dp(8)))
+        cardWrap.addView(edit)
+        cardWrap.addView(lbl("Choose the name Scout will use when speaking.", 12f, TXT_MUTE).padded(0, dp(8), 0, 0))
+        body.addView(cardWrap)
+
+        body.addView(spacer(dp(16)))
         body.addView(actionBtn("Save Name") {
             val n = edit.text.toString().trim()
             if (n.isNotEmpty()) {
@@ -310,7 +353,7 @@ class SettingsActivity : AppCompatActivity() {
                 toast("Name can't be empty")
             }
         })
-        body.addView(tipCard("💡  You can change this anytime.\nScout will remember."))
+        body.addView(tipCard("Your change takes effect immediately. Scout will use this name from now on."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -321,32 +364,121 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun apiKeyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🔑", "API Key", "Connect Scout to online services."))
+        root.addView(subHeader("API Key", "Connect Scout to online services."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(dp(20), dp(24), dp(20), dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
         val key = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI)
         val hasKey = !key.isNullOrBlank()
 
-        body.addView(lbl("Google Gemini API Key", 14f, TXT_SEC).padded(0, 0, 0, dp(8)))
-        body.addView(lbl(
-            if (hasKey) "✓  API key is saved and active" else "No key saved yet",
-            14f,
-            if (hasKey) Color.parseColor("#4CAF50") else TXT_MUTE
-        ).padded(0, 0, 0, dp(20)))
+        body.addView(sectionLabel("GEMINI"))
+        body.addView(cardGroup(
+            statusRow(
+                "Google Gemini API Key",
+                if (hasKey) "✓  Key saved and active" else "No key saved yet",
+                if (hasKey) Color.parseColor("#4CAF50") else TXT_MUTE
+            )
+        ))
+
+        body.addView(spacer(dp(16)))
         body.addView(actionBtn(if (hasKey) "Update API Key" else "Set Up API Key") {
             startActivity(Intent(this, ApiKeySetupActivity::class.java))
         })
-        body.addView(tipCard("🔒  Your key is stored securely on this device only.\nScout never sends your key anywhere else."))
+        body.addView(tipCard("Your key is stored securely on this device only. Scout never sends your key anywhere else."))
 
         scroll.addView(body)
         root.addView(scroll)
         return root
     }
 
+    // ─── CARD LAYOUT BUILDERS ───────────────────────────────────
+
+    private fun sectionCard(icon: String, title: String, sub: String, iconBg: Int, onClick: () -> Unit): View {
+        val card = hRow(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 16)
+            clipToOutline = true
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(16), dp(14), dp(16))
+            isClickable = true; isFocusable = true
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val iconBadge = FrameLayout(this).apply {
+            background = roundRect(iconBg, 10)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) }
+        }
+        iconBadge.addView(TextView(this).apply {
+            text = icon; textSize = 20f; gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        })
+        card.addView(iconBadge)
+        val col = vCol(Color.TRANSPARENT).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        col.addView(lbl(title, 15f, TXT, bold = true))
+        col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
+        card.addView(col)
+        card.addView(lbl("›", 22f, TXT_MUTE).padded(dp(8), 0, 0, 0))
+        return card
+    }
+
+    private fun cardGroup(vararg rows: View): LinearLayout {
+        val card = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 14)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        rows.forEachIndexed { i, row ->
+            card.addView(row)
+            if (i < rows.size - 1) card.addView(cardDivider())
+        }
+        return card
+    }
+
+    private fun cardDivider() = View(this).apply {
+        setBackgroundColor(DIV)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+            marginStart = dp(20)
+        }
+    }
+
+    private fun sectionLabel(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 11f
+        setTextColor(TXT_MUTE)
+        typeface = Typeface.DEFAULT_BOLD
+        letterSpacing = 0.12f
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(8); topMargin = dp(4) }
+        setPadding(dp(4), 0, 0, 0)
+    }
+
+    private fun cardSpacer() = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16))
+    }
+
+    private fun spacer(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height)
+    }
+
+    private fun roundRect(color: Int, radiusDp: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+    }
+
     // ─── SHARED HEADER ──────────────────────────────────────────
 
-    private fun subHeader(icon: String, title: String, sub: String): View {
+    private fun subHeader(title: String, sub: String): View {
         val v = vCol(BG).padded(0, dp(48), 0, 0)
         val backRow = hRow(BG).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -355,43 +487,16 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener { pop() }
         }
         backRow.addView(lbl("←", 22f, ACCENT).padded(dp(8), dp(8), dp(16), dp(8)))
-        backRow.addView(lbl("$icon  $title", 16f, TXT, bold = true))
+        backRow.addView(lbl(title, 16f, TXT, bold = true))
         v.addView(backRow)
-        if (sub.isNotEmpty()) v.addView(lbl(sub, 13f, TXT_SEC).padded(dp(20), dp(4), dp(20), dp(14)))
-        v.addView(div())
+        if (sub.isNotEmpty()) v.addView(lbl(sub, 13f, TXT_SEC).padded(dp(20), dp(4), dp(20), dp(12)))
         return v
     }
 
     // ─── ROW BUILDERS ───────────────────────────────────────────
 
-    private fun sectionRow(icon: String, title: String, sub: String, bg: Int, onClick: () -> Unit): View {
-        val row = hRow(bg).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(18), dp(16), dp(18))
-            isClickable = true; isFocusable = true
-            setOnClickListener { onClick() }
-        }
-        val iconBox = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#0F1F35"))
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(16) }
-        }
-        iconBox.addView(TextView(this).apply {
-            text = icon; textSize = 20f; gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        })
-        row.addView(iconBox)
-        val col = vCol(Color.TRANSPARENT).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        col.addView(lbl(title, 15f, TXT, bold = true))
-        col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
-        row.addView(col)
-        row.addView(lbl("›", 22f, TXT_MUTE).padded(dp(8), 0, 0, 0))
-        return row
-    }
-
     private fun navRow(title: String, value: String, sub: String, onClick: () -> Unit): View {
-        val row = hRow(BG_ROW).apply {
+        val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(16), dp(16), dp(16))
             isClickable = true; isFocusable = true
@@ -409,7 +514,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun toggleRow(title: String, sub: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): View {
-        val row = hRow(BG_ROW).apply {
+        val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(14), dp(16), dp(14))
         }
@@ -431,8 +536,8 @@ class SettingsActivity : AppCompatActivity() {
         return row
     }
 
-    private fun resetVoiceBtn(): View {
-        val row = hRow(BG_ROW).apply {
+    private fun resetVoiceRow(): View {
+        val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(14), dp(20), dp(14))
         }
@@ -446,7 +551,7 @@ class SettingsActivity : AppCompatActivity() {
             text = "Reset"
             textSize = 13f; isAllCaps = false
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#1E3D6E"))
+            background = roundRect(DIM_BLUE, 8)
             setPadding(dp(16), dp(8), dp(16), dp(8))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -462,7 +567,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun sliderRow(icon: String, title: String, sub: String, key: String, prefs: SharedPreferences, min: Float, max: Float, def: Float, preview: Boolean = false): View {
-        val col = vCol(BG_ROW).padded(dp(20), dp(14), dp(20), dp(14))
+        val col = vCol(Color.TRANSPARENT).padded(dp(20), dp(14), dp(20), dp(14))
         val header = hRow(Color.TRANSPARENT).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(lbl("$icon  $title", 15f, TXT).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -506,29 +611,33 @@ class SettingsActivity : AppCompatActivity() {
         return col
     }
 
-    // ─── SMALL HELPERS ──────────────────────────────────────────
-
-    private fun div() = View(this).apply {
-        setBackgroundColor(DIV)
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+    private fun statusRow(title: String, status: String, statusColor: Int): View {
+        val row = vCol(Color.TRANSPARENT).apply {
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+        }
+        row.addView(lbl(title, 15f, TXT))
+        row.addView(lbl(status, 13f, statusColor).padded(0, dp(4), 0, 0))
+        return row
     }
 
+    // ─── SMALL HELPERS ──────────────────────────────────────────
+
     private fun footerNote(text: String): LinearLayout {
-        val v = vCol(Color.TRANSPARENT).padded(dp(20), dp(20), dp(20), dp(8))
-        v.addView(div())
-        v.addView(lbl(text, 12f, ACCENT).apply {
-            (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(12)
-            setLineSpacing(0f, 1.4f)
-        })
+        val v = vCol(Color.TRANSPARENT).padded(dp(4), dp(16), dp(4), dp(8))
+        v.addView(lbl(text, 12f, TXT_MUTE).apply { setLineSpacing(0f, 1.4f) })
         return v
     }
 
     private fun tipCard(text: String): View {
-        val v = vCol(DIM_BLUE).padded(dp(16), dp(14), dp(16), dp(14))
-        v.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(20) }
+        val v = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(DIM_BLUE, 12)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(16) }
+        }
+        v.setPadding(dp(16), dp(14), dp(16), dp(14))
         v.addView(lbl(text, 13f, TXT_SEC).apply { setLineSpacing(0f, 1.4f) })
         return v
     }
@@ -537,12 +646,12 @@ class SettingsActivity : AppCompatActivity() {
         this.text = text
         textSize = 15f; isAllCaps = false
         setTextColor(Color.WHITE)
-        setBackgroundColor(ACCENT)
+        background = roundRect(ACCENT, 10)
         setPadding(dp(16), dp(12), dp(16), dp(12))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(12) }
+        ).apply { bottomMargin = dp(8) }
         setOnClickListener { onClick() }
     }
 
