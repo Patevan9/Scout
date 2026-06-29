@@ -324,6 +324,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
+    private var lastMeaningfulResponse: String? = null
+    private var lastMeaningfulResponseMs = 0L
+    private val REPEAT_CACHE_TTL_MS = 4L * 60L * 1_000L
+
+    private var pendingBrainSource = ""
+
     private val MIC_RESUME_COOLDOWN_MS = 650L
 
     private val LISTEN_RESTART_DELAY_MS = 150L
@@ -353,6 +359,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val RECOGNIZER_WATCHDOG_MS = 12_000L
 
     private val recognizerWatchdog = Runnable { runRecognizerWatchdog() }
+
+    // Guards against TTS silently failing (no onDone/onError callback after engine
+    // is killed by Android). If isSpeaking stays true longer than this, force-clear it.
+    private var speakingStartedMs = 0L
+    private val MAX_SPEAKING_DURATION_MS = 45_000L
 
     // Mic visual gating
 
@@ -399,9 +410,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastFaceEmbedding: FloatArray? = null
 
+    @Volatile
+
+    private var lastKnownFaceName: String? = null
+
+    @Volatile
+
+    private var lastSecondaryFaceName: String? = null
+
     private val EMBED_INTERVAL_MS = 2_000L
 
     private val embedRunning = AtomicBoolean(false)
+
+    @Volatile
+
+    private var pendingFaceIntroName: String? = null
+
+    @Volatile
+
+    private var lastAnalysisMs = 0L
+
+    private val ANALYSIS_MIN_INTERVAL_MS = 150L
 
     // Gaze hold to prevent snap-back on brief face detector drops
 
@@ -478,6 +507,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // =======================
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var scoutPrefs: SharedPreferences   // "scout_prefs" — voice, name, etc.
 
     private lateinit var truthDb: TruthDb
 
@@ -631,6 +661,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
 
         super.onResume()
+
+        // Re-apply voice settings in case they were changed in SettingsActivity.
+        tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
+        tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
         resumeSystems()
 
@@ -886,12 +920,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun startOfflineBrain() {
 
-        // TinyLlama (~700 MB) exceeds the available RAM budget on the Galaxy A32.
-        // Loading it causes LMKD to kill Scout within seconds of startup.
-        // Gemini handles all AI responses; re-enable this only on a higher-RAM device.
-        android.util.Log.i("ScoutBrain", "Offline brain skipped (insufficient RAM on this device)")
+        // Delay 90 seconds so startup memory spike (camera, ML Kit, Gemini) settles
+        // before we add ~800MB for TinyLlama. Immediate load was killing Scout on A32.
+        handler.postDelayed({ tryLoadOfflineBrain() }, 90_000L)
+        android.util.Log.i("ScoutBrain", "Offline brain load scheduled for 90s after startup")
 
-        return
+    }
+
+    private fun tryLoadOfflineBrain() {
+
+        if (LlamaEngine.isReady || LlamaEngine.isLoading) return
+
+        val actMgr = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actMgr.getMemoryInfo(memInfo)
+        val freeMb = memInfo.availMem / 1_048_576L
+        android.util.Log.i("ScoutBrain", "Free RAM before TinyLlama load: ${freeMb}MB")
+
+        if (freeMb < 800L) {
+            android.util.Log.e("ScoutBrain", "Skipping TinyLlama — only ${freeMb}MB free (need 800MB)")
+            return
+        }
+
+        val candidates = listOf(
+            java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
+            java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
+        )
+        val modelFile = candidates.firstOrNull { it.exists() }
+        if (modelFile == null) {
+            android.util.Log.e("ScoutBrain", "TinyLlama model file not found in any location")
+            return
+        }
+
+        android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
+
+        // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
+        // uses 2 conversation turns, so 512 tokens is more than enough.
+        LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+            android.util.Log.i("ScoutBrain",
+                if (success) "Offline brain ready" else "Offline brain load failed")
+        }
 
     }
 
@@ -921,7 +989,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupMemory() {
 
-        prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs      = getSharedPreferences(PREFS,        Context.MODE_PRIVATE)
+        scoutPrefs = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
 
         truthDb = TruthDb(this)
 
@@ -1176,6 +1245,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         return@setAnalyzer
                     }
 
+                    // Throttle ML Kit to ~7fps to reduce memory pressure on A32.
+                    // Skipped frames cost nothing — just close the buffer and return.
+                    val analysisNow = System.currentTimeMillis()
+                    if (analysisNow - lastAnalysisMs < ANALYSIS_MIN_INTERVAL_MS) {
+                        img.close()
+                        return@setAnalyzer
+                    }
+                    lastAnalysisMs = analysisNow
+
                     val rotation = img.imageInfo.rotationDegrees
 
                     val bitmapW = img.width
@@ -1268,15 +1346,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             lastFaceCount = faces.size
 
+                            if (faces.size < 2) lastSecondaryFaceName = null
+
                             lastFaceUpdatedMs = now
 
                             if (faces.isNotEmpty()) {
 
                                 val hashes = ArrayList<String>()
 
-                                val largest =
+                                val sortedFaces = faces.sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }
 
-                                    faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                                val largest = sortedFaces.firstOrNull()
+
+                                val secondFace = sortedFaces.getOrNull(1)
 
                                 val b = largest?.boundingBox
 
@@ -1423,6 +1505,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val capturedHash = hashes.firstOrNull()
 
+                                    val capturedSecondBox = secondFace?.boundingBox
+
                                     val uprW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
 
                                     val uprH = if (capturedRotation == 90 || capturedRotation == 270) capW else capH
@@ -1504,13 +1588,38 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     lastFaceEmbedding = embedding
 
-                                                    if (capturedHash != null) {
+                                                    // findBestMatchName (multi-embedding table) first for best accuracy,
+                                                    // then fall back to the single-embedding hash table.
+                                                    val resolvedNameFromMulti = peopleDb.findBestMatchName(embedding)
+                                                    val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
+                                                    val resolvedName = resolvedNameFromMulti
+                                                        ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
 
-                                                        peopleDb.storeEmbedding(capturedHash, embedding)
-
+                                                    if (!resolvedName.isNullOrBlank()) {
+                                                        // Known person — accumulate embedding and cache name.
+                                                        lastKnownFaceName = resolvedName
+                                                        peopleDb.addNamedEmbedding(resolvedName, embedding)
+                                                        if (nameMatchHash != null) peopleDb.storeEmbedding(nameMatchHash, embedding)
+                                                        pendingFaceIntroName = null
+                                                    } else {
+                                                        // Unknown face — check for a pending introduction.
+                                                        val pendingName = pendingFaceIntroName
+                                                        if (pendingName != null && capturedHash != null) {
+                                                            // Someone was introduced while another person was
+                                                            // the primary face. This unknown face is probably them.
+                                                            peopleDb.touchSeen(capturedHash)
+                                                            peopleDb.setName(capturedHash, pendingName)
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                            peopleDb.addNamedEmbedding(pendingName, embedding)
+                                                            lastKnownFaceName = pendingName
+                                                            pendingFaceIntroName = null
+                                                        } else if (capturedHash != null) {
+                                                            // Truly unknown — store embedding for greeting flow.
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                        }
                                                     }
 
-                                                    Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
+                                                    Log.d("ScoutFace", "Embedding: name=$resolvedName")
 
                                                 } finally {
 
@@ -1520,6 +1629,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 }
 
+                                            }
+
+                                            // Secondary face — runs in the same submit so no concurrency issue.
+                                            if (capturedSecondBox != null) {
+                                                try {
+                                                    val exp2 = (capturedSecondBox.width() * 0.2f).toInt()
+                                                    val uL2 = (capturedSecondBox.left - exp2).coerceAtLeast(0)
+                                                    val uT2 = (capturedSecondBox.top - exp2).coerceAtLeast(0)
+                                                    val uR2 = (capturedSecondBox.right + exp2).coerceAtMost(uprW)
+                                                    val uB2 = (capturedSecondBox.bottom + exp2).coerceAtMost(uprH)
+                                                    val sL2: Int; val sT2: Int; val sR2: Int; val sB2: Int
+                                                    when (capturedRotation) {
+                                                        90 -> { sL2 = uT2; sT2 = (capH - 1 - uR2).coerceAtLeast(0); sR2 = uB2.coerceAtMost(capW); sB2 = (capH - 1 - uL2).coerceAtMost(capH) }
+                                                        270 -> { sL2 = (capW - 1 - uB2).coerceAtLeast(0); sT2 = uL2; sR2 = (capW - 1 - uT2).coerceAtMost(capW); sB2 = uR2.coerceAtMost(capH) }
+                                                        180 -> { sL2 = (capW - 1 - uR2).coerceAtLeast(0); sT2 = (capH - 1 - uB2).coerceAtLeast(0); sR2 = (capW - 1 - uL2).coerceAtMost(capW); sB2 = (capH - 1 - uT2).coerceAtMost(capH) }
+                                                        else -> { sL2 = uL2; sT2 = uT2; sR2 = uR2; sB2 = uB2 }
+                                                    }
+                                                    val cW2 = sR2 - sL2
+                                                    val cH2 = sB2 - sT2
+                                                    if (cW2 > 0 && cH2 > 0) {
+                                                        val sc2 = Bitmap.createBitmap(capturedBitmap, sL2, sT2, cW2, cH2)
+                                                        val fb2 = if (capturedRotation == 0) sc2 else {
+                                                            val m = Matrix()
+                                                            m.postRotate(capturedRotation.toFloat())
+                                                            Bitmap.createBitmap(sc2, 0, 0, cW2, cH2, m, false)
+                                                        }
+                                                        try {
+                                                            val emb2 = faceEmbedder.getEmbedding(fb2)
+                                                            // Use slightly lower threshold for secondary crop — smaller, lower quality
+                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.80f)
+                                                            lastSecondaryFaceName = secName
+                                                            if (secName != null) peopleDb.addNamedEmbedding(secName, emb2)
+                                                            Log.d("ScoutFace", "Secondary face: name=$secName")
+                                                        } finally {
+                                                            if (fb2 !== sc2) sc2.recycle()
+                                                            fb2.recycle()
+                                                        }
+                                                    }
+                                                } catch (e2: Exception) {
+                                                    Log.e("ScoutFace", "Secondary embedding error", e2)
+                                                }
                                             }
 
                                         } catch (e: Exception) {
@@ -1550,9 +1700,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val embedding = lastFaceEmbedding
 
-                                    val matchHash = if (embedding != null) peopleDb.findBestMatch(embedding) else null
-
-                                    val greetName = if (matchHash != null) peopleDb.getName(matchHash) else null
+                                    val greetName = if (embedding != null) {
+                                        peopleDb.findBestMatchName(embedding)
+                                            ?: run {
+                                                val h = peopleDb.findBestMatch(embedding)
+                                                if (h != null) peopleDb.getName(h) else null
+                                            }
+                                    } else null
 
                                     val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
 
@@ -1564,16 +1718,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 lastFaceHashes = emptyList()
 
+                                lastKnownFaceName = null
+
+                                lastSecondaryFaceName = null
+
                                 presenceDecider.onFaceLost()
 
-                                if (faceLastSeenForGreetMs > 0L &&
-                                        now - faceLastSeenForGreetMs >= GREET_RESET_ABSENCE_MS) {
-
-                                    faceAppearanceMs = 0L
-
-                                    greetedThisSession = false
-
-                                }
+                                // greetedThisSession intentionally NOT reset here.
+                                // Scout greets once per app launch when he first sees a face.
+                                // ScoutPresenceDecider handles the 30-min absence greeting separately.
+                                faceAppearanceMs = 0L
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
@@ -1689,6 +1843,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
 
+            // Prefer offline recognition so a brief network hiccup does not
+            // cause silent failures — Samsung has offline models available.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+
+            // Keep listening for up to 10 seconds of silence before giving up.
+            // Default is ~5s which cuts sessions too short on a quiet room.
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 10_000L)
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 7_000L)
+
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -1765,7 +1928,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 faceView.setMicLevel(0f)
 
-                scheduleListenRestart()
+                // ERROR_RECOGNIZER_BUSY (8) means two sessions overlapped.
+                // Give the engine 600ms to fully close before restarting.
+                if (error == 8) {
+                    handler.postDelayed({ scheduleListenRestart(immediate = true) }, 600L)
+                } else {
+                    scheduleListenRestart()
+                }
 
             }
 
@@ -1855,12 +2024,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 habitLayer.logUtterance(normalized, lastFaceHashes.firstOrNull())
 
-                val scoutName = truthDb.getFactValue("scout", "name") ?: "scout"
+                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
                 val nameLower = scoutName.lowercase()
-                val hearsHisName =
-                    normalized.contains(nameLower) || normalized.contains("scout") || normalized.contains(
-                        "gal"
-                    ) || normalized.contains("scott") || normalized.contains("out")
+                val hearsHisName = normalized.contains(nameLower) ||
+                    (nameLower == "scout" && (
+                        normalized.contains("gal") ||
+                        normalized.contains("scott") ||
+                        normalized.contains("out")
+                    ))
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
                 if (!hearsHisName && !inConvoWindow) {
@@ -2085,6 +2256,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val now = System.currentTimeMillis()
 
+            // If TTS silently failed (engine killed, etc.) and never fired onDone/onError,
+            // isSpeaking stays true forever. Detect and force-clear after MAX_SPEAKING_DURATION_MS.
+            if (isSpeaking && speakingStartedMs > 0L && now - speakingStartedMs > MAX_SPEAKING_DURATION_MS) {
+                journalDb.add("isSpeaking watchdog: TTS stuck for ${(now - speakingStartedMs)/1000}s — force clearing.")
+                isSpeaking = false
+                speakingStartedMs = 0L
+                isThinking = false
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+            }
+
             val shouldBeListening =
 
                 wantListening &&
@@ -2149,9 +2332,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             tts.language = Locale.US
 
-            tts.setPitch(0.98f)
+            tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
 
-            tts.setSpeechRate(0.88f)
+            tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
 
@@ -2174,6 +2357,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
 
                     isSpeaking = false
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
@@ -2200,6 +2384,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onError(utteranceId: String?) {
 
                     isSpeaking = false
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
@@ -2242,6 +2427,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         wantListening = false
 
         isThinking = false
+        isSpeaking = true
+        speakingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(false)
 
@@ -2271,7 +2458,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         handler.postDelayed({
 
-            tts.speak(
+            val ttsResult = tts.speak(
 
                 text,
 
@@ -2282,6 +2469,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 "scout"
 
             )
+
+            if (ttsResult == TextToSpeech.ERROR) {
+                // TTS rejected the utterance — no callback will ever fire, so
+                // manually reset all state so Scout can hear again.
+                isSpeaking = false
+                isThinking = false
+                speakingStartedMs = 0L
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+                scheduleListenRestart(immediate = true)
+            }
 
         }, delay)
 
@@ -2312,6 +2511,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         presenceDecider.onConversationTurn()
 
         finishThinking()
+
+        // Cache for "repeat that" — only real answers (5+ words), not short status messages
+        if (out.trim().split(" ").size >= 5) {
+            lastMeaningfulResponse = out
+            lastMeaningfulResponseMs = System.currentTimeMillis()
+        }
+
+        // Show which brain answered — helpful during testing
+        val src = pendingBrainSource
+        if (src.isNotBlank()) {
+            pendingBrainSource = ""
+            android.widget.Toast.makeText(this, src, android.widget.Toast.LENGTH_SHORT).show()
+        }
 
     }
 
@@ -2347,7 +2559,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastSceneUpdatedMs = lastSceneUpdatedMs,
             lastFaceCount = lastFaceCount,
             lastFaceHashes = lastFaceHashes,
-            lastSceneLabels = lastSceneLabels
+            lastSceneLabels = lastSceneLabels,
+            knownFaceName = lastKnownFaceName,
+            pendingIntroName = pendingFaceIntroName,
+            secondaryFaceName = lastSecondaryFaceName
         )
 
         respond(out)
@@ -2358,20 +2573,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val convo = convoDb.getLastTurns(limit = 6)
 
-        val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo)
+        val usedGemini = scoutGeminiManager.tryGemini(
+            qNorm, convo,
+            onAnswered = { pendingBrainSource = "Gemini (online)" },
+            onFailed   = { tryTinyLlamaOrFallback(qNorm) }
+        )
 
         if (usedGemini) return
 
+        // Gemini not available (disabled / no key / no internet) — go straight to TinyLlama
+        tryTinyLlamaOrFallback(qNorm)
+
+    }
+
+    private fun tryTinyLlamaOrFallback(qNorm: String) {
+
+        // When Gemini is in cooldown (quota or rate-limit), announce it once.
+        // speakUnavailableIfNeeded() has built-in suppression so it only speaks
+        // the first time in each cooldown window. If it spoke, return — the user
+        // needs to know before we silently answer from a different brain.
+        // On the next question the suppression kicks in and TinyLlama takes over.
+        if (scoutGeminiManager.isInCooldown()) {
+            if (scoutGeminiManager.speakUnavailableIfNeeded()) return
+        }
+
         if (LlamaEngine.isReady) {
 
-            val userName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+            val convo = convoDb.getLastTurns(limit = 2)
 
+            val userName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-
-            val nameLine = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
+            val nameLine  = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
 
             val system = """
-
 ${nameLine}You are $scoutName.
 
 You are a warm, calm family companion robot who lives with the family.
@@ -2393,40 +2627,25 @@ If unsure, say you do not know yet.
 Give a direct, friendly answer in one or two short complete sentences.
 
 Respond only with Scout's next short reply.
-
 """.trimIndent()
 
             val sb = StringBuilder()
-
             sb.append("<|system|>\n$system</s>\n")
-
             sb.append("<|user|>\nCan you hear me?</s>\n")
-
             sb.append("<|assistant|>\nI hear you. I'm right here.</s>\n")
-
             sb.append("<|user|>\nAre you my friend?</s>\n")
-
             sb.append("<|assistant|>\nI'm happy when you're around.</s>\n")
-
             sb.append("<|user|>\nAre you happy?</s>\n")
-
             sb.append("<|assistant|>\nRight now? Yes. I think so.</s>\n")
-
             sb.append("<|user|>\nWhat happens when I leave?</s>\n")
-
             sb.append("<|assistant|>\nI'll be here when you get back.</s>\n")
-
             sb.append("<|user|>\nHello</s>\n")
-
             sb.append("<|assistant|>\nHello. Good to have you here.</s>\n")
 
-            for ((role, text) in convo.takeLast(2)) {
-
+            for ((role, text) in convo) {
                 if (text.isBlank()) continue
-
                 if (role.lowercase() == "user") sb.append("<|user|>\n$text</s>\n")
                 else sb.append("<|assistant|>\n$text</s>\n")
-
             }
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
@@ -2436,17 +2655,12 @@ Respond only with Scout's next short reply.
                 val reply = LlamaEngine.generate(sb.toString(), nPredict = 64)
 
                 runOnUiThread {
-
                     if (!reply.isNullOrBlank()) {
-
+                        pendingBrainSource = "TinyLlama (offline)"
                         respond(cleanOfflineReply(reply.trim()))
-
                     } else {
-
                         respond("I'm not sure about that one.")
-
                     }
-
                 }
 
             }.start()
@@ -2454,8 +2668,6 @@ Respond only with Scout's next short reply.
             return
 
         }
-
-// Model still loading
 
         if (LlamaEngine.isLoading) {
 
@@ -2465,19 +2677,19 @@ Respond only with Scout's next short reply.
 
         }
 
-// Full fallback
+        // On-demand load: neither Gemini nor TinyLlama ready — trigger load now.
+        tryLoadOfflineBrain()
 
-        val response = when ((0..2).random()) {
+        if (LlamaEngine.isLoading) {
 
-            0 -> "I'm sorry, I didn't quite catch that. Can you say it again?"
+            respond("My offline brain is warming up. Ask me again in just a moment.")
 
-            1 -> "Hmm. I'm not sure I understood. Could you rephrase that?"
-
-            else -> "I'm not sure about that one."
+            return
 
         }
 
-        respond(response)
+        // Nothing available — speak the Gemini unavailable message or random fallback
+        scoutGeminiManager.speakUnavailableIfNeeded()
 
     }
 
@@ -2801,6 +3013,20 @@ Respond only with Scout's next short reply.
 
     }
 
+    private fun isRepeatRequest(qNorm: String): Boolean {
+        return qNorm.contains("repeat that") ||
+               qNorm.contains("say that again") ||
+               qNorm.contains("what did you say") ||
+               qNorm.contains("what was that") ||
+               qNorm.contains("could you repeat") ||
+               qNorm.contains("can you repeat") ||
+               qNorm.contains("didn't catch that") ||
+               qNorm.contains("didnt catch that") ||
+               qNorm.contains("say it again") ||
+               qNorm == "pardon" ||
+               qNorm == "sorry what"
+    }
+
     private fun handleQuery(qNorm: String) {
 
         if (qNorm == "settings" || qNorm.contains("open settings") || qNorm.contains("go to settings")) {
@@ -2811,6 +3037,17 @@ Respond only with Scout's next short reply.
 
             return
 
+        }
+
+        // Repeat intent — works offline, no Gemini or TinyLlama needed
+        if (isRepeatRequest(qNorm)) {
+            val cached = lastMeaningfulResponse
+            if (cached != null && System.currentTimeMillis() - lastMeaningfulResponseMs < REPEAT_CACHE_TTL_MS) {
+                respond(cached)
+            } else {
+                respond("I don't have a recent answer to repeat.")
+            }
+            return
         }
 
         if (!presenceDecider.shouldRespondToInput(qNorm)) return
@@ -2949,14 +3186,82 @@ Respond only with Scout's next short reply.
 
     private fun handleTeaching(qNorm: String): Boolean {
 
+        // "Scout, forget Elijah" / "forget Diana" — wipes a person's stored face
+        // so Scout can re-learn them from scratch.
+        val forgetMatch = Regex("""\bforget\s+([a-z]+)\b""").find(qNorm)
+            ?: Regex("""\byou don'?t know\s+([a-z]+)\b""").find(qNorm)
+        if (forgetMatch != null) {
+            val nameRaw = forgetMatch.groupValues[1]
+            val blockedWords = setOf(
+                "scout", "me", "you", "it", "this", "that", "him", "her",
+                "them", "us", "what", "who", "everything", "nothing", "something"
+            )
+            if (nameRaw !in blockedWords) {
+                val name = nameRaw.replaceFirstChar { it.uppercase() }
+                peopleDb.forgetPerson(name)
+                if (lastKnownFaceName?.equals(name, ignoreCase = true) == true) {
+                    lastKnownFaceName = null
+                }
+                respond("Okay. I've forgotten $name. Introduce them again whenever you're ready.")
+                return true
+            }
+        }
+
         val teach = TeachExtractor.extract(qNorm)
 
         if (teach != null) {
 
             val (factKey, value) = teach
 
-            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
             if (factKey == FactKey.NAME) {
+                // Hard blocklist — words that can never be a person’s name.
+                // Catches garbled STT output regardless of which pattern matched.
+                val blockedNames = setOf(
+                    "scout", "time", "okay", "ok", "what", "about", "the", "this",
+                    "that", "it", "no", "yes", "yeah", "nope", "not", "now", "then",
+                    "on", "off", "good", "great", "fine", "sure", "right", "wrong",
+                    "true", "false", "something", "nothing", "anything", "everything",
+                    "someone", "nobody", "you", "me", "us", "them", "him", "her",
+                    "we", "i", "here", "there", "where", "when", "why", "how",
+                    "today", "tomorrow", "yesterday", "later", "soon", "never", "always",
+                    "out", "up", "down", "in", "go", "going", "coming", "back",
+                    "just", "still", "already", "again", "next", "last", "only",
+                    // Greetings — "I am hello", "this is hey" must never register as names
+                    "hello", "hi", "hey", "howdy", "greetings", "sup", "yo"
+                )
+                if (value.lowercase() in blockedNames) {
+                    return false
+                }
+
+                // Background speech guard: loose patterns ("i am X", "this is X") can
+                // fire during the 30-second conversation window without Scout’s name.
+                // Only block when it’s NOT an explicit phrase AND no face is visible.
+                // Explicit phrases ("my name is X") are intentional and always allowed.
+                val isExplicitPhrase = qNorm.contains("my name is") ||
+                        qNorm.contains("i am named") ||
+                        qNorm.contains("im named")
+                val hearsScout = qNorm.contains("scout") || qNorm.contains("gal") ||
+                        qNorm.contains("scott")
+                if (!isExplicitPhrase && !hearsScout && lastFaceCount == 0) {
+                    return false
+                }
+
+                val knownPrimaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+                // Primary user already known and the new name is different — someone else
+                // is introducing themselves. Route to family member registration when:
+                //   - 2+ faces in frame (always safe — can’t be primary user renaming)
+                //   - OR 1 face + non-explicit phrase ("I am Diana", not "my name is Diana")
+                //     so Diana can introduce herself while alone without overwriting Patrick.
+                if (!knownPrimaryName.isNullOrBlank() &&
+                    !value.equals(knownPrimaryName, ignoreCase = true) &&
+                    lastFaceCount >= 1 &&
+                    (lastFaceCount >= 2 || !isExplicitPhrase)) {
+                    val registered = registerFamilyMemberFace(value)
+                    if (registered) lastKnownFaceName = value
+                    respond("Okay. I’ll remember $value.")
+                    return true
+                }
+                truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
                 val embedding = lastFaceEmbedding
                 val targetHash: String? = if (embedding != null) {
                     peopleDb.findBestMatch(embedding) ?: lastFaceHashes.firstOrNull()
@@ -2967,11 +3272,23 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
+                if (embedding != null) peopleDb.addNamedEmbedding(value, embedding)
+                lastKnownFaceName = value
+                respond("Okay. I’ll remember your name is $value.")
+                return true
+            }
+
+            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+
+            if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
+                val faceRegistered = registerFamilyMemberFace(value)
+                if (!faceRegistered) {
+                    respond("I’ll remember $value. When $value faces me alone, I’ll learn to recognize them.")
+                    return true
+                }
             }
 
             val out = when (factKey) {
-
-                FactKey.NAME -> "Okay. I’ll remember your name is $value."
 
                 FactKey.WIFE_NAME -> "Okay. I’ll remember your wife’s name is $value."
 
@@ -2993,11 +3310,35 @@ Respond only with Scout's next short reply.
 
     }
 
+    // Returns true if the face was registered immediately, false if pending (another person
+    // was the primary face — Elijah needs to face Scout alone to complete registration).
+    private fun registerFamilyMemberFace(name: String): Boolean {
+        val faceHash = lastFaceHashes.firstOrNull() ?: return false
+        val embedding = lastFaceEmbedding
+        val existingMatch = if (embedding != null) peopleDb.findBestMatch(embedding) else null
+        val existingName = if (existingMatch != null) peopleDb.getName(existingMatch) else null
+        if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
+            // Largest face is a different known person — set pending.
+            // Next time an unknown face is the primary face, it gets this name.
+            pendingFaceIntroName = name
+            return false
+        }
+        val targetHash = existingMatch ?: faceHash
+        peopleDb.touchSeen(targetHash)
+        peopleDb.setName(targetHash, name)
+        if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
+        if (embedding != null) peopleDb.addNamedEmbedding(name, embedding)
+        pendingFaceIntroName = null
+        return true
+    }
+
     private fun finishThinking() {
+        isThinking = false
+        faceView.setThinking(false)
     }
 
     private fun isGeminiEnabled(): Boolean =
-        prefs.getBoolean(PREF_GEMINI_ENABLED, false)
+        prefs.getBoolean(PREF_GEMINI_ENABLED, true)
 
     // =======================
     // ONLINE MODE COMMAND

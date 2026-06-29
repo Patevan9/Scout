@@ -47,9 +47,12 @@ class ScoutGeminiManager(
     private var lastRequestStartedMs  = 0L
     private var lastPrompt            = ""
     private var lastPromptMs          = 0L
+    private var lastGeminiReply: String? = null
+    private var lastGeminiReplyMs     = 0L
 
-    private val minRequestGapMs         = 2_500L
-    private val duplicatePromptWindowMs = 45_000L
+    private val minRequestGapMs          = 2_500L
+    private val duplicatePromptWindowMs  = 45_000L
+    private val REPLY_CACHE_TTL_MS       = 4L * 60L * 1_000L
 
 
     // =======================
@@ -82,7 +85,9 @@ class ScoutGeminiManager(
 
     fun tryGemini(
         qNorm: String,
-        conversation: List<Pair<String, String>>
+        conversation: List<Pair<String, String>>,
+        onAnswered: (() -> Unit)? = null,
+        onFailed: (() -> Unit)? = null
     ): Boolean {
 
         val enabled   = isGeminiEnabled()
@@ -113,10 +118,16 @@ class ScoutGeminiManager(
         }
 
         if (qNorm == lastPrompt && now - lastPromptMs < duplicatePromptWindowMs) {
-            requestInFlight.set(false)
-            Log.e("ScoutGemini", "Blocked: duplicate prompt")
-            respond("I heard that. I don't want to ask online twice for the same thing.")
-            return true
+            val cached = lastGeminiReply
+            if (cached != null && now - lastGeminiReplyMs < REPLY_CACHE_TTL_MS) {
+                requestInFlight.set(false)
+                Log.e("ScoutGemini", "Duplicate prompt — replaying cached answer")
+                respond(cached)
+                return true
+            }
+            // No cached answer — let it through so the user gets a response
+            Log.e("ScoutGemini", "Duplicate prompt, no cache — allowing through")
+            lastPromptMs = 0L
         }
 
         if (now - lastRequestStartedMs < minRequestGapMs) {
@@ -152,14 +163,17 @@ class ScoutGeminiManager(
                     val out = reply?.trim().takeUnless { it.isNullOrBlank() }
 
                     if (out != null) {
-                        // Gemini answered — speak it and reset the unavailable timer
-                        // so the next failure gets a fresh announcement.
+                        // Gemini answered — cache it, reset unavailable timer.
                         unavailableLastSpokenMs = 0L
+                        lastGeminiReply   = out
+                        lastGeminiReplyMs = System.currentTimeMillis()
+                        onAnswered?.invoke()
                         respond(out)
                     } else {
-                        // Gemini returned nothing — quota or error.
-                        // Only announce this if we haven't said so recently.
-                        speakUnavailableIfNeeded()
+                        // Gemini returned nothing — quota, timeout, or error.
+                        // Let caller try TinyLlama first; only speak unavailable if
+                        // no fallback was provided or the fallback didn't handle it.
+                        if (onFailed != null) onFailed.invoke() else speakUnavailableIfNeeded()
                     }
                 }
 
@@ -167,7 +181,7 @@ class ScoutGeminiManager(
                 Log.e("ScoutGemini", "Gemini thread crashed", e)
                 runOnMain {
                     requestInFlight.set(false)
-                    speakUnavailableIfNeeded()
+                    if (onFailed != null) onFailed.invoke() else speakUnavailableIfNeeded()
                 }
             }
         }.start()
@@ -187,7 +201,16 @@ class ScoutGeminiManager(
      * Uses a longer repeat gap for daily quota exhaustion since
      * that won't clear for hours.
      */
-    private fun speakUnavailableIfNeeded() {
+    /** Returns true if Gemini is currently in any cooldown window. */
+    fun isInCooldown(): Boolean = geminiClient.isInCooldown()
+
+    /**
+     * Speaks the Gemini unavailable message ONCE per cooldown window.
+     * Returns true if the message was spoken, false if it was suppressed
+     * (already announced recently). Callers use the return value to decide
+     * whether to also try a local fallback on the same turn.
+     */
+    fun speakUnavailableIfNeeded(): Boolean {
         val now = System.currentTimeMillis()
 
         val repeatGap = if (geminiClient.isDailyQuotaExhausted()) {
@@ -196,13 +219,15 @@ class ScoutGeminiManager(
             shortCooldownRepeatGapMs
         }
 
-        if (now - unavailableLastSpokenMs > repeatGap) {
+        return if (now - unavailableLastSpokenMs > repeatGap) {
             unavailableLastSpokenMs = now
             respond(ScoutPromptBuilder.buildOnlineUnavailableMessage(geminiClient))
+            true
         } else {
             // Already told the user — stay quiet this time.
             Log.e("ScoutGemini", "Quota message suppressed (already announced recently)")
             finishThinking()
+            false
         }
     }
 }

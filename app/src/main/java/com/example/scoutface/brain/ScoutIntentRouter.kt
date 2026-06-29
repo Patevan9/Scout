@@ -29,16 +29,22 @@ object ScoutIntentRouter {
             return IntentType.IDENTITY
         }
 
-        if ((clean.contains("wife") || clean.contains("spouse")) && clean.contains("name")) {
-            return IntentType.ASK_WIFE_NAME
+        if (clean.contains("wife") || clean.contains("spouse")) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_WIFE_NAME
+            }
         }
 
-        if ((clean.contains("son") || clean.contains("kid") || clean.contains("child")) && clean.contains("name")) {
-            return IntentType.ASK_SON_NAME
+        if (clean.contains("son") || clean.contains("kid") || clean.contains("child")) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_SON_NAME
+            }
         }
 
-        if ((clean.contains("dog") || clean.contains("pet")) && clean.contains("name")) {
-            return IntentType.ASK_DOG_NAME
+        if (clean.contains("dog") || clean.contains("pet")) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("what is my") || clean.contains("what's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_DOG_NAME
+            }
         }
 
         if (
