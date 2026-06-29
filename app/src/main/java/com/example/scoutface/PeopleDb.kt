@@ -84,7 +84,17 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.75f): String? {
+    fun forgetPerson(name: String) {
+        try {
+            writableDatabase.execSQL(
+                "UPDATE people SET name='', embedding=NULL WHERE LOWER(name)=LOWER(?);",
+                arrayOf(name)
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.82f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT face_hash, embedding FROM people WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != '';",

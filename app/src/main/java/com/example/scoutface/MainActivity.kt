@@ -3081,6 +3081,27 @@ Respond only with Scout's next short reply.
 
     private fun handleTeaching(qNorm: String): Boolean {
 
+        // "Scout, forget Elijah" / "forget Diana" — wipes a person's stored face
+        // so Scout can re-learn them from scratch.
+        val forgetMatch = Regex("""\bforget\s+([a-z]+)\b""").find(qNorm)
+            ?: Regex("""\byou don'?t know\s+([a-z]+)\b""").find(qNorm)
+        if (forgetMatch != null) {
+            val nameRaw = forgetMatch.groupValues[1]
+            val blockedWords = setOf(
+                "scout", "me", "you", "it", "this", "that", "him", "her",
+                "them", "us", "what", "who", "everything", "nothing", "something"
+            )
+            if (nameRaw !in blockedWords) {
+                val name = nameRaw.replaceFirstChar { it.uppercase() }
+                peopleDb.forgetPerson(name)
+                if (lastKnownFaceName?.equals(name, ignoreCase = true) == true) {
+                    lastKnownFaceName = null
+                }
+                respond("Okay. I've forgotten $name. Introduce them again whenever you're ready.")
+                return true
+            }
+        }
+
         val teach = TeachExtractor.extract(qNorm)
 
         if (teach != null) {
