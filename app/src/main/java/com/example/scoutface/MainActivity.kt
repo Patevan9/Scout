@@ -503,6 +503,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // =======================
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var scoutPrefs: SharedPreferences   // "scout_prefs" — voice, name, etc.
 
     private lateinit var truthDb: TruthDb
 
@@ -656,6 +657,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
 
         super.onResume()
+
+        // Re-apply voice settings in case they were changed in SettingsActivity.
+        tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
+        tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
         resumeSystems()
 
@@ -980,7 +985,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupMemory() {
 
-        prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs      = getSharedPreferences(PREFS,        Context.MODE_PRIVATE)
+        scoutPrefs = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
 
         truthDb = TruthDb(this)
 
@@ -2269,9 +2275,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             tts.language = Locale.US
 
-            tts.setPitch(0.98f)
+            tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
 
-            tts.setSpeechRate(0.88f)
+            tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
 
@@ -3152,7 +3158,9 @@ Respond only with Scout's next short reply.
                     "we", "i", "here", "there", "where", "when", "why", "how",
                     "today", "tomorrow", "yesterday", "later", "soon", "never", "always",
                     "out", "up", "down", "in", "go", "going", "coming", "back",
-                    "just", "still", "already", "again", "next", "last", "only"
+                    "just", "still", "already", "again", "next", "last", "only",
+                    // Greetings — "I am hello", "this is hey" must never register as names
+                    "hello", "hi", "hey", "howdy", "greetings", "sup", "yo"
                 )
                 if (value.lowercase() in blockedNames) {
                     return false
