@@ -360,6 +360,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val recognizerWatchdog = Runnable { runRecognizerWatchdog() }
 
+    // Guards against TTS silently failing (no onDone/onError callback after engine
+    // is killed by Android). If isSpeaking stays true longer than this, force-clear it.
+    private var speakingStartedMs = 0L
+    private val MAX_SPEAKING_DURATION_MS = 45_000L
+
     // Mic visual gating
 
     private val MIC_RMS_FLOOR_DB = 2.5f
@@ -2188,6 +2193,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val now = System.currentTimeMillis()
 
+            // If TTS silently failed (engine killed, etc.) and never fired onDone/onError,
+            // isSpeaking stays true forever. Detect and force-clear after MAX_SPEAKING_DURATION_MS.
+            if (isSpeaking && speakingStartedMs > 0L && now - speakingStartedMs > MAX_SPEAKING_DURATION_MS) {
+                journalDb.add("isSpeaking watchdog: TTS stuck for ${(now - speakingStartedMs)/1000}s — force clearing.")
+                isSpeaking = false
+                speakingStartedMs = 0L
+                isThinking = false
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+            }
+
             val shouldBeListening =
 
                 wantListening &&
@@ -2277,6 +2294,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
 
                     isSpeaking = false
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
@@ -2303,6 +2321,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onError(utteranceId: String?) {
 
                     isSpeaking = false
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
@@ -2346,6 +2365,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         isThinking = false
         isSpeaking = true
+        speakingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(false)
 
@@ -2375,7 +2395,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         handler.postDelayed({
 
-            tts.speak(
+            val ttsResult = tts.speak(
 
                 text,
 
@@ -2386,6 +2406,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 "scout"
 
             )
+
+            if (ttsResult == TextToSpeech.ERROR) {
+                // TTS rejected the utterance — no callback will ever fire, so
+                // manually reset all state so Scout can hear again.
+                isSpeaking = false
+                isThinking = false
+                speakingStartedMs = 0L
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+                scheduleListenRestart(immediate = true)
+            }
 
         }, delay)
 
