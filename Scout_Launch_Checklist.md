@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 28, 2026 | Version 8**
+**What Scout needs to be worth $9.99 | Updated June 29, 2026 | Version 9**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -30,9 +30,9 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Self-echo guard — Scout no longer picks up his own TTS voice as a new question. DONE June 15.
 ✓ Face recognition Step 1 — MobileFaceNet.tflite bundled (MIT licensed, ~5MB). FaceEmbedder.kt created. DONE June 15.
 ✓ Face recognition Steps 2–4 COMPLETE — FaceEmbedder wired into camera. PeopleDb stores BLOB embeddings. Naming flow uses embedding-based identity. Known face recognized. Unknown face greeted. Nicolas Protocol active. DONE June 17.
-✓ Face recognition RELIABLE — findBestMatch scans named rows only. Threshold raised to 0.75. Self-match bug fixed (findBestMatch before storeEmbedding). Scout says your name consistently, not just once. DONE June 21.
+✓ Face recognition RELIABLE — findBestMatch scans named rows only. Threshold raised to 0.82. Self-match bug fixed (findBestMatch before storeEmbedding). Scout says your name consistently, not just once. DONE June 21 / threshold updated June 29.
 ✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers their face. Pending mechanism handles two-people-in-frame gracefully. DONE June 21.
-✓ Two-person response — Scout says "I can see Patrick and one other person" instead of just "I see two people." DONE June 21.
+✓ Two-person response — Scout now says "I can see Patrick and Elijah" instead of "someone else" when both faces are known. Secondary face embedding added June 29.
 ✓ Wrong-name teaching fixed — 2-person frame guard prevents "this is my wife Diana" being stored as primary user rename. DONE June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder. Garbage labels gone. DONE June 27.
 ✓ finishThinking() fixed — was empty no-op. Scout no longer freezes in thinking mode. DONE June 27.
@@ -44,13 +44,21 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ A32 NO LONGER CRASHING — Patrick confirmed stable June 21. Delayed LMKD kill after Gemini responses eliminated.
 ✓ TinyLlama re-enabled with safe delayed load — 90s startup delay, 800MB RAM guard, nCtx=512, nThreads=2. On-demand load fires when Gemini fails. DONE June 28.
 ✓ TinyLlama automatic Gemini fallback — onFailed callback in tryGemini() triggers tryTinyLlamaOrFallback(). If Gemini times out or returns nothing, Scout automatically tries TinyLlama. DONE June 28.
-✓ Gemini timeouts reduced — connectTimeout 10s (was 20s), readTimeout 12s (was 30s). Faster fallback to TinyLlama on slow responses. DONE June 28.
+✓ Gemini timeouts reduced — connectTimeout 10s, readTimeout 20s. Faster fallback to TinyLlama on slow responses. DONE June 28.
 ✓ "Repeat that" intent — isRepeatRequest() detects "repeat that", "say that again", "what did you say?", etc. Replays last meaningful answer from 4-minute cache. Works offline without re-running any brain. DONE June 28.
 ✓ Brain source Toast — after each answer, Toast shows "Gemini (online)" or "TinyLlama (offline)" for testing. DONE June 28.
 ✓ Gemini default fixed — isGeminiEnabled() was defaulting to false (always OFF). Fixed to true so Gemini works on fresh install when a key is saved. DONE June 28.
 ✓ Gemini daily quota cooldown reduced — 6 hours → 1 hour. Faster dev recovery after quota exhaustion. DONE June 28.
 ✓ Face greeting fires once per launch — was resetting every 5 seconds when face briefly left frame (greetedThisSession = false reset removed). Now fires once per app boot only. DONE June 28.
 ✓ STT reliability improved — EXTRA_PREFER_OFFLINE=true (avoids Samsung network STT dependency), 10-second silence window (was shorter), ERROR_RECOGNIZER_BUSY (error 8) gets 600ms delay before restart instead of immediate retry. DONE June 28.
+✓ Launcher icon eyes no longer clipped — Face scaled to 68% of canvas, centered. All 5 mipmap densities regenerated. Eyes and eyebrows fully visible inside the circular launcher mask. DONE June 29.
+✓ Face misidentification fixed — Cosine similarity threshold raised 0.75→0.82. Prevents father/son pairs (Patrick/Elijah) from scoring above threshold. "Scout, forget [name]" command added to clear and re-register any face. DONE June 29.
+✓ Scout can no longer go permanently deaf — 3-layer TTS stuck fix: speak() return-value check, speakingStartedMs timestamp, 45-second watchdog that force-clears isSpeaking if TTS callback never fires. DONE June 29.
+✓ Voice slider changes now stick — SettingsActivity and MainActivity both read from scout_prefs. onResume() reloads pitch/speed so voice changes take effect immediately without restarting the app. DONE June 29.
+✓ Greeting words blocked from name storage — "hello", "hi", "hey", "howdy", "greetings", "sup", "yo" added to blockedNames. Scout no longer says "I'll remember your name is hello." DONE June 29.
+✓ Gemini responses no longer cut off mid-sentence — maxOutputTokens raised 250→600. "Always end on a complete sentence" added to system prompt. MAX_TOKENS trim logic finds last sentence boundary; returns null if none (falls through to TinyLlama). DONE June 29.
+✓ Gemini quota/cooldown announced — Scout now speaks "Gemini says you've reached your daily limit" instead of silently falling through to TinyLlama. speakUnavailableIfNeeded() returns Boolean (true=spoken, false=suppressed). Cooldown check added at top of tryTinyLlamaOrFallback(). DONE June 29.
+✓ Secondary face recognition — Both faces now get embedded in two-person scenes, not just the primary. PeopleDb v3 adds person_embeddings table (up to 5 per person). VisionAnswerBuilder uses secondaryFaceName — Scout says "I can see you, Patrick and Elijah" instead of "someone else." DONE June 29.
 
 ---
 
@@ -169,7 +177,7 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, full reliable face recognition for the whole family, and a settings screen. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, full reliable face recognition for the whole family (including both people in a two-person frame), a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
 
 **Next session: Startup diagnostics (#2 on Must Fix list) — friendly messages if brain, TTS, or STT missing at boot. Then: Onboarding flow (#3).**
 
@@ -177,4 +185,4 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Updated June 28, 2026 | Version 8 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated June 29, 2026 | Version 9 | For Patrick, Diana, Elijah, and Scout*

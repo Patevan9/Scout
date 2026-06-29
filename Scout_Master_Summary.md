@@ -1,8 +1,22 @@
 # Project Scout — Master Project Summary
-**Last updated: June 28, 2026 | Version 36**
+**Last updated: June 29, 2026 | Version 37**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 29, 2026 — What Changed Since Version 36
+
+✓ **Launcher icon eyes fixed** — Face was at 100% of the foreground canvas; eyebrows at ~14% from top were being clipped by the circular launcher mask (safe zone = inner 66.7%). Scaled face to 68% of canvas with dark navy #0D1728 background. All 5 mipmap densities regenerated. Patrick confirmed: "icon looks good 👍"
+✓ **Face threshold raised 0.75→0.82** — Father/son genetic similarity (Patrick/Elijah) caused cosine scores of 0.76–0.79, above the old 0.75 threshold. Genuine same-person matches score 0.80+. Threshold raised to 0.82 in `PeopleDb.findBestMatch()`. DONE June 29.
+✓ **"Scout, forget [name]" command** — `forgetPerson(name)` now wipes both the `people` table (sets name='', embedding=NULL) and the new `person_embeddings` table (DELETE). Voice command parsed in `handleTeaching()`. DONE June 29.
+✓ **TTS deafness bug fixed** — `speak()` sets `isSpeaking=true` and `wantListening=false`. If Android kills the TTS engine during idle and `tts.speak()` fails silently (no onDone/onError callback), Scout goes permanently deaf. Three-layer fix: (1) `speak()` checks return value — if `TextToSpeech.ERROR`, immediately clears `isSpeaking`; (2) `speakingStartedMs` timestamp set when speaking begins, cleared in `onDone`/`onError`; (3) 45-second watchdog in the recognizer watchdog loop force-clears `isSpeaking`, `isThinking`, sets `wantListening=true` if TTS is stuck. DONE June 29.
+✓ **Voice slider changes now stick** — SettingsActivity was saving pitch/speed to `scout_prefs` but MainActivity was reading from `scout_memory` (different SharedPreferences file) and hardcoding defaults in `onInit()`. Fixed: `MainActivity.scoutPrefs` reads from `"scout_prefs"`. `onInit()` and `onResume()` both call `scoutPrefs.getFloat("voice_pitch", 0.98f)` / `getFloat("voice_speed", 0.88f)`. Patrick confirmed: "voice is fixed." DONE June 29.
+✓ **Greeting words blocked from name storage** — "hello", "hi", "hey", "howdy", "greetings", "sup", "yo" added to `blockedNames` in `handleTeaching()`. Scout no longer says "I'll remember your name is hello." DONE June 29.
+✓ **Gemini responses no longer truncated mid-sentence** — `maxOutputTokens` raised 250→600 in `GeminiClent.kt`. "Always end on a complete sentence — never stop mid-sentence." added to Gemini system prompt in `ScoutPromptBuilder.kt`. When Gemini returns `finishReason=MAX_TOKENS`: trims to last `.`/`!`/`?` boundary; returns null (falls through to TinyLlama) if no sentence boundary found. DONE June 29.
+✓ **Gemini quota/cooldown announced to user** — Previously `tryTinyLlamaOrFallback()` only called `speakUnavailableIfNeeded()` after TinyLlama also failed. Now: `isInCooldown()` exposed on `ScoutGeminiManager`, cooldown check added at top of `tryTinyLlamaOrFallback()` — if in cooldown, `speakUnavailableIfNeeded()` is called immediately. `speakUnavailableIfNeeded()` returns `Boolean`: `true` = message spoken (caller returns), `false` = suppressed within repeat gap (TinyLlama answers normally). Repeat gaps: 6 hours for daily quota, 10 minutes for rate limit. Scout says: "Gemini says you've reached your daily limit, but I can do my best locally to help any way I can." DONE June 29.
+✓ **Secondary face recognition** — Previously only the largest (primary) face got embedded per frame. The second face (e.g. Elijah when Patrick and Elijah are both in frame) was never processed — hence "someone else." Fix: (1) `PeopleDb` upgraded to v3, adds `person_embeddings` table (stores up to 5 embeddings per named person via `addNamedEmbedding()`; `findBestMatchName()` scans it and returns the name directly). (2) `MainActivity`: computes `secondFace` = second-largest face; captures `capturedSecondBox`; in the same `embedExecutor.submit` block, after primary face processing, also crops/embeds the secondary face and calls `findBestMatchName(emb2, threshold=0.80f)` → stores in `lastSecondaryFaceName` (@Volatile). Clears `lastSecondaryFaceName` when `faces.size < 2`. All name-confirmation paths also call `addNamedEmbedding()` to accumulate embeddings for future matching. (3) `VisionAnswerBuilder.build()` gets new `secondaryFaceName` param — used in `faceCount==2` branch. Scout now says "I can see you, Patrick and Elijah." DONE June 29.
 
 ---
 
@@ -174,15 +188,23 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ Speech recognition (Android STT) + Text to Speech (TTS)
 ✓ STT reliability improved — EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. June 28.
 ✓ Camera — face detection (ML Kit), scene labeling — throttled to ~7fps June 21 (memory pressure fix)
-✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb stores BLOB embeddings with cosine similarity (threshold 0.75), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
+✓ Launcher icon fixed — face 68% of canvas, all 5 mipmap densities. Eyes fully inside circular mask. June 29.
+✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb v3 stores BLOB embeddings with cosine similarity (threshold 0.82, raised June 29), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
+✓ Secondary face recognition — second-largest face also embedded in same executor job. person_embeddings table (up to 5 per person, threshold 0.80). lastSecondaryFaceName (@Volatile). VisionAnswerBuilder uses it. June 29.
+✓ "Scout, forget [name]" command — wipes people table + person_embeddings table for that name. June 29.
 ✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21.
-✓ VisionAnswerBuilder two-person response — "I can see [Patrick] and one other person." when primary face known. June 21.
+✓ VisionAnswerBuilder two-person response — "I can see you, Patrick and Elijah" when both faces known; "I can see you, Patrick and someone else" when secondary unrecognized. June 21 / updated June 29.
 ✓ Face greeting fires once per launch — greetedThisSession reset removed. June 28.
 ✓ Wrong-name teaching with 2 people in frame fixed — handleTeaching() guard prevents "this is my wife Diana" being stored as primary user rename. June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder.kt. ~80 household objects. Garbage labels gone. June 27.
 ✓ lastKnownFaceName set immediately on teaching — Scout says your name right away, not 2 seconds later. June 27.
 ✓ finishThinking() fixed — was empty no-op. Now clears isThinking + faceView state. Fixes permanent stuck-thinking when Gemini blocked. June 27.
-✓ Gemini API — ON by default when key is saved (default fixed June 28). Timeout 10s/12s. maxOutputTokens=250. Activated by 'go online' voice command. Model: gemini-3.5-flash. Daily quota cooldown 1 hour.
+✓ Greeting words blocked from name storage — hello/hi/hey/howdy/greetings/sup/yo in blockedNames. June 29.
+✓ TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Scout cannot go permanently deaf after idle. June 29.
+✓ Voice settings persist across Settings/MainActivity — scout_prefs used by both. onResume() reloads pitch/speed. June 29.
+✓ Gemini API — ON by default when key is saved (default fixed June 28). Timeout 10s connect / 20s read. maxOutputTokens=600 (raised June 29), sentence-complete instruction. Activated by 'go online' voice command. Model: gemini-3.5-flash. Daily quota cooldown 1 hour.
+✓ Gemini quota/cooldown announced — speakUnavailableIfNeeded() returns Boolean; cooldown check at top of tryTinyLlamaOrFallback(). Repeat gaps: 6h daily quota, 10min rate limit. June 29.
+✓ Gemini responses complete — maxOutputTokens=600, MAX_TOKENS trim to sentence boundary. June 29.
 ✓ TinyLlama 1.1B offline brain — RE-ENABLED June 28 with delayed load (90s), 800MB RAM guard, nCtx=512, nThreads=2. Automatic Gemini fallback via onFailed callback. On-demand load fires when Gemini fails and TinyLlama not yet loaded.
 ✓ "Repeat that" intent — isRepeatRequest() + lastMeaningfulResponse cache (4-min TTL). Replays last 5-word+ answer instantly from any brain. June 28.
 ✓ Brain source Toast — "Gemini (online)" / "TinyLlama (offline)" shown after each answer for testing. June 28.
@@ -261,7 +283,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 |-------|-------|
 | TinyLlama A32 real-world confirmation needed | Re-enabled June 28 with delayed load + RAM guard. Not yet confirmed that LMKD crash does not return under memory pressure. |
 | A32 crashes | **RESOLVED June 21** — camera frame throttle (150ms) eliminated the delayed LMKD kill. Patrick confirmed stable. |
-| Elijah/Diana face registration | Requires solo face moment after introduction to capture embedding via pending mechanism. Works once triggered. |
+| Secondary face bootstrap | First time two people are in frame after a fresh pull, Elijah may show as "someone else" — person_embeddings table starts empty. Once Elijah faces Scout alone once, his embedding populates the table and two-person recognition works. |
 | A32 active test device | Patrick confirmed June 28: testing is on A32. Fold 7 listed as primary but needs a dedicated session. |
 | TinyLlama slow on A32 | 20-40s per answer. Expected. Hardware limitation. Gemini is fast path when online. |
 | Barge-in | Deliberately disabled. Runaway loop. Status: PARKED. |
@@ -289,7 +311,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 20: ML Kit suppressed during Gemini calls via isThinking gate. speak() race condition fixed — isSpeaking set immediately at function entry, closing 240–650ms gap that allowed ML Kit to spike memory just before Scout spoke. Mouth animation timing fixed — faceView.setSpeaking(true) moved back to TTS onStart callback only.
 - June 21: Camera frame throttle added (150ms interval, ~7fps ML Kit). A32 crash eliminated — confirmed stable by Patrick. Face name persistence fixed (lastKnownFaceName, findBestMatch before storeEmbedding, named-rows-only SQL). Face recognition threshold raised 0.65→0.75 (Patrick/Elijah false match fixed). Multi-person introduction added (SON_NAME/WIFE_NAME register face, pendingFaceIntroName mechanism). VisionAnswerBuilder two-person response improved. Gemini maxOutputTokens raised 150→250.
 - June 27: Wrong-name teaching bug fixed (2-person frame guard in handleTeaching). ML Kit label blacklist replaced with OBJECT_WHITELIST in VisionAnswerBuilder (~80 household objects). lastKnownFaceName now set immediately after name teaching (not 2s later). finishThinking() fixed — was empty no-op causing permanent stuck-thinking when Gemini blocked. Testing listed as moved to Fold 7.
-- June 28: TinyLlama re-enabled — 90s delayed load, 800MB RAM guard, nCtx=512, nThreads=2. tryLoadOfflineBrain() helper added (startup + on-demand path). Gemini timeouts reduced (10s/12s). onFailed/onAnswered callbacks added to tryGemini(). tryTinyLlamaOrFallback() extracted — TinyLlama now automatic Gemini fallback. "Repeat that" intent added (isRepeatRequest(), lastMeaningfulResponse cache, 4-min TTL). Brain source Toast added ("Gemini (online)" / "TinyLlama (offline)"). Gemini default fixed (isGeminiEnabled() was always false). Daily quota cooldown reduced 6h→1h. Face greeting reset removed — greets once per boot only. STT improved: EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. Duplicate prompt now serves cached Gemini reply. speakUnavailableIfNeeded() made public. Testing confirmed on A32.
+- June 28: TinyLlama re-enabled — 90s delayed load, 800MB RAM guard, nCtx=512, nThreads=2. tryLoadOfflineBrain() helper added (startup + on-demand path). Gemini timeouts reduced (10s connect / 20s read). onFailed/onAnswered callbacks added to tryGemini(). tryTinyLlamaOrFallback() extracted — TinyLlama now automatic Gemini fallback. "Repeat that" intent added (isRepeatRequest(), lastMeaningfulResponse cache, 4-min TTL). Brain source Toast added ("Gemini (online)" / "TinyLlama (offline)"). Gemini default fixed (isGeminiEnabled() was always false). Daily quota cooldown reduced 6h→1h. Face greeting reset removed — greets once per boot only. STT improved: EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. Duplicate prompt now serves cached Gemini reply. speakUnavailableIfNeeded() made public. Testing confirmed on A32.
+- June 29: Launcher icon fixed — face 68% of canvas, all 5 mipmap densities regenerated, eyes inside circular mask. Face threshold raised 0.75→0.82 (Patrick/Elijah genetic similarity fix). "Scout, forget [name]" voice command added (clears people + person_embeddings). TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Voice slider now sticks — scout_prefs in both SettingsActivity and MainActivity.onResume(). Greeting words blocked from name storage (hello/hi/hey/howdy/greetings/sup/yo). Gemini maxOutputTokens raised 250→600, "Always end on a complete sentence" added to system prompt, MAX_TOKENS boundary trim. Gemini quota announced — speakUnavailableIfNeeded() returns Boolean, cooldown check at top of tryTinyLlamaOrFallback(). Secondary face recognition — PeopleDb v3 with person_embeddings table, addNamedEmbedding(), findBestMatchName(); secondFace embedded in same executor job, lastSecondaryFaceName (@Volatile); VisionAnswerBuilder uses secondaryFaceName.
 
 ---
 
@@ -313,7 +336,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 | File | Description |
 |------|-------------|
-| MainActivity.kt | Main app — all logic. Hardcoded API key REMOVED June 18. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. isSpeaking set immediately in speak() — race condition fix June 20. tryLoadOfflineBrain() added June 28 (delayed + on-demand TinyLlama load). isRepeatRequest() + lastMeaningfulResponse cache June 28. tryTinyLlamaOrFallback() extracted June 28. pendingBrainSource + brain Toast June 28. greetedThisSession reset removed June 28. STT EXTRA_PREFER_OFFLINE + silence/busy fixes June 28. |
+| MainActivity.kt | Main app — all logic. Hardcoded API key REMOVED June 18. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. isSpeaking set immediately in speak() — race condition fix June 20. tryLoadOfflineBrain() added June 28 (delayed + on-demand TinyLlama load). isRepeatRequest() + lastMeaningfulResponse cache June 28. tryTinyLlamaOrFallback() extracted June 28. pendingBrainSource + brain Toast June 28. greetedThisSession reset removed June 28. STT EXTRA_PREFER_OFFLINE + silence/busy fixes June 28. TTS deafness fix June 29 (speak() return check, speakingStartedMs, 45s watchdog). scoutPrefs reads from scout_prefs June 29 (voice pitch/speed in onInit + onResume). blockedNames includes greeting words June 29. lastSecondaryFaceName + secondFace + capturedSecondBox + secondary embed block June 29. isInCooldown() check + speakUnavailableIfNeeded() call at top of tryTinyLlamaOrFallback() June 29. |
 | ScoutFaceView.kt | Custom face canvas — all visual animation. Thinking expression updated June 8. Eye jitter fixed June 18 (boot lock, speaking gate, dead zone, min-delta). Eyebrows/mouth #9BBEFF June 18. |
 | SettingsActivity.kt | NEW June 18 — 5 sections: AI Provider, Voice & TTS, Behavior, Brain & Behavior, About Scout. Gemini key entry, offline toggle, pitch/speed sliders. Opened via swipe-right + voice command + first-boot hint. |
 | ScoutIntentRouter.kt | Intent routing — IDENTITY + RECALL_FACT added. Online/disconnect phrases. |
@@ -321,9 +344,9 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | FactKey.kt | Fact labels — fixed keys kept + FactKey.custom() for any new label. |
 | TruthDb.kt | SQLite fact store — fully flexible. No changes needed. |
 | ApiKeySetupActivity.kt | API key wizard — wired to secure storage June 17. |
-| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. connectTimeout=10s, readTimeout=12s (reduced June 28). maxOutputTokens=250 (raised June 21). Daily quota cooldown 1 hour (was 6h, reduced June 28). Single-flight guard. Daily quota detection (isDailyQuotaInError). |
-| ScoutPromptBuilder.kt | Builds Gemini system instruction and unavailable messages. |
-| brain/ScoutGeminiManager.kt | Gemini orchestration. onAnswered/onFailed callbacks added June 28. lastGeminiReply cache (4-min TTL) — serves duplicate prompts June 28. speakUnavailableIfNeeded() made public June 28. Quota message discipline — says "unavailable" once per cooldown window, then stays quiet. |
+| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. connectTimeout=10s, readTimeout=20s. maxOutputTokens=600 (raised June 29). Daily quota cooldown 1 hour. Single-flight guard. isDailyQuotaExhausted() + isInCooldown() methods. MAX_TOKENS finishReason trim to sentence boundary June 29. |
+| ScoutPromptBuilder.kt | Builds Gemini system instruction and unavailable messages. "Always end on a complete sentence" in system prompt June 29. buildOnlineUnavailableMessage() returns daily quota / rate limit / generic variants. |
+| brain/ScoutGeminiManager.kt | Gemini orchestration. onAnswered/onFailed callbacks added June 28. lastGeminiReply cache (4-min TTL) — serves duplicate prompts June 28. speakUnavailableIfNeeded() returns Boolean June 29 (true=spoken, false=suppressed). isInCooldown() exposed June 29. Repeat gaps: 6h daily quota, 10min rate limit. |
 | ScoutWeatherManager.kt | Live weather via NWS (api.weather.gov) — UPDATED June 16. Free for commercial use. Precip %, offline-aware. U.S. only. |
 | ScoutPresenceDecider.kt | Social timing layer. |
 | LlamaEngine.kt | Offline brain JNI wrapper — WORKING. Re-enabled June 28: loadAsync called with nCtx=512, nThreads=2. |
@@ -332,8 +355,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
-| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). Threshold 0.75 (raised June 21). |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 names primary face (June 21). |
+| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). Threshold 0.82 (raised June 29). DB version 3 June 29: person_embeddings table added (addNamedEmbedding(), findBestMatchName(), forgetPerson() also clears it). Up to 5 embeddings per person. |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 uses both knownFaceName and secondaryFaceName (June 29). |
 | FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. Loads MobileFaceNet.tflite, returns 192-dim L2-normalized face embedding. |
 | MobileFaceNet.tflite | Bundled in app/src/main/assets/. MIT licensed. 5.2MB. Input: 112x112 RGB, normalized. Output: 192-dim embedding. |
 | THIRD_PARTY_NOTICES.md | MIT attribution for MobileFaceNet. Start of Open Source Credits. |
@@ -529,4 +552,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 28, 2026 | Version 36 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: June 29, 2026 | Version 37 | Single source of truth — upload every session*
