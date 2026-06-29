@@ -1,8 +1,30 @@
 # Project Scout — Master Project Summary
-**Last updated: June 16, 2026 | Version 32**
+**Last updated: June 29, 2026 | Version 37**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 29, 2026 — What Changed Since Version 36
+
+✓ **Test coverage analysis complete** — all 34 source files mapped and documented. Zero real test coverage confirmed (two placeholder boilerplate tests only: `2 + 2 == 4` and package name check). Full gap report created with priority roadmap.
+
+✓ **Tier 1 test targets identified (pure logic, zero Android deps)** — TextNormalizer.normalizeUtterance(), TeachExtractor.extract(), ScoutIntentRouter.route(), ScoutStatusText.buildConnectivityAnswer() / buildBootStatusString(), VisionLabelFilter.isUseful() / VisionUtils.keepVisionLabel(). JUnit4 only. No mocks, no Context. Write these first.
+
+✓ **Tier 2 test targets identified (lightweight mocks)** — VisionAnswerBuilder.build() (fake TruthDb + PeopleDb + VoiceBank), ScoutPresenceDecider (battery depletion/recharge, presence mode transitions, long-absence greeting one-shot), HabitLayer (extractKeywords, decayedScore half-life, getTopTopics, getIdleObservation threshold).
+
+✓ **Tier 3 test targets identified (instrumented, Room)** — TruthDb, PeopleDb, ConversationDb, JournalDb. Use Room.inMemoryDatabaseBuilder. VoiceBank needs SharedPreferences mock for non-repeat logic.
+
+✓ **Dead code found — TeachExtractor.kt line 131** — the `\bmy ([a-z ]+?) is ([a-z ]+)` regex is unreachable: the pattern on line 126 (`\bmy ([a-z ]+?)'?s? name is ...`) always fires first on the same inputs. Line 131 also has a subtle label collision with line 137 (same pattern, different label prefix). Flagged for removal / reorder.
+
+✓ **Duplicate label filter found** — `VisionLabelFilter` (object, `vision` package) and `VisionUtils.keepVisionLabel()` are identical logic with identical bad-label sets. Two sources of truth for the same filter. Consolidate to VisionUtils; remove VisionLabelFilter. Filed as cleanup task.
+
+✓ **Missing test dependencies documented** — Add to build.gradle.kts `testImplementation` block: `org.mockito.kotlin:mockito-kotlin:5.1.0`, `org.assertj:assertj-core:3.24.1`, `org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3`, `androidx.arch.core:core-testing:2.2.0`.
+
+✓ **Structural test blocker confirmed — MainActivity.kt at 4,114 LOC** — single class owns camera, speech, TTS, face detection, intent routing, downloads, vision, conversation flow, and state coordination. Cannot unit test any of it without extracting CameraService, SpeechService, VisionService, GeminiOrchestrator. Documented as post-launch refactor target, not a launch blocker.
+
+✓ **Test priority roadmap created** — Tier 1 (write immediately, no setup needed), Tier 2 (mock-based, medium effort), Tier 3 (instrumented, needs emulator or device). Tier 1 alone covers TeachExtractor, ScoutIntentRouter, TextNormalizer, ScoutStatusText — the four classes that govern what Scout understands and remembers.
 
 ---
 
@@ -188,7 +210,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 | Issue | Notes |
 |-------|-------|
-| Face recognition Steps 2–4 | Step 1 done. Steps 2–4 still needed: wire into camera, update PeopleDb schema, rewire naming flow. |
+| Face recognition Steps 2–4 | Step 1 done. Steps 2–4 still needed: wire into camera, update PeopleDb schema, rewire naming flow. When wiring is complete, Elijah's face must be bootstrapped manually as Scout's first known person — no automatic enrollment flow exists yet. |
 | Hardcoded API key | Patrick's personal Gemini key in MainActivity.kt. Removing in Settings session. |
 | Fold 7 not tested | All testing on A32 via WiFi. Fold 7 needs dedicated stability session. |
 | TinyLlama slow on A32 | 20-40s per answer. Expected. Hardware limitation. Gemini is fast path when online. |
@@ -211,6 +233,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 14: Greeting routing fixed. Vision response cleanup. VisionAnswerBuilder wired to PeopleDb. Face-tagging hook added to handleTeaching() but face hash instability found. Rambling/garbled continuations discovered.
 - June 15: Rambling fix — limitToSentences() added, offline replies capped at 2 sentences. MainActivity.kt blank line cleanup. Self-echo guard added (lastScoutUtteranceNormalized, onResults() check). Face recognition Step 1: MobileFaceNet.tflite bundled (MIT, ~5MB), TensorFlow Lite dep added, FaceEmbedder.kt created (not yet wired). Naming phrases expanded in TeachExtractor.kt ("this is X", "I am X", "you see X").
 - June 16: Weather switched from Open-Meteo to NWS (api.weather.gov) — free for commercial use, no API key, U.S. only. ScoutWeatherManager.kt fully rewritten. THIRD_PARTY_NOTICES.md created. Quick Start, Launch Checklist, and Master Summary updated to v10/v4/v32.
+- June 29: Test coverage analysis session. All 34 source files mapped. Zero real test coverage confirmed. Tier 1/2/3 test targets documented. Dead code in TeachExtractor.kt flagged (line 131 unreachable regex). Duplicate VisionLabelFilter / VisionUtils.keepVisionLabel identified. Structural test blocker (MainActivity monolith at 4,114 LOC) documented. Missing test deps listed. Elijah face bootstrap gap noted for face recognition Step 4. Full test priority roadmap created. Quick Start, Launch Checklist, and Master Summary updated to v15/v9/v37.
 
 ---
 
@@ -234,16 +257,16 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 | File | Description |
 |------|-------------|
-| MainActivity.kt | Main app — all logic. API key — REMOVE BEFORE LAUNCH. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. |
+| MainActivity.kt | Main app — all logic. API key — REMOVE BEFORE LAUNCH. Wake word filter in onResults(). Self-echo guard (lastScoutUtteranceNormalized). limitToSentences() for rambling fix. handleTeaching() wires name to PeopleDb. 4,114 LOC — primary structural test blocker. Cannot unit test without extracting CameraService, SpeechService, VisionService. |
 | ScoutFaceView.kt | Custom face canvas — all visual animation. Thinking expression updated June 8. |
 | ScoutIntentRouter.kt | Intent routing — IDENTITY + RECALL_FACT added. Online/disconnect phrases. |
 | TeachExtractor.kt | Extracts facts from speech — FLEXIBLE. Updated June 15 with "this is X", "I am X", "you see X" name patterns + NON_NAME_WORDS stoplist. |
 | FactKey.kt | Fact labels — fixed keys kept + FactKey.custom() for any new label. |
 | TruthDb.kt | SQLite fact store — fully flexible. No changes needed. |
 | ApiKeySetupActivity.kt | API key wizard — built by Claude. Needs wiring to secure storage. |
-| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. |
-| ScoutPromptBuilder.kt | Builds Gemini system instruction. |
-| ScoutGeminiManager.kt | Gemini orchestration. |
+| GeminiClient.kt | Gemini HTTP wrapper with cooldown discipline. isDailyQuotaExhausted(), isInCooldown(), cooldownRemainingMs() are pure state checks — Tier 2 test targets via ScoutPromptBuilder.buildOnlineUnavailableMessage(). |
+| ScoutPromptBuilder.kt | Builds Gemini system instruction and online-unavailable messages (3 states: quota exhausted / cooldown / generic). Tier 2 test target — all 3 message states should be pinned with snapshot tests. |
+| ScoutGeminiManager.kt | Gemini orchestration. Request de-duplication (duplicatePromptWindowMs = 45s), throttle gap (minRequestGapMs = 2.5s). Tier 2 test target — verify same prompt within 45s is blocked, different prompt after 2.5s succeeds. |
 | ScoutWeatherManager.kt | Live weather via NWS (api.weather.gov) — UPDATED June 16. Free for commercial use. Precip %, offline-aware. U.S. only. |
 | ScoutPresenceDecider.kt | Social timing layer. |
 | LlamaEngine.kt | Offline brain JNI wrapper — WORKING. |
@@ -252,8 +275,8 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
-| PeopleDb.kt | People memory — getName(), setName(), isKnown(). Will need BLOB embedding column in Step 3 of face recognition. |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. Filters noisy ML Kit labels. Wired to PeopleDb. |
+| PeopleDb.kt | People memory — getName(), setName(), isKnown(). Will need BLOB embedding column in Step 3 of face recognition. After Steps 2–4 complete, Elijah must be bootstrapped as first known person — no automatic enrollment flow exists yet. Tier 3 test target (Room inMemoryDatabaseBuilder). |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. Filters noisy ML Kit labels. Wired to PeopleDb. Tier 2 test target — rich branching logic (0/1/2/3+ faces, known/unknown, dog, cat, objects, stale data). Testable with lightweight TruthDb + PeopleDb + VoiceBank fakes. |
 | FaceEmbedder.kt | NEW June 15 — loads MobileFaceNet.tflite, returns 192-dim L2-normalized face embedding. NOT YET WIRED INTO CAMERA. |
 | MobileFaceNet.tflite | NEW June 15 — bundled in app/src/main/assets/. MIT licensed. 5.2MB. Input: 112x112 RGB, normalized. Output: 192-dim embedding. |
 | THIRD_PARTY_NOTICES.md | NEW June 15 — MIT attribution for MobileFaceNet. Start of Open Source Credits. |
@@ -443,4 +466,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 16, 2026 | Version 32 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: June 29, 2026 | Version 37 | Single source of truth — upload every session*

@@ -1,22 +1,24 @@
 # Project Scout — Quick Start
-**Last updated: June 16, 2026 | Version 10**
+**Last updated: June 29, 2026 | Version 15**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
 For full technical details, use the Scout Master Summary (v32).
 
 ---
 
-## June 16, 2026 — What Is New:
+## June 29, 2026 — What Is New:
 
-✓ **TinyLlama rambling fix COMPLETE** — offline replies capped at 2 sentences. No more garbled continuations.
-✓ **Self-echo guard COMPLETE** — Scout no longer hears his own TTS voice and treats it as a new question.
-✓ **MainActivity.kt blank line cleanup COMPLETE** — file cleaned throughout.
-✓ **Face recognition foundation COMPLETE (Step 1 of 4)** — MobileFaceNet.tflite bundled in app (MIT licensed, ~5MB). TensorFlow Lite dependency added. FaceEmbedder.kt created but not yet wired in. App behavior unchanged — foundation only.
-✓ **Naming phrases expanded** — "this is Patrick", "I am Patrick", "you see Patrick" now teach Scout a name alongside "my name is Patrick".
-✓ **Weather switched to NWS** — api.weather.gov replaces Open-Meteo. 100% free for commercial use, no API key, no licensing issue. U.S. locations only.
-✓ **THIRD_PARTY_NOTICES.md created** — MIT credit for MobileFaceNet model. Start of Open Source Credits screen.
+✓ **Test coverage analysis complete** — all 34 source files mapped. Zero real test coverage confirmed (only boilerplate placeholder tests exist). Full gap report and priority roadmap created.
+✓ **Tier 1 test targets identified** — TextNormalizer, TeachExtractor, ScoutIntentRouter, ScoutStatusText, VisionLabelFilter / VisionUtils. Pure logic, zero Android dependencies. Write these first with JUnit4 only.
+✓ **Tier 2 test targets identified** — VisionAnswerBuilder, ScoutPresenceDecider, HabitLayer. Testable with lightweight in-process fakes.
+✓ **Tier 3 test targets identified** — TruthDb, PeopleDb, ConversationDb, JournalDb. Room inMemoryDatabaseBuilder. Instrumented tests only.
+✓ **Dead code flagged — TeachExtractor.kt line 131** — regex is unreachable (line 126 always matches first). Flagged for removal.
+✓ **Duplicate filter flagged** — VisionLabelFilter and VisionUtils.keepVisionLabel() do identical work. One should be removed.
+✓ **Missing test dependencies documented** — Mockito-Kotlin, AssertJ, coroutines-test, core-testing listed and ready to add to build.gradle.kts.
+✓ **Structural test blocker confirmed** — MainActivity.kt at 4,114 LOC cannot be unit tested as-is. Documented as post-launch refactor (not a launch blocker).
+✓ **Elijah face bootstrap gap noted** — when face recognition Steps 2–4 are complete, Elijah's face must be bootstrapped manually as Scout's first known person. No automatic enrollment flow exists yet.
 
-*(Previous sessions: Wake word, conversation window, boot window, memory recall, greeting routing, vision cleanup, person counting — all DONE June 12–14)*
+*(Previous: June 16 — NWS weather, THIRD_PARTY_NOTICES.md, face recognition Step 1, naming phrases expanded, TinyLlama rambling fix, self-echo guard. June 12–14 — wake word, conversation window, boot window, memory recall, greeting routing, vision cleanup.)*
 
 ---
 
@@ -80,7 +82,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-■ **Face recognition Steps 2–4 — IN PROGRESS.** Foundation done (Step 1). Still needed: wire FaceEmbedder into camera pipeline (Step 2), update PeopleDb schema for embeddings (Step 3), rewire naming flow (Step 4).
+■ **Face recognition Steps 2–4 — IN PROGRESS.** When complete, Elijah's face must be manually bootstrapped as Scout's first known person — no automatic enrollment flow exists yet.
 ■ **Hardcoded Gemini API key** — Patrick's personal key in MainActivity.kt. Removing in Settings session.
 
 - Fold 7 not tested — all testing on A32 via WiFi. Fold 7 needs dedicated session.
@@ -141,4 +143,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: June 16, 2026 | Version 10 | Upload every session | For full details use Master Summary v32*
+*Project Scout Quick Start | Last updated: June 29, 2026 | Version 15 | Upload every session | For full details use Master Summary v37*

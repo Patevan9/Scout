@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 16, 2026 | Version 4**
+**What Scout needs to be worth $9.99 | Updated June 29, 2026 | Version 9**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -29,6 +29,14 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Face recognition Step 1 — MobileFaceNet.tflite bundled (MIT licensed, ~5MB). FaceEmbedder.kt created. DONE June 15.
 ✓ Naming phrases expanded — "this is X", "I am X", "you see X" recognized as name-teaching phrases. DONE June 15.
 ✓ THIRD_PARTY_NOTICES.md created — start of Open Source Credits. DONE June 15.
+✓ Test coverage analysis complete — all 34 source files mapped. Zero real test coverage confirmed. Full gap report created. DONE June 29.
+✓ Tier 1 test targets identified — TextNormalizer, TeachExtractor, ScoutIntentRouter, ScoutStatusText, VisionLabelFilter / VisionUtils. Pure logic. Zero Android dependencies. JUnit4 only. Write these first. DONE June 29.
+✓ Tier 2 test targets identified — VisionAnswerBuilder, ScoutPresenceDecider, HabitLayer. Testable with lightweight in-process fakes. DONE June 29.
+✓ Tier 3 test targets identified — TruthDb, PeopleDb, ConversationDb, JournalDb. Room inMemoryDatabaseBuilder. Instrumented only. DONE June 29.
+✓ Dead code found in TeachExtractor.kt — line 131 regex is unreachable (line 126 pattern always matches first). Flagged for removal. DONE June 29.
+✓ Duplicate label filter found — VisionLabelFilter object and VisionUtils.keepVisionLabel() do identical work with identical bad-label sets. Flagged for consolidation. DONE June 29.
+✓ Missing test dependencies documented — Mockito-Kotlin, AssertJ, kotlinx-coroutines-test, androidx.arch.core:core-testing listed and added to build plan. DONE June 29.
+✓ Structural test blocker confirmed — MainActivity.kt at 4,114 LOC is primary barrier to unit testing. Extraction plan (CameraService, SpeechService, VisionService) documented. DONE June 29.
 
 ---
 
@@ -152,10 +160,10 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, a brain, memory, weather, a wake word, an onboarding flow, and a real business model. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, a brain, memory, weather, a wake word, an onboarding flow, a real business model, and now a full test coverage analysis with a clear priority roadmap. The gap between today and the Play Store is focused sessions — not months. Every session closes another gap.
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated June 16, 2026 | Version 4 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated June 29, 2026 | Version 9 | For Patrick, Diana, Elijah, and Scout*
