@@ -289,6 +289,21 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 ---
 
+## 7b2. Pending Expert Feedback — Mike Forst (Amazon Astro)
+
+Mike Forst — Amazon Astro character director and sound lead (mikeforst.com). Contacted June 30, 2026. Responded positively. Feedback pending — arriving via email or video call.
+
+Mike is an expert in how robots and AI companions feel trustworthy and present through behavioral design and non-verbal cues.
+
+**When feedback arrives, map his insights to:**
+- `ScoutFaceView.kt` — animation timing and behavioral micro-expressions
+- `ScoutPresenceDecider.kt` — social timing, when Scout speaks vs. stays quiet
+- Scout's identity and response philosophy (section 3 of this summary)
+
+Do not act on this area without his input. His expertise is the right lens for these decisions.
+
+---
+
 ## 7c. Known Issues — Do Not Touch Without Discussion
 
 | Issue | Notes |
