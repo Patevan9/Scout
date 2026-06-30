@@ -2817,13 +2817,12 @@ Respond only with Scout's next short reply.
 
                     lower.contains("family friendly companion") ||
 
-                    lower.contains("family companion robot") ||
-
-                    lower.contains("my name is scout")
+                    lower.contains("family companion robot")
 
         if (badIdentity) {
 
-            return "I'm Scout. I hear you, and I'm here with you."
+            val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+            return "I'm $myName. I hear you, and I'm here with you."
 
         }
 
