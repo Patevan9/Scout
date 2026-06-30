@@ -1,8 +1,19 @@
 # Project Scout — Master Project Summary
-**Last updated: June 29, 2026 | Version 37**
+**Last updated: June 30, 2026 | Version 38**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## June 30, 2026 — What Changed Since Version 37
+
+✓ **Dynamic robot name — all spoken responses fixed** — Boot greeting, identity feelings reply, identity fallback, and offline brain fallback reply all now read the robot name from TruthDb at runtime (`truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"`). Renaming Scout in Settings is now fully reflected in every spoken line. No more hardcoded "Scout" in any spoken response. DONE June 30.
+✓ **TeachExtractor.kt — 8 new teaching patterns** — "that person is my son/wife [name]", "that is my son/wife [name]", "his name is [name]", "her name is [name]", "that is [name]", "that person is [name]" all now recognized and stored. Root cause of "I see one person" after teaching a family member's face — TeachExtractor returned null → fell to Gemini → Gemini said "I'll remember" but stored nothing. DONE June 30.
+✓ **VisionAnswerBuilder freshness extended 1800ms → 3500ms** — Camera is blocked during TTS (`isThinking || isSpeaking` gate). If Scout speaks for more than 1.8s before Patrick asks "what do you see?", face data was stale → "VISION_STALE" or "I see one person." 3500ms covers most TTS utterances. DONE June 30.
+✓ **registerFamilyMemberFace() guard** — If the largest face's position-hash already carries a DIFFERENT person's name (i.e. primary user recognized by position but below embedding threshold), the incoming name is stored in `pendingFaceIntroName` instead of overwriting. Prevents the A32 misidentification where Scout called Patrick "Elijah." DONE June 30.
+✓ **TinyLlama filter additions** — "family friendly companion" and "family companion robot" added to bad-response filter in `cleanOfflineReply()`. Stops TinyLlama from saying "and my name is Scout, a family friendly companion." DONE June 30.
+✓ **Pet Mode design locked** — Nicolas Protocol renamed to Pet Mode. Covers ALL animals (dog, cat, bird, rabbit, etc.). When a pet first appears in frame: if pet name is stored in TruthDb → Scout says "Hello [name]." softly. If no name stored → Scout says "Well... hello there little one. I hope someone will tell me your name soon." Once per appearance (2-minute cooldown). Scout continues operating normally after the greeting — does NOT go silent. Future robot body: steer-around Bluetooth command when Scout is mobile. NOT YET CODED — design locked, implementation next.
 
 ---
 
@@ -98,7 +109,7 @@ Patrick Lippy — developer, project owner, creator of Scout. Not a professional
 
 - Diana: Patrick's wife
 - Elijah: Patrick's son, age 9. Scout's biggest fan. Has drawn pictures of Scout.
-- Nicolas: The family dog. The Nicolas Protocol: Scout stops immediately when the dog is detected.
+- Nicolas: The family dog. Elijah has drawn pictures of Scout. Nicolas is why Pet Mode exists.
 
 **Names must NEVER be hardcoded in Scout's code. Always use variables.**
 
@@ -172,8 +183,9 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 | Reflective | Wisdom | LLM read-only | Not yet |
 
 - Sovereign Rules: SQLite Truth always overrules everything.
-- Nicolas Protocol: dog detection → immediate stop.
-- Guest Mode: unknown face → 'Hello, I am Scout. What is your name?'
+- Pet Mode: any animal detected → Scout greets softly by name (or "Well... hello there little one. I hope someone will tell me your name soon." if unnamed). Scout continues operating normally. Future: steer-around Bluetooth command when mobile.
+- Privacy Gate: Gemini receives anonymized text only. (Planned — not yet implemented.)
+- Guest Mode: unknown face → 'Hello, I am [name]. What is your name?' (Planned — not yet implemented.)
 - Flexible Memory: Scout stores and recalls ANY fact.
 
 ---
@@ -313,6 +325,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 - June 27: Wrong-name teaching bug fixed (2-person frame guard in handleTeaching). ML Kit label blacklist replaced with OBJECT_WHITELIST in VisionAnswerBuilder (~80 household objects). lastKnownFaceName now set immediately after name teaching (not 2s later). finishThinking() fixed — was empty no-op causing permanent stuck-thinking when Gemini blocked. Testing listed as moved to Fold 7.
 - June 28: TinyLlama re-enabled — 90s delayed load, 800MB RAM guard, nCtx=512, nThreads=2. tryLoadOfflineBrain() helper added (startup + on-demand path). Gemini timeouts reduced (10s connect / 20s read). onFailed/onAnswered callbacks added to tryGemini(). tryTinyLlamaOrFallback() extracted — TinyLlama now automatic Gemini fallback. "Repeat that" intent added (isRepeatRequest(), lastMeaningfulResponse cache, 4-min TTL). Brain source Toast added ("Gemini (online)" / "TinyLlama (offline)"). Gemini default fixed (isGeminiEnabled() was always false). Daily quota cooldown reduced 6h→1h. Face greeting reset removed — greets once per boot only. STT improved: EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. Duplicate prompt now serves cached Gemini reply. speakUnavailableIfNeeded() made public. Testing confirmed on A32.
 - June 29: Launcher icon fixed — face 68% of canvas, all 5 mipmap densities regenerated, eyes inside circular mask. Face threshold raised 0.75→0.82 (Patrick/Elijah genetic similarity fix). "Scout, forget [name]" voice command added (clears people + person_embeddings). TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Voice slider now sticks — scout_prefs in both SettingsActivity and MainActivity.onResume(). Greeting words blocked from name storage (hello/hi/hey/howdy/greetings/sup/yo). Gemini maxOutputTokens raised 250→600, "Always end on a complete sentence" added to system prompt, MAX_TOKENS boundary trim. Gemini quota announced — speakUnavailableIfNeeded() returns Boolean, cooldown check at top of tryTinyLlamaOrFallback(). Secondary face recognition — PeopleDb v3 with person_embeddings table, addNamedEmbedding(), findBestMatchName(); secondFace embedded in same executor job, lastSecondaryFaceName (@Volatile); VisionAnswerBuilder uses secondaryFaceName.
+- June 30: Dynamic robot name — boot greeting, identity feelings reply, identity fallback, offline brain fallback all read from TruthDb. No hardcoded "Scout" in any spoken response. TeachExtractor.kt: 8 new patterns for "that is my son/wife", "that person is my son/wife", "that is [name]", "that person is [name]", "his name is", "her name is". VisionAnswerBuilder freshness 1800ms→3500ms (camera blocked during TTS). registerFamilyMemberFace() guard prevents overwriting a known face hash with a wrong name. TinyLlama filter: "family friendly companion" + "family companion robot" added. Pet Mode design locked: any animal → soft greeting using stored name or "Well... hello there little one. I hope someone will tell me your name soon." Scout continues normally after greeting. Nicolas Protocol renamed Pet Mode (covers all animals). Settings Architecture and Visual Elements specs restored to summary. Summary updated to version 38.
 
 ---
 
@@ -365,6 +378,26 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 ## 10. Scout Animation Goal & Mood System
 
+### Visual Elements (ScoutFaceView)
+- Background: dark blue-charcoal #1E2B38 (finalized May 18, 2026)
+- Virtual canvas: 1920×1080
+- Eyes: large ovals, deep blue iris with 28 spoke rays, biased inward 20f toward nose
+- Mouth: minimal subtle curve
+- Brows: thin and subtle — floating sticker feeling reduced but still readable. Still being refined.
+- Wave bars: 22 diamond shapes, teal #00FFD0, visible during listening and speaking
+- Idle listening dots: 3 teal pulsing dots when quiet
+
+**Animation tone:** Subtle human animation. Soft emotional transitions. Calm organic motion. Believable presence.
+NOT: Pixar-style exaggeration. Cartoon expressions. Hyperactive motion. Fake emotion.
+
+**Design goal:** An AI face with gentle gaze drift, very subtle mouth, and soft thin brows that integrate naturally with the face. Scout is closer to this target than the early versions; brow integration is the largest remaining visual gap.
+
+**Keep forever:** blue iris, white sclera, cartoon style.
+**Never add:** tear ducts, skin folds, eyelashes, realistic anatomy.
+**Design principle:** 'Scout stays Scout. He just gets a little more alive.'
+
+### Mood States
+
 Scout's face should feel alive and emotionally present, but always calm. Never perfectly still.
 
 - CALM — Eyes center, brows neutral, subtle smile (0.15). Scout's default.
@@ -383,6 +416,51 @@ Scout's face should feel alive and emotionally present, but always calm. Never p
 - Keep forever: blue iris, white sclera, cartoon style.
 - Never add: tear ducts, skin folds, eyelashes, realistic anatomy.
 - Design principle: 'Scout stays Scout. He just gets a little more alive.'
+
+---
+
+## 10b. Settings Architecture
+
+The Settings screen is the user's control center for Scout. Defaults are calm and safe — users opt in to more capability rather than opt out.
+
+**10b.1 Identity & Voice**
+- Robot Name — default "Scout", users can rename. All spoken responses use the stored name dynamically.
+- Voice pitch slider
+- Voice speed slider
+- Future voice tone options
+
+**10b.2 Brain & Behavior**
+- Offline Mode (default ON) — Scout uses TinyLlama by default
+- Online Brain Helper — toggle Gemini or a larger local model
+- API key entry — user's own free Gemini key, never bundled with the app
+- Kid Safe Filter
+- Pet Mode — Scout greets pets softly. Future: physical steer-around on robot body.
+- Presence Mode (default ON) — Scout actively listens in the room
+- Allow Spontaneous Comments
+- Privacy Mode toggle
+
+**10b.3 Builder's Workbench**
+- Enable Hardware Mode (off by default)
+- Bluetooth pairing — for KEYESTUDIO Mini Tank Kit V2 chassis
+- Future motor controls
+
+**10b.4 Privacy & Data**
+- Memory Export — back up TruthDb and habits
+- Memory Import
+- Reset Memory Layers — selective reset
+- Camera controls
+- Voice camera commands
+
+**10b.5 Extras & Support**
+- Cosmetics (Backpack) — visual customization
+- Support Scout (in-app, optional — see section 5)
+- About & Licenses
+
+**10b.6 Connected Services (Future — All Opt-In)**
+- Calendar access — add, remove, and announce events. Uses Android Calendar Provider. No external API needed.
+- Phone call awareness — Scout announces caller name then steps aside. Normal call behavior untouched.
+- Gmail access — read emails and compose when asked. Requires Google OAuth. Planned for a later phase.
+- Design principle: Scout announces and helps, but never interferes.
 
 ---
 
@@ -552,4 +630,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 29, 2026 | Version 37 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: June 30, 2026 | Version 38 | Single source of truth — upload every session*
