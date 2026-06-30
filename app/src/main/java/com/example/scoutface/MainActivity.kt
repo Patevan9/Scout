@@ -2813,7 +2813,13 @@ Respond only with Scout's next short reply.
 
                     lower.contains("i do not have the ability to see") ||
 
-                    lower.contains("i don't have the ability to see")
+                    lower.contains("i don't have the ability to see") ||
+
+                    lower.contains("family friendly companion") ||
+
+                    lower.contains("family companion robot") ||
+
+                    lower.contains("my name is scout")
 
         if (badIdentity) {
 
@@ -3320,6 +3326,13 @@ Respond only with Scout's next short reply.
         if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
             // Largest face is a different known person — set pending.
             // Next time an unknown face is the primary face, it gets this name.
+            pendingFaceIntroName = name
+            return false
+        }
+        // Face hash already carries a different name (e.g. primary user recognized
+        // by position but below embedding threshold). Don't overwrite their name.
+        val hashName = peopleDb.getName(faceHash)
+        if (!hashName.isNullOrBlank() && !hashName.equals(name, ignoreCase = true)) {
             pendingFaceIntroName = name
             return false
         }

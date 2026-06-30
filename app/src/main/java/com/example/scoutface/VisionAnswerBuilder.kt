@@ -193,8 +193,8 @@ class VisionAnswerBuilder(
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
 
-        val faceFresh = lastFaceUpdatedMs != 0L && faceAgeMs <= 1800L
-        val labelFresh = lastSceneUpdatedMs != 0L && labelAgeMs <= 1800L
+        val faceFresh = lastFaceUpdatedMs != 0L && faceAgeMs <= 3500L
+        val labelFresh = lastSceneUpdatedMs != 0L && labelAgeMs <= 3500L
 
         if (!faceFresh && !labelFresh) return voice.say("VISION_STALE")
 

@@ -65,6 +65,24 @@ object TeachExtractor {
             if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
         }
 
+        // "his name is X" / "her name is X" — pointing at someone
+        Regex("""\bhis name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bher name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+
+        // "that is X" / "that person is X" — broad pointing phrases (checked before son/wife specifics)
+        Regex("""\bthat is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+        Regex("""\bthat person is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+
         // -------------------------
         // WIFE
         // -------------------------
@@ -75,6 +93,12 @@ object TeachExtractor {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my wife ([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
 
@@ -88,6 +112,12 @@ object TeachExtractor {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my son ([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my son[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my son[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
 
