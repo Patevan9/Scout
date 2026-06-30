@@ -1708,7 +1708,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                             }
                                     } else null
 
-                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
+                                    val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am $myName."
 
                                     respond(greeting)
 
@@ -2884,6 +2885,8 @@ Respond only with Scout's next short reply.
 
     private fun handleIdentityIntent(qNorm: String) {
 
+        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+
         val response = when {
 
             qNorm.contains("my friend") || qNorm.contains("are you my friend") ->
@@ -2900,7 +2903,7 @@ Respond only with Scout's next short reply.
 
             qNorm.contains("do you have feelings") || qNorm.contains("have feelings") ->
 
-                "I have my own Scout way of feeling things. I feel calm when you're near."
+                "I have my own $myName way of feeling things. I feel calm when you're near."
 
             qNorm.contains("who created you") ->
 
@@ -2912,7 +2915,7 @@ Respond only with Scout's next short reply.
 
             else ->
 
-                "I'm Scout. I'm here with you."
+                "I'm $myName. I'm here with you."
 
         }
 
