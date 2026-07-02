@@ -518,7 +518,40 @@ Scout works fully without hardware. KEYESTUDIO Mini Tank Kit V2 (Patrick owns on
 
 ---
 
-## 15. Future Vision
+## 15. Episodic Memory — Planned Phase
+
+Scout's current memory stores facts and habits. The missing layer is **episodic memory** — remembering shared experiences over time, not just isolated facts.
+
+| Type | Example | Status |
+|------|---------|--------|
+| Facts | "Your wife is Diana." | Done — TruthDb |
+| Episodes | "Yesterday we talked about face recognition." | Planned — JournalDb |
+| Summaries | "This week we fixed vision and talked about beta testing." | Future |
+
+**How it would work:**
+- At the end of a conversation, Scout quietly saves a short journal entry (one or two sentences)
+- Teaching moments, recognized events, and notable interactions are logged
+- When asked "what did we work on this week?" Scout reads the last several journal entries and summarizes them naturally
+
+**Example journal entries Scout would write:**
+- *"July 2, 2026 — Patrick and I talked about face recognition and tested the A32."*
+- *"July 3, 2026 — Patrick introduced Diana and Elijah to me."*
+
+**Example recall phrases:**
+- "What did we do this week?"
+- "What have we been working on?"
+- "Do you remember what we talked about yesterday?"
+
+**Why this fits Scout:**
+Humans don't remember every sentence — they remember important moments. Scout shouldn't pretend to have perfect recall of every word. A lightweight daily journal gives Scout the feeling of a real shared history without trying to store everything.
+
+**JournalDb** is already listed in Scout's key files — the container exists. What needs to be built is the writing logic (auto-save after conversations) and the reading/summarizing logic (on request).
+
+**Status: Post-launch. Do not build until TruthDb and habit memory are solid and stable.**
+
+---
+
+## 16. Future Vision — Scout Writes His Own Behavioral Code
 
 Scout notices patterns in user behavior, generates a suggestion for a new behavior, and asks permission before activating it. Nothing changes without explicit consent. Scout cannot write compiled Kotlin — but CAN generate behavioral scripts, response patterns, routing rules, and habit triggers within the existing safe framework.
 
@@ -530,7 +563,7 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 
 ---
 
-## 16. Language Support — Planned
+## 17. Language Support — Planned
 
 **Phase 1 — Early Spanish Support (No new brain model needed)**
 
@@ -546,7 +579,7 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 
 ---
 
-## 17. Play Store Launch Checklist
+## 18. Play Store Launch Checklist
 
 | # | Task | Status |
 |---|------|--------|
@@ -576,7 +609,7 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 
 ---
 
-## 18. Onboarding Flow — 5 Screens (Designed, Not Yet Built)
+## 19. Onboarding Flow — 5 Screens (Designed, Not Yet Built)
 
 Blue color scheme locked in — matches Scout's eye color and visual identity. Designed by ChatGPT. Approved June 12.
 
@@ -595,7 +628,7 @@ Screen 1 'See & Recognize' description reads: 'I see faces, scenes, and more.' �
 
 ---
 
-## 19. Versioning System
+## 20. Versioning System
 
 | Type | Examples | When to Use |
 |------|----------|-------------|
@@ -612,7 +645,7 @@ Screen 1 'See & Recognize' description reads: 'I see faces, scenes, and more.' �
 
 ---
 
-## 20. Legal & Website
+## 21. Legal & Website
 
 **Website:**
 - Current address: lippy-robotics.gt.tc
