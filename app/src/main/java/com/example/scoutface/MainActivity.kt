@@ -1632,7 +1632,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     } else null
 
                                     val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am $myName."
+                                    val greeting = if (greetName != null) "I see $greetName." else "Hello. I am $myName."
 
                                     respond(greeting)
 
