@@ -572,7 +572,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             hasApiKey = { apiKey.trim().isNotBlank() },
 
-            hasValidatedInternet = { connectivityManager.hasValidatedInternet() }
+            hasValidatedInternet = { connectivityManager.hasValidatedInternet() },
+
+            lastLlamaLoadMs = { scoutPrefs.getLong("llama_last_load_ms", Long.MAX_VALUE) }
 
         )
 
@@ -879,11 +881,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
 
+        val llamaLoadStart = System.currentTimeMillis()
         // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
         // uses 2 conversation turns, so 512 tokens is more than enough.
         LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+            val loadMs = System.currentTimeMillis() - llamaLoadStart
+            scoutPrefs.edit().putLong("llama_last_load_ms", loadMs).apply()
             android.util.Log.i("ScoutBrain",
-                if (success) "Offline brain ready" else "Offline brain load failed")
+                if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
         }
 
     }

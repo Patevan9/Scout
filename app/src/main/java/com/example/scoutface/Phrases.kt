@@ -36,6 +36,15 @@ object Phrases {
         "Good to be back. Online mode is on."
     )
 
+    // Used when the last TinyLlama load was fast (< 2 s) — skip the warming-up line.
+    val BOOT_OFFLINE_FAST = listOf(
+        "Hey there! Good to see you again.",
+        "Hi! I'm up and ready.",
+        "Hey. Good to be back.",
+        "Hello! Ready when you are.",
+        "Hi there! I'm awake and ready to go."
+    )
+
     val BOOT_OFFLINE = listOf(
         "Hey there! Give my offline brain a few seconds to wake up.",
         "Good to see you! Just warming up my offline brain.",
