@@ -3001,7 +3001,7 @@ Respond only with Scout's next short reply.
 
             IntentType.HOW_ARE_YOU -> handleVoiceBankIntent("HOW_ARE_YOU")
 
-            IntentType.GOODBYE -> respond("Okay. I’ll see you later.")
+            IntentType.GOODBYE -> respond(Phrases.pick("goodbye", Phrases.GOODBYE))
 
             IntentType.PRAISE -> handleVoiceBankIntent("PRAISE")
 
@@ -3103,7 +3103,7 @@ Respond only with Scout's next short reply.
                     (lastFaceCount >= 2 || !isExplicitPhrase)) {
                     val registered = registerFamilyMemberFace(value)
                     if (registered) lastKnownFaceName = value
-                    respond("Okay. I’ll remember $value.")
+                    respond(Phrases.pickNamed("remember_name", Phrases.REMEMBER_NAME, value))
                     return true
                 }
                 truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
@@ -3119,7 +3119,7 @@ Respond only with Scout's next short reply.
                 }
                 if (embedding != null) peopleDb.addNamedEmbedding(value, embedding)
                 lastKnownFaceName = value
-                respond("Okay. I’ll remember your name is $value.")
+                respond(Phrases.pickNamed("remember_my_name", Phrases.REMEMBER_MY_NAME, value))
                 return true
             }
 
@@ -3135,13 +3135,13 @@ Respond only with Scout's next short reply.
 
             val out = when (factKey) {
 
-                FactKey.WIFE_NAME -> "Okay. I’ll remember your wife’s name is $value."
+                FactKey.WIFE_NAME -> Phrases.pickNamed("remember_wife", Phrases.REMEMBER_WIFE, value)
 
-                FactKey.SON_NAME -> "Okay. I’ll remember your son’s name is $value."
+                FactKey.SON_NAME -> Phrases.pickNamed("remember_son", Phrases.REMEMBER_SON, value)
 
-                FactKey.DOG_NAME -> "Okay. I’ll remember your dog’s name is $value."
+                FactKey.DOG_NAME -> Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value)
 
-                else -> "Okay. I’ll remember that."
+                else -> Phrases.pick("remember", Phrases.REMEMBER)
 
             }
 
