@@ -1580,10 +1580,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         }
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
-                                                            // Use slightly lower threshold for secondary crop — smaller, lower quality
-                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.73f)
+                                                            var secName = peopleDb.findBestMatchName(emb2, threshold = 0.55f)
+                                                            if (secName == null && pendingFaceIntroName != null) {
+                                                                // Introduction was given while primary face was someone else —
+                                                                // this unknown secondary face is who was being introduced.
+                                                                secName = pendingFaceIntroName
+                                                                peopleDb.addNamedEmbedding(secName!!, emb2)
+                                                                pendingFaceIntroName = null
+                                                            } else if (secName != null) {
+                                                                peopleDb.addNamedEmbedding(secName, emb2)
+                                                            }
                                                             lastSecondaryFaceName = secName
-                                                            if (secName != null) peopleDb.addNamedEmbedding(secName, emb2)
                                                             Log.d("ScoutFace", "Secondary face: name=$secName")
                                                         } finally {
                                                             if (fb2 !== sc2) sc2.recycle()
