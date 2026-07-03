@@ -13,10 +13,13 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.abs
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -29,6 +32,8 @@ class SettingsActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private val previewHandler = Handler(Looper.getMainLooper())
     private var previewRunnable: Runnable? = null
+
+    private lateinit var swipeDetector: GestureDetector
 
     private val BG           = Color.parseColor("#0D1728")
     private val CARD         = Color.parseColor("#19293F")
@@ -64,7 +69,30 @@ class SettingsActivity : AppCompatActivity() {
         container  = FrameLayout(this).apply { setBackgroundColor(BG) }
         setContentView(container)
         tts = TextToSpeech(this) { /* init silent — ready by the time the user touches sliders */ }
+
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vX: Float, vY: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: return false)
+                if (dx < -160f && vX < -400f && abs(vY) < abs(vX)) {
+                    finish()
+                    return true
+                }
+                return false
+            }
+        })
+
         push(S_MAIN)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipeDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun finish() {
+        super.finish()
+        overridePendingTransition(R.anim.stay_still, R.anim.slide_out_to_left)
     }
 
     override fun onDestroy() {
@@ -93,8 +121,7 @@ class SettingsActivity : AppCompatActivity() {
             screenStack.removeLast()
             show(screenStack.last())
         } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
+            finish()
         }
     }
 
@@ -166,6 +193,14 @@ class SettingsActivity : AppCompatActivity() {
             sliderRow("🎵", "Voice Pitch", "Adjust how high or low Scout's voice sounds", "voice_pitch", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
             sliderRow("⚡", "Voice Speed", "Adjust how fast or slow Scout speaks", "voice_speed", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
             resetVoiceRow()
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("ACCESSIBILITY"))
+        body.addView(cardGroup(
+            toggleRow("Closed Captions", "Show Scout's words as text at the bottom of the screen",
+                scoutPrefs.getBoolean("closed_captions", false)
+            ) { on -> scoutPrefs.edit().putBoolean("closed_captions", on).apply() }
         ))
 
         body.addView(cardSpacer())

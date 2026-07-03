@@ -30,4 +30,23 @@
         android:clickable="false"
         android:importantForAccessibility="no" />
 
+    <!-- Closed captions for hearing impaired (toggled in Settings) -->
+    <TextView
+        android:id="@+id/captionsText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:background="#CC000000"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:gravity="center"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="14dp"
+        android:lineSpacingMultiplier="1.25"
+        android:visibility="gone"
+        android:importantForAccessibility="yes"
+        android:contentDescription="Scout caption" />
+
 </FrameLayout>

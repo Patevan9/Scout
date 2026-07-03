@@ -410,6 +410,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var swipeDetector: GestureDetector
 
+    private lateinit var captionsText: android.widget.TextView
+
+    private var captionsEnabled = false
+
+    private val captionHideRunnable = Runnable {
+        captionsText.visibility = View.GONE
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     // =======================
@@ -578,6 +586,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
         tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
+        captionsEnabled = scoutPrefs.getBoolean("closed_captions", false)
+
         resumeSystems()
 
     }
@@ -700,6 +710,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         viewFinder = findViewById(R.id.viewFinder)
 
+        captionsText = findViewById(R.id.captionsText)
+
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
 
             override fun onDown(e: MotionEvent): Boolean = true
@@ -711,6 +723,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (dx > 160f && vX > 400f && abs(vY) < abs(vX)) {
 
                     startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                    overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
 
                     return true
 
@@ -2272,6 +2285,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     faceView.setThinking(false)
 
+                    if (captionsEnabled) {
+                        handler.postDelayed(captionHideRunnable, 2500L)
+                    }
+
                     val now = System.currentTimeMillis()
 
                     lastSpeechDoneMs = now
@@ -2336,6 +2353,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speakingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(false)
+
+        if (captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.text = text
+            captionsText.visibility = View.VISIBLE
+        }
 
         stopListeningSafe()
 
@@ -2909,7 +2932,10 @@ Respond only with Scout's next short reply.
 
             respond("Opening settings!")
 
-            handler.postDelayed({ startActivity(Intent(this, SettingsActivity::class.java)) }, 600L)
+            handler.postDelayed({
+                startActivity(Intent(this, SettingsActivity::class.java))
+                overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+            }, 600L)
 
             return
 
