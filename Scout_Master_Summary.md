@@ -1,8 +1,26 @@
 # Project Scout — Master Project Summary
-**Last updated: June 30, 2026 | Version 38**
+**Last updated: July 3, 2026 | Version 39**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 3, 2026 — What Changed Since Version 38
+
+✓ **ArcFace face recognition upgrade** — MobileFaceNet (192-dim) replaced with InsightFace MobileFaceNet trained with ArcFace Additive Angular Margin Loss (512-dim, 4.8MB). Input: 112×112 RGB, preprocessing `(px - 127.5f) / 128f` unchanged. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, output array `Array(1) { FloatArray(512) }`, input buffer single-batch (removed the repeat(2) loop). PeopleDb upgraded to v4; migration clears incompatible 192-dim embeddings (preserves names and face hashes — everyone re-introduces once). New cosine similarity threshold: 0.60f (ArcFace same-person range ~0.5–0.95, different-person ~0.0–0.4; 0.40f caused "everyone is Patrick" false positives). DONE July 3.
+
+✓ **"I see you, X" → "I see X"** — VisionAnswerBuilder and MainActivity greeting path both updated. Scout now says "I see Patrick" and "I see Patrick and Diana" instead of "I can see you, Patrick." Sounds like a description, not an address — better match for what Patrick wanted. DONE July 3.
+
+✓ **Diana (secondary face) fix** — Secondary face processing block now also consumes `pendingFaceIntroName`. Previously, introducing "this is my wife Diana" with two people in frame stored the pending name but the secondary face block never checked it — Diana was always "someone else." Fixed: if secondary face embedding doesn't match anyone AND `pendingFaceIntroName` is set, the pending name is assigned to the secondary face and stored via `addNamedEmbedding()`. DONE July 3.
+
+✓ **Personality phrase pools — Phrases.kt (new file)** — New `Phrases` object with anti-repeat rolling window (cooldown = pool.size / 2; chosen phrase blocked until half the pool has been used). Scout no longer repeats the same line back-to-back. Pools: BOOT_ONLINE (6), BOOT_OFFLINE_FAST (5), BOOT_OFFLINE (6), BOOT_NO_INTERNET (4), BOOT_NO_KEY (3), REMEMBER (9), REMEMBER_NAME (6), REMEMBER_MY_NAME (5), REMEMBER_WIFE (5), REMEMBER_SON (5), REMEMBER_DOG (4), GOODBYE (7). `{name}` placeholder substituted via `pickNamed()`. DONE July 3.
+
+✓ **Adaptive boot greeting — ScoutBootStatus.kt rewritten** — Offline boot greeting is now adaptive: if TinyLlama loaded in under 2 seconds last session (`llama_last_load_ms` in SharedPreferences), Scout picks from BOOT_OFFLINE_FAST (skips warming-up line). Otherwise picks from BOOT_OFFLINE (includes warming-up). TinyLlama load time measured and stored in SharedPreferences inside `tryLoadOfflineBrain()`. ScoutBootStatus now takes a `lastLlamaLoadMs: () -> Long` lambda (default Long.MAX_VALUE). DONE July 3.
+
+✓ **Online boot phrases mention offline backup warming up** — All 6 BOOT_ONLINE phrases now include a line about the offline backup warming up in the background (e.g., "Online mode is on. My offline backup is warming up in the background."). Previously said nothing about warming up when online. DONE July 3.
+
+✓ **Goodbye and Remember responses now varied** — `respond("Okay. I'll see you later.")` replaced with `Phrases.pick("goodbye", Phrases.GOODBYE)`. All remember confirmation responses replaced with Phrases pool calls. Scout no longer says the same goodbye or confirmation line every session. DONE July 3.
 
 ---
 
@@ -201,11 +219,14 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ STT reliability improved — EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. June 28.
 ✓ Camera — face detection (ML Kit), scene labeling — throttled to ~7fps June 21 (memory pressure fix)
 ✓ Launcher icon fixed — face 68% of canvas, all 5 mipmap densities. Eyes fully inside circular mask. June 29.
-✓ Face recognition COMPLETE and RELIABLE — embedding pipeline wired into camera, PeopleDb v3 stores BLOB embeddings with cosine similarity (threshold 0.82, raised June 29), `findBestMatch` scans only named rows, embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match bug fixed June 21). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
-✓ Secondary face recognition — second-largest face also embedded in same executor job. person_embeddings table (up to 5 per person, threshold 0.80). lastSecondaryFaceName (@Volatile). VisionAnswerBuilder uses it. June 29.
+✓ Face recognition COMPLETE and RELIABLE — ArcFace upgrade July 3: InsightFace MobileFaceNet (512-dim, 4.8MB) replaces old 192-dim model. PeopleDb v4. Cosine threshold 0.60f (ArcFace scale: same-person ~0.5–0.95, different-person ~0.0–0.4). findBestMatch scans only named rows. embedExecutor runs findBestMatch BEFORE storeEmbedding (self-match fix). Known face recognized consistently. Unknown face → Guest Mode. Nicolas Protocol active.
+✓ Secondary face recognition — second-largest face also embedded in same executor job. person_embeddings table (up to 12 per person, threshold 0.55f for secondary crops). lastSecondaryFaceName (@Volatile). VisionAnswerBuilder uses it. June 29 / Diana fix July 3.
+✓ Diana (secondary face) fix — pendingFaceIntroName now checked in secondary face block. "This is my wife Diana" with two people in frame now correctly assigns Diana to the secondary face. July 3.
 ✓ "Scout, forget [name]" command — wipes people table + person_embeddings table for that name. June 29.
-✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21.
-✓ VisionAnswerBuilder two-person response — "I can see you, Patrick and Elijah" when both faces known; "I can see you, Patrick and someone else" when secondary unrecognized. June 21 / updated June 29.
+✓ Multi-person face introduction — "this is my son Elijah" / "this is my wife Diana" registers family member faces in PeopleDb. Pending face mechanism handles two-person-in-frame introductions. June 21 / fixed July 3.
+✓ VisionAnswerBuilder two-person response — "I see Patrick and Elijah" when both faces known; "I see Patrick and someone else" when secondary unrecognized. "I see X" phrasing (not "I see you, X") as of July 3.
+✓ Personality phrase pools — Phrases.kt (new July 3). Anti-repeat rolling window (cooldown = pool.size / 2). Varied boot, goodbye, and remember responses. pickNamed() substitutes {name} placeholder.
+✓ Adaptive boot greeting — ScoutBootStatus.kt rewritten July 3. Offline boot: BOOT_OFFLINE_FAST (no warming-up line) when TinyLlama loaded < 2s last session; BOOT_OFFLINE otherwise. TinyLlama load time stored in SharedPreferences. Online boot: BOOT_ONLINE (all 6 phrases mention offline backup warming up).
 ✓ Face greeting fires once per launch — greetedThisSession reset removed. June 28.
 ✓ Wrong-name teaching with 2 people in frame fixed — handleTeaching() guard prevents "this is my wife Diana" being stored as primary user rename. June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder.kt. ~80 household objects. Garbage labels gone. June 27.
@@ -341,6 +362,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 - June 28: TinyLlama re-enabled — 90s delayed load, 800MB RAM guard, nCtx=512, nThreads=2. tryLoadOfflineBrain() helper added (startup + on-demand path). Gemini timeouts reduced (10s connect / 20s read). onFailed/onAnswered callbacks added to tryGemini(). tryTinyLlamaOrFallback() extracted — TinyLlama now automatic Gemini fallback. "Repeat that" intent added (isRepeatRequest(), lastMeaningfulResponse cache, 4-min TTL). Brain source Toast added ("Gemini (online)" / "TinyLlama (offline)"). Gemini default fixed (isGeminiEnabled() was always false). Daily quota cooldown reduced 6h→1h. Face greeting reset removed — greets once per boot only. STT improved: EXTRA_PREFER_OFFLINE, 10s silence window, ERROR_RECOGNIZER_BUSY 600ms delay. Duplicate prompt now serves cached Gemini reply. speakUnavailableIfNeeded() made public. Testing confirmed on A32.
 - June 29: Launcher icon fixed — face 68% of canvas, all 5 mipmap densities regenerated, eyes inside circular mask. Face threshold raised 0.75→0.82 (Patrick/Elijah genetic similarity fix). "Scout, forget [name]" voice command added (clears people + person_embeddings). TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Voice slider now sticks — scout_prefs in both SettingsActivity and MainActivity.onResume(). Greeting words blocked from name storage (hello/hi/hey/howdy/greetings/sup/yo). Gemini maxOutputTokens raised 250→600, "Always end on a complete sentence" added to system prompt, MAX_TOKENS boundary trim. Gemini quota announced — speakUnavailableIfNeeded() returns Boolean, cooldown check at top of tryTinyLlamaOrFallback(). Secondary face recognition — PeopleDb v3 with person_embeddings table, addNamedEmbedding(), findBestMatchName(); secondFace embedded in same executor job, lastSecondaryFaceName (@Volatile); VisionAnswerBuilder uses secondaryFaceName.
 - June 30: Dynamic robot name — boot greeting, identity feelings reply, identity fallback, offline brain fallback all read from TruthDb. No hardcoded "Scout" in any spoken response. TeachExtractor.kt: 8 new patterns for "that is my son/wife", "that person is my son/wife", "that is [name]", "that person is [name]", "his name is", "her name is". VisionAnswerBuilder freshness 1800ms→3500ms (camera blocked during TTS). registerFamilyMemberFace() guard prevents overwriting a known face hash with a wrong name. TinyLlama filter: "family friendly companion" + "family companion robot" added. Pet Mode design locked: any animal → soft greeting using stored name or "Well... hello there little one. I hope someone will tell me your name soon." Scout continues normally after greeting. Nicolas Protocol renamed Pet Mode (covers all animals). Settings Architecture and Visual Elements specs restored to summary. Summary updated to version 38.
+- July 3: ArcFace upgrade — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces 192-dim model. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, single-batch output. PeopleDb v4: migration clears 192-dim embeddings, preserves names/hashes, threshold 0.60f. "I see X" phrasing replaces "I can see you, X" throughout VisionAnswerBuilder and MainActivity. Diana fix — secondary face block now consumes pendingFaceIntroName. Phrases.kt new file: anti-repeat phrase pools for boot, goodbye, and all remember responses. ScoutBootStatus.kt rewritten: uses Phrases pools, adaptive BOOT_OFFLINE_FAST (< 2s load) vs BOOT_OFFLINE. BOOT_ONLINE phrases all mention offline backup warming up. TinyLlama load time measured and stored in SharedPreferences. Goodbye and remember responses now varied via Phrases pools. Summary updated to version 39.
 
 ---
 
@@ -383,10 +405,12 @@ Do not act on this area without his input. His expertise is the right lens for t
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
-| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). Threshold 0.82 (raised June 29). DB version 3 June 29: person_embeddings table added (addNamedEmbedding(), findBestMatchName(), forgetPerson() also clears it). Up to 5 embeddings per person. |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 uses both knownFaceName and secondaryFaceName (June 29). |
-| FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. Loads MobileFaceNet.tflite, returns 192-dim L2-normalized face embedding. |
-| MobileFaceNet.tflite | Bundled in app/src/main/assets/. MIT licensed. 5.2MB. Input: 112x112 RGB, normalized. Output: 192-dim embedding. |
+| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). DB version 4 July 3: migration clears 192-dim embeddings (preserves names/hashes), threshold 0.60f (ArcFace scale). person_embeddings table (addNamedEmbedding(), findBestMatchName(), forgetPerson()). Up to 12 embeddings per person. Secondary crop threshold 0.55f. |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 uses both knownFaceName and secondaryFaceName. "I see X" phrasing (not "I see you, X") as of July 3. |
+| FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. ArcFace upgrade July 3: loads InsightFace MobileFaceNet.tflite (512-dim), EMBEDDING_SIZE=512, single-batch output Array(1){FloatArray(512)}, single-pass buffer fill. Preprocessing unchanged: (px - 127.5f) / 128f. Returns L2-normalized 512-dim embedding. |
+| MobileFaceNet.tflite | Bundled in app/src/main/assets/. InsightFace MobileFaceNet trained with ArcFace loss (July 3). 4.8MB. Input: 112x112 RGB, normalized. Output: 512-dim embedding. Replaces original 192-dim model. |
+| Phrases.kt | NEW July 3. Personality phrase pools with anti-repeat rolling window (cooldown = pool.size / 2). pick(key, pool) returns a non-repeating random phrase. pickNamed(key, pool, name) substitutes {name} placeholder. Pools: BOOT_ONLINE, BOOT_OFFLINE_FAST, BOOT_OFFLINE, BOOT_NO_INTERNET, BOOT_NO_KEY, REMEMBER, REMEMBER_NAME, REMEMBER_MY_NAME, REMEMBER_WIFE, REMEMBER_SON, REMEMBER_DOG, GOODBYE. |
+| brain/ScoutBootStatus.kt | REWRITTEN July 3. Uses Phrases pools for all boot greetings. Adaptive offline boot: BOOT_OFFLINE_FAST (skips warming-up) when lastLlamaLoadMs < 2s, BOOT_OFFLINE otherwise. Takes lastLlamaLoadMs: () -> Long lambda (default Long.MAX_VALUE). |
 | THIRD_PARTY_NOTICES.md | MIT attribution for MobileFaceNet. Start of Open Source Credits. |
 
 ---
@@ -678,4 +702,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: June 30, 2026 | Version 38 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 3, 2026 | Version 39 | Single source of truth — upload every session*

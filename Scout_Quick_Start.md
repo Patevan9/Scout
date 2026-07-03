@@ -1,8 +1,21 @@
 # Project Scout — Quick Start
-**Last updated: June 29, 2026 | Version 15**
+**Last updated: July 3, 2026 | Version 16**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v37).
+For full technical details, use the Scout Master Summary (v39).
+
+---
+
+## July 3, 2026 — What Is New:
+
+✓ **ArcFace upgrade** — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces old 192-dim model. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, single-batch output. PeopleDb v4: migration clears incompatible embeddings (names and face hashes preserved — everyone needs one re-introduction). New threshold 0.60f (ArcFace scale: same-person ~0.5–0.95, different-person ~0.0–0.4). Fixes "everyone is Patrick" false positive bug.
+✓ **"I see X" (not "I see you, X")** — Scout now says "I see Patrick" and "I see Patrick and Diana" instead of "I can see you, Patrick." Sounds like a description, not an address.
+✓ **Diana (secondary face) fix** — Secondary face block now consumes `pendingFaceIntroName`. "This is my wife Diana" with two people in frame now correctly stores and recognizes Diana as the secondary face.
+✓ **Personality phrase pools — Phrases.kt (new)** — Scout no longer repeats the same boot greeting, goodbye, or remember confirmation every time. Anti-repeat rolling window (cooldown = half the pool). Pools: BOOT_ONLINE (6), BOOT_OFFLINE_FAST (5), BOOT_OFFLINE (6), BOOT_NO_INTERNET (4), BOOT_NO_KEY (3), REMEMBER (9), REMEMBER_NAME/MY_NAME/WIFE/SON/DOG, GOODBYE (7).
+✓ **Adaptive boot greeting** — If TinyLlama loaded in under 2 seconds last session, Scout uses the short fast boot greeting (no warming-up mention). Otherwise uses the full offline greeting with warming-up. TinyLlama load time now stored in SharedPreferences.
+✓ **Online boot phrases mention offline backup** — All 6 BOOT_ONLINE phrases now include "My offline backup is warming up in the background." Previously said nothing about this when online.
+
+*(Previous session June 30: Dynamic robot name, 8 new TeachExtractor patterns, VisionAnswerBuilder freshness extended, registerFamilyMemberFace() guard, Pet Mode design locked — all DONE)*
 
 ---
 
@@ -84,11 +97,13 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ✓ Voice slider changes stick — scout_prefs used in both SettingsActivity and MainActivity. onResume() reloads pitch/speed. June 29.
 ✓ Launcher icon fixed — face 68% of canvas, eyes fully inside circular mask. June 29.
 ✓ Camera — face detection, scene labeling (ML Kit) — throttled to ~7fps for A32 stability
-✓ Face recognition COMPLETE and RELIABLE — known faces recognized consistently. Threshold 0.82 (raised June 29). findBestMatch scans named rows only. Self-match bug fixed. lastKnownFaceName updated every 2 seconds.
-✓ Secondary face recognition — both faces in a two-person frame now embedded and matched. person_embeddings table (PeopleDb v3). Threshold 0.80 for secondary crops. June 29.
-✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers face. Pending mechanism for two-people-in-frame.
+✓ Face recognition COMPLETE and RELIABLE — ArcFace upgrade July 3: InsightFace MobileFaceNet (512-dim, 4.8MB). PeopleDb v4, threshold 0.60f (ArcFace scale). findBestMatch scans named rows only. Self-match bug fixed. lastKnownFaceName updated every 2 seconds.
+✓ Secondary face recognition — both faces in a two-person frame embedded and matched. person_embeddings table (PeopleDb v4). Threshold 0.55f for secondary crops. Diana fix July 3 — pendingFaceIntroName now checked in secondary block.
+✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers face. Pending mechanism for two-people-in-frame now works correctly for secondary face.
 ✓ "Scout, forget [name]" command — clears face embedding and name from both tables. June 29.
-✓ Two-person response — "I can see you, Patrick and Elijah" when both faces are known. June 29.
+✓ Two-person response — "I see Patrick and Elijah" when both faces are known (July 3: "I see X" not "I see you, X").
+✓ Personality phrase pools — Phrases.kt (July 3). Varied boot greetings, goodbye, and remember responses. Anti-repeat rolling window.
+✓ Adaptive boot greeting — BOOT_OFFLINE_FAST (no warming-up) if TinyLlama loaded fast last session; BOOT_OFFLINE_FAST otherwise. BOOT_ONLINE all mention offline backup warming up. July 3.
 ✓ Face greeting fires once per launch — greetedThisSession no longer resets every 5s. June 28.
 ✓ Wrong-name teaching fixed — 2-person frame guard in handleTeaching(). June 27.
 ✓ ML Kit label whitelist — OBJECT_WHITELIST in VisionAnswerBuilder. Garbage labels gone. June 27.
@@ -181,4 +196,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: June 29, 2026 | Version 15 | Upload every session | For full details use Master Summary v37*
+*Project Scout Quick Start | Last updated: July 3, 2026 | Version 16 | Upload every session | For full details use Master Summary v39*

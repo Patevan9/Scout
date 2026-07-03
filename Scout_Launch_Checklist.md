@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 29, 2026 | Version 9**
+**What Scout needs to be worth $9.99 | Updated July 3, 2026 | Version 10**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -59,6 +59,11 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Gemini responses no longer cut off mid-sentence — maxOutputTokens raised 250→600. "Always end on a complete sentence" added to system prompt. MAX_TOKENS trim logic finds last sentence boundary; returns null if none (falls through to TinyLlama). DONE June 29.
 ✓ Gemini quota/cooldown announced — Scout now speaks "Gemini says you've reached your daily limit" instead of silently falling through to TinyLlama. speakUnavailableIfNeeded() returns Boolean (true=spoken, false=suppressed). Cooldown check added at top of tryTinyLlamaOrFallback(). DONE June 29.
 ✓ Secondary face recognition — Both faces now get embedded in two-person scenes, not just the primary. PeopleDb v3 adds person_embeddings table (up to 5 per person). VisionAnswerBuilder uses secondaryFaceName — Scout says "I can see you, Patrick and Elijah" instead of "someone else." DONE June 29.
+✓ **ArcFace face recognition upgrade** — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces old 192-dim model. PeopleDb v4: migration clears incompatible embeddings (preserves names and face hashes). Threshold 0.60f fixes "everyone is Patrick" false positive. DONE July 3.
+✓ **"I see X" phrasing** — Scout now says "I see Patrick" and "I see Patrick and Diana" instead of "I can see you, Patrick." Better match for a seeing-eye companion. DONE July 3.
+✓ **Diana (secondary face) fix** — Secondary face block now consumes pendingFaceIntroName. "This is my wife Diana" with two people in frame now correctly stores and recognizes Diana. DONE July 3.
+✓ **Personality phrase pools — Phrases.kt** — Scout no longer repeats the same boot greeting, goodbye, or remember confirmation every session. Anti-repeat rolling window prevents back-to-back repeats. DONE July 3.
+✓ **Adaptive boot greeting** — BOOT_OFFLINE_FAST (no warming-up mention) when TinyLlama loaded in under 2 seconds last session; BOOT_OFFLINE otherwise. TinyLlama load time stored in SharedPreferences. All BOOT_ONLINE phrases now mention offline backup warming up. DONE July 3.
 
 ---
 
@@ -177,7 +182,7 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, full reliable face recognition for the whole family (including both people in a two-person frame), a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, fixes false positives), Diana/secondary face fix, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
 
 **Next session: Startup diagnostics (#2 on Must Fix list) — friendly messages if brain, TTS, or STT missing at boot. Then: Onboarding flow (#3).**
 
@@ -185,4 +190,4 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Updated June 29, 2026 | Version 9 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 3, 2026 | Version 10 | For Patrick, Diana, Elijah, and Scout*
