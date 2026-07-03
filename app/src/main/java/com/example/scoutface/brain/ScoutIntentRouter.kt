@@ -126,51 +126,6 @@ clean.contains("go on the internet")
             return IntentType.GO_OFFLINE
         }
 
-        if (
-            clean.contains("download status") ||
-            clean.contains("downloads status") ||
-            clean.contains("what is downloaded") ||
-            clean.contains("what downloads are installed")
-        ) {
-            return IntentType.DOWNLOAD_STATUS
-        }
-
-        if (
-            clean.contains("download all") ||
-            clean.contains("download everything") ||
-            clean.contains("download brain pack")
-        ) {
-            return IntentType.DOWNLOAD_ALL
-        }
-
-        if (clean.contains("download dictionary") || clean.contains("download wikdict")) {
-            return IntentType.DOWNLOAD_DICT
-        }
-
-        if (clean.contains("download idioms") || clean.contains("download idiom")) {
-            return IntentType.DOWNLOAD_IDIOMS
-        }
-
-        if (clean.contains("download wordnet")) {
-            return IntentType.DOWNLOAD_WORDNET
-        }
-
-        if (clean.contains("download sentiment")) {
-            return IntentType.DOWNLOAD_SENTIMENT
-        }
-
-        if (clean.contains("download slang")) {
-            return IntentType.DOWNLOAD_SLANG
-        }
-
-        if (clean.contains("reset download")) {
-            return IntentType.RESET_DOWNLOAD_DECISIONS
-        }
-
-        if (clean.contains("remove downloads") || clean.contains("delete downloads")) {
-            return IntentType.REMOVE_DOWNLOADS
-        }
-
         if (clean.contains("export brain") || clean.contains("export memory")) {
             return IntentType.EXPORT_BRAIN
         }
