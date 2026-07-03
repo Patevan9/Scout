@@ -100,9 +100,9 @@ class PeopleDb(context: Context) :
         }
     }
 
-    // Accumulates up to MAX_EMBEDDINGS_PER_PERSON embeddings per named person.
-    // Matching against multiple embeddings handles the solo-vs-group crop quality gap.
-    private val MAX_EMBEDDINGS_PER_PERSON = 5
+    // Accumulates embeddings per named person across varied lighting/angles.
+    // More coverage = better match rate in real-world conditions.
+    private val MAX_EMBEDDINGS_PER_PERSON = 12
 
     fun addNamedEmbedding(name: String, embedding: FloatArray) {
         try {
@@ -120,7 +120,7 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.82f): String? {
+    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.75f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT name, embedding FROM person_embeddings;",
@@ -160,7 +160,7 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.82f): String? {
+    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.75f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT face_hash, embedding FROM people WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != '';",

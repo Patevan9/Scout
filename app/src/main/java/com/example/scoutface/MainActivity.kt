@@ -1581,7 +1581,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
                                                             // Use slightly lower threshold for secondary crop — smaller, lower quality
-                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.80f)
+                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.73f)
                                                             lastSecondaryFaceName = secName
                                                             if (secName != null) peopleDb.addNamedEmbedding(secName, emb2)
                                                             Log.d("ScoutFace", "Secondary face: name=$secName")
