@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class PeopleDb(context: Context) :
-    SQLiteOpenHelper(context, "scout_people.db", null, 3) {
+    SQLiteOpenHelper(context, "scout_people.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -42,6 +42,13 @@ class PeopleDb(context: Context) :
                         "embedding BLOB NOT NULL" +
                         ");"
             )
+        }
+        if (oldVersion < 4) {
+            // Face model upgraded from 192-dim to 512-dim (ArcFace). Old embeddings
+            // are incompatible — clear them so Scout re-learns faces fresh.
+            // Names are preserved; only the stored face vectors are removed.
+            db.execSQL("DELETE FROM person_embeddings;")
+            db.execSQL("UPDATE people SET embedding = NULL;")
         }
     }
 
@@ -120,7 +127,7 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.75f): String? {
+    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.40f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT name, embedding FROM person_embeddings;",
@@ -160,7 +167,7 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.75f): String? {
+    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.40f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT face_hash, embedding FROM people WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != '';",
