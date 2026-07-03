@@ -37,19 +37,19 @@ object Phrases {
     )
 
     val BOOT_OFFLINE = listOf(
-        "Hi. I'm here. Running in offline mode today.",
-        "Hey! I'm up. Offline mode is active.",
-        "Hello! No internet today, but I've still got plenty I can do.",
-        "Hi. I'm awake. Running offline — ready when you are.",
-        "Hey. I'm here and offline. What do you need?",
-        "Hi! Just woke up. Offline mode is on."
+        "Hey there! Give my offline brain a few seconds to wake up.",
+        "Good to see you! Just warming up my offline brain.",
+        "Why, hello there! Give me a moment while my offline brain gets itself together.",
+        "Hi! I'm waking up my offline brain. I'll be ready in just a few seconds.",
+        "Welcome back! My offline brain is still stretching. I'll be ready in a moment.",
+        "Good to see you! I'm just warming up my offline brain. I'll be ready in a few seconds."
     )
 
     val BOOT_NO_INTERNET = listOf(
-        "Hi. I'm here. Online mode is on but I'm not seeing internet right now.",
-        "Hey! I'm up. Online mode is set but internet isn't connecting yet.",
-        "Hello! Online mode is ready but I can't reach the internet. I'll keep trying.",
-        "Hi. I'm awake. Online mode is enabled — just waiting on a connection."
+        "Hey! Just warming up my offline brain. No internet right now, but I'll keep trying.",
+        "Hi there! Give my offline brain a moment. No internet yet — I'll let you know when I connect.",
+        "Good to see you! My offline brain is warming up. Internet isn't connecting yet.",
+        "Hi! Waking up my offline brain. I can't reach the internet right now, but I'll keep checking."
     )
 
     val BOOT_NO_KEY = listOf(
