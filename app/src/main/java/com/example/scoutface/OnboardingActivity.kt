@@ -165,6 +165,12 @@ class OnboardingActivity : AppCompatActivity() {
             .edit()
             .putBoolean(PREF_ONBOARDING_DONE, true)
             .apply()
+        // New installs start in offline mode. The user can enable online
+        // mode in Settings once they have a Gemini API key.
+        getSharedPreferences("scout_memory", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("gemini_enabled", false)
+            .apply()
         startActivity(Intent(this, MainActivity::class.java))
         finish()
     }
