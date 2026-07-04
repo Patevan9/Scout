@@ -1,8 +1,34 @@
 # Project Scout — Master Project Summary
-**Last updated: July 3, 2026 | Version 39**
+**Last updated: July 4, 2026 | Version 40**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 4, 2026 — What Changed Since Version 39
+
+✓ **PeopleDb threshold raised back to 0.65f** — ArcFace upgrade (July 3) lowered threshold to 0.60f, but this caused Diana/Elijah cross-contamination (Diana's face scored above 0.60f against Elijah's stored embeddings — root cause of "I see Elijah" when only Diana was present). Threshold raised back to 0.65f in both `findBestMatch` and `findBestMatchName`. `cursor.use {}` added to both methods (leak fix). `forgetPerson` made atomic with `beginTransaction()`/`setTransactionSuccessful()`/`endTransaction()`. `addNamedEmbedding` now checks `COUNT(*)` first and skips INSERT if already at `MAX_EMBEDDINGS_PER_PERSON (12)`. DONE July 4.
+
+✓ **VisionAnswerBuilder dogLine + 2-face branch fix** — 3+ faces branch was missing `dogLine` (asymmetric with the 1- and 2-face branches); added. 2-face branch reorganized: `secondaryFaceName` arm now precedes `pendingIntroName` arm; new `else` arm handles case where primary is unknown but secondary is known. Freshness window 3500ms → 1800ms (line 196). DONE July 4.
+
+✓ **Secondary face `findBestMatch` fallback** — Secondary face path now tries `findBestMatchName` first (person_embeddings table, threshold 0.55f), then falls back to `findBestMatch` (people.embedding BLOB, also 0.55f) + `getName()`. Closes the recognition gap when only the single-BLOB embedding exists for a person. DONE July 4.
+
+✓ **Caption persistence fix** — When closed captions are turned off in Settings, `onResume()` now immediately hides the caption TextView and removes the pending hide Runnable. Previously the last spoken caption line lingered on screen after toggling captions off. DONE July 4.
+
+✓ **Startup diagnostics** — At boot, Scout checks STT and TTS availability. TTS failure: Toast shown ("Scout's voice isn't working. Please restart the app…"). STT unavailable: Scout speaks a friendly warning 4 seconds after boot and logs to JournalDb. DONE July 4.
+
+✓ **First-boot onboarding redirect** — Top of `MainActivity.onCreate()` checks `OnboardingActivity.PREF_ONBOARDING_DONE` in `scout_prefs`. If false, starts OnboardingActivity and finishes MainActivity immediately. New installs never reach the main UI until onboarding is complete. DONE July 4.
+
+✓ **OnboardingActivity.kt (new)** — Full 5-screen onboarding flow. Screens: Welcome / Trial / This Is Just The Beginning / Privacy / Ready To Begin. `currentPage` is the single source of truth driving both navigation dots and the "X / 5" counter. Scout icon on screens 1 and 5 only. Colors: `#0D1728` bg, `#9BBEFF` active dot/button, `#2A3A5C` inactive dot, `#B0C4E8` body text. `finishOnboarding()` sets `PREF_ONBOARDING_DONE=true` in `scout_prefs` AND `gemini_enabled=false` in `scout_memory`. DONE July 4.
+
+✓ **New installs default to offline mode** — `finishOnboarding()` writes `gemini_enabled=false` to `scout_memory` SharedPrefs. Gemini opt-in via Settings after adding a key. Prevents new users from being in "online mode not configured" state on first launch. DONE July 4.
+
+✓ **BOOT_NO_KEY phrases replaced** — Old vague phrases replaced with actionable settings-access tip: "Open settings any time by sliding the screen to the right." / "Slide the screen to the right any time to open settings." / "You can open settings any time by sliding right." DONE July 4.
+
+✓ **CLAUDE.md created** — New file in repo root. Documents full `git pull origin claude/test-coverage-analysis-hsp9lt` and `git push` commands, critical hardcoding rules, architecture quick reference, test devices, master doc list. Persists across session compaction so all future Claude instances have the context. DONE July 4.
+
+✓ **ModelDownloadActivity.kt (new)** — Portrait-only loading screen for TinyLlama model download. All 39 humorous loading messages from Patrick's approved list. ObjectAnimator animation: message slides in from the right (320ms), holds for 3.8s, slides out left (280ms), next enters from the right. Messages shuffled at startup and reshuffled on each full cycle. `updateProgress(percent, downloaded, total, timeLeft)` method ready for Play Asset Delivery wiring. Layout: "SCOUT" wordmark + "AI COMPANION APP" subtitle, 220dp Scout face icon, animated message frame, `#9BBEFF` progress bar, downloaded/total/time row. Registered in AndroidManifest as portrait. DONE July 4.
 
 ---
 
@@ -268,10 +294,11 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 
 ### Pending — Launch Blockers:
 
-■ **Startup diagnostics** — friendly message if brain, TTS, or STT missing at startup. (MainActivity.kt) — NEXT
-■ **Onboarding flow** — build 5 approved screens as OnboardingActivity.kt.
+✓ **Startup diagnostics** — DONE July 4. TTS failure Toast + STT unavailability spoken warning at boot.
+✓ **Onboarding flow** — DONE July 4. OnboardingActivity.kt, 5 screens, first-boot redirect in MainActivity.
 ■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
 ■ **16KB page size warning** — ML Kit + TensorFlow Lite native libraries need version updates before Play Store submission (`mlkit:face-detection:16.1.6`, `mlkit:image-labeling:17.0.7`, `tensorflow-lite:2.14.0`). Address before submission.
+■ **Play Asset Delivery (PAD) wiring** — ModelDownloadActivity is built and ready. Wiring PAD to trigger the download screen and call updateProgress() is a future session.
 
 - Privacy Policy, Terms of Use, Open Source Credits — write and add to app + website.
 - Play Store listing — description, screenshots, content rating, privacy policy link.
@@ -363,6 +390,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 - June 29: Launcher icon fixed — face 68% of canvas, all 5 mipmap densities regenerated, eyes inside circular mask. Face threshold raised 0.75→0.82 (Patrick/Elijah genetic similarity fix). "Scout, forget [name]" voice command added (clears people + person_embeddings). TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Voice slider now sticks — scout_prefs in both SettingsActivity and MainActivity.onResume(). Greeting words blocked from name storage (hello/hi/hey/howdy/greetings/sup/yo). Gemini maxOutputTokens raised 250→600, "Always end on a complete sentence" added to system prompt, MAX_TOKENS boundary trim. Gemini quota announced — speakUnavailableIfNeeded() returns Boolean, cooldown check at top of tryTinyLlamaOrFallback(). Secondary face recognition — PeopleDb v3 with person_embeddings table, addNamedEmbedding(), findBestMatchName(); secondFace embedded in same executor job, lastSecondaryFaceName (@Volatile); VisionAnswerBuilder uses secondaryFaceName.
 - June 30: Dynamic robot name — boot greeting, identity feelings reply, identity fallback, offline brain fallback all read from TruthDb. No hardcoded "Scout" in any spoken response. TeachExtractor.kt: 8 new patterns for "that is my son/wife", "that person is my son/wife", "that is [name]", "that person is [name]", "his name is", "her name is". VisionAnswerBuilder freshness 1800ms→3500ms (camera blocked during TTS). registerFamilyMemberFace() guard prevents overwriting a known face hash with a wrong name. TinyLlama filter: "family friendly companion" + "family companion robot" added. Pet Mode design locked: any animal → soft greeting using stored name or "Well... hello there little one. I hope someone will tell me your name soon." Scout continues normally after greeting. Nicolas Protocol renamed Pet Mode (covers all animals). Settings Architecture and Visual Elements specs restored to summary. Summary updated to version 38.
 - July 3: ArcFace upgrade — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces 192-dim model. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, single-batch output. PeopleDb v4: migration clears 192-dim embeddings, preserves names/hashes, threshold 0.60f. "I see X" phrasing replaces "I can see you, X" throughout VisionAnswerBuilder and MainActivity. Diana fix — secondary face block now consumes pendingFaceIntroName. Phrases.kt new file: anti-repeat phrase pools for boot, goodbye, and all remember responses. ScoutBootStatus.kt rewritten: uses Phrases pools, adaptive BOOT_OFFLINE_FAST (< 2s load) vs BOOT_OFFLINE. BOOT_ONLINE phrases all mention offline backup warming up. TinyLlama load time measured and stored in SharedPreferences. Goodbye and remember responses now varied via Phrases pools. Summary updated to version 39.
+- July 4: PeopleDb threshold raised back to 0.65f (0.60f caused Diana/Elijah cross-contamination at ArcFace scale). cursor.use{} in findBestMatch + findBestMatchName (leak fix). forgetPerson made atomic with transactions. addNamedEmbedding COUNT(*) guard. VisionAnswerBuilder: freshness 3500ms→1800ms, 3+ faces branch gets dogLine, 2-face branch secondaryFaceName arm precedes pendingIntroName arm, new else arm for unknown primary + known secondary. Secondary face path adds findBestMatch fallback after findBestMatchName. Caption persistence fix — onResume() hides caption immediately when captions disabled. Startup diagnostics: TTS failure Toast + STT unavailability spoken warning at boot + JournalDb log. First-boot onboarding redirect at top of MainActivity.onCreate(). OnboardingActivity.kt built — full 5-screen flow, currentPage single source of truth for dots + counter, finishOnboarding() sets offline default. BOOT_NO_KEY phrases replaced with settings slide-right tip. CLAUDE.md created with git commands and critical rules for all future Claude sessions. ModelDownloadActivity.kt built — 39 messages, ObjectAnimator animation, updateProgress() API, portrait-only, AndroidManifest registered. Summary updated to version 40.
 
 ---
 
@@ -405,11 +433,14 @@ Do not act on this area without his input. His expertise is the right lens for t
 | scout_llama_api.h | Self-contained b8946 declarations. |
 | CMakeLists.txt | NDK build config. |
 | HabitLayer.kt | Pattern memory — 14-day decay. |
-| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). DB version 4 July 3: migration clears 192-dim embeddings (preserves names/hashes), threshold 0.60f (ArcFace scale). person_embeddings table (addNamedEmbedding(), findBestMatchName(), forgetPerson()). Up to 12 embeddings per person. Secondary crop threshold 0.55f. |
-| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 uses both knownFaceName and secondaryFaceName. "I see X" phrasing (not "I see you, X") as of July 3. |
+| PeopleDb.kt | People memory — getName(), setName(), isKnown(). BLOB embedding column added June 17. Cosine similarity matching. findBestMatch scans named rows only (June 21). DB version 4 July 3: migration clears 192-dim embeddings (preserves names/hashes). person_embeddings table (addNamedEmbedding(), findBestMatchName(), forgetPerson()). Up to 12 embeddings per person. Threshold 0.65f (raised back July 4 — 0.60f caused Diana/Elijah cross-contamination). cursor.use{} in findBestMatch and findBestMatchName (July 4). forgetPerson atomic with transactions (July 4). addNamedEmbedding COUNT(*) guard — skips INSERT if already at max 12 (July 4). Secondary crop threshold 0.55f. |
+| VisionAnswerBuilder.kt | Builds spoken vision responses. OBJECT_WHITELIST filters noisy ML Kit labels (June 27). Wired to PeopleDb. Uses lastKnownFaceName for reliable name reporting. faceCount==2 uses both knownFaceName and secondaryFaceName. "I see X" phrasing (not "I see you, X") as of July 3. July 4: freshness 3500ms→1800ms; 3+ faces branch gets dogLine; 2-face branch: secondaryFaceName arm precedes pendingIntroName arm, new else arm for unknown primary + known secondary. |
 | FaceEmbedder.kt | Created June 15. Wired into camera pipeline June 17. ArcFace upgrade July 3: loads InsightFace MobileFaceNet.tflite (512-dim), EMBEDDING_SIZE=512, single-batch output Array(1){FloatArray(512)}, single-pass buffer fill. Preprocessing unchanged: (px - 127.5f) / 128f. Returns L2-normalized 512-dim embedding. |
 | MobileFaceNet.tflite | Bundled in app/src/main/assets/. InsightFace MobileFaceNet trained with ArcFace loss (July 3). 4.8MB. Input: 112x112 RGB, normalized. Output: 512-dim embedding. Replaces original 192-dim model. |
-| Phrases.kt | NEW July 3. Personality phrase pools with anti-repeat rolling window (cooldown = pool.size / 2). pick(key, pool) returns a non-repeating random phrase. pickNamed(key, pool, name) substitutes {name} placeholder. Pools: BOOT_ONLINE, BOOT_OFFLINE_FAST, BOOT_OFFLINE, BOOT_NO_INTERNET, BOOT_NO_KEY, REMEMBER, REMEMBER_NAME, REMEMBER_MY_NAME, REMEMBER_WIFE, REMEMBER_SON, REMEMBER_DOG, GOODBYE. |
+| Phrases.kt | NEW July 3. Personality phrase pools with anti-repeat rolling window (cooldown = pool.size / 2). pick(key, pool) returns a non-repeating random phrase. pickNamed(key, pool, name) substitutes {name} placeholder. Pools: BOOT_ONLINE, BOOT_OFFLINE_FAST, BOOT_OFFLINE, BOOT_NO_INTERNET, BOOT_NO_KEY, REMEMBER, REMEMBER_NAME, REMEMBER_MY_NAME, REMEMBER_WIFE, REMEMBER_SON, REMEMBER_DOG, GOODBYE. BOOT_NO_KEY phrases replaced July 4 — now tell user to slide right to open settings. |
+| OnboardingActivity.kt | NEW July 4. 5-screen onboarding flow: Welcome / Trial / This Is Just The Beginning / Privacy / Ready To Begin. currentPage drives both dots and "X / 5" counter (single source of truth). Scout icon visible screens 1 and 5 only. finishOnboarding() sets PREF_ONBOARDING_DONE=true (scout_prefs) and gemini_enabled=false (scout_memory). |
+| ModelDownloadActivity.kt | NEW July 4. Portrait loading screen for TinyLlama model download. 39 humorous messages shuffled and cycled with ObjectAnimator slide-right-in / slide-left-out animation. updateProgress(percent, downloaded, total, timeLeft) for PAD wiring. Layout: activity_model_download.xml. |
+| CLAUDE.md | NEW July 4. Repo-root session notes for all future Claude instances: full git pull/push commands (branch name), critical hardcoding rules, architecture quick ref, test devices, master doc list. |
 | brain/ScoutBootStatus.kt | REWRITTEN July 3. Uses Phrases pools for all boot greetings. Adaptive offline boot: BOOT_OFFLINE_FAST (skips warming-up) when lastLlamaLoadMs < 2s, BOOT_OFFLINE otherwise. Takes lastLlamaLoadMs: () -> Long lambda (default Long.MAX_VALUE). |
 | THIRD_PARTY_NOTICES.md | MIT attribution for MobileFaceNet. Start of Open Source Credits. |
 
@@ -620,8 +651,8 @@ Scout notices patterns in user behavior, generates a suggestion for a new behavi
 | 11 | A32 speak() crash fix | ✓ DONE June 20 — isSpeaking race condition closed |
 | 11b | A32 delayed crash fix | ✓ DONE June 21 — camera frame throttle eliminates post-Gemini LMKD kill. Patrick confirmed stable. |
 | 12 | TinyLlama re-enable on A32 | ✓ DONE June 28 — 90s delay, 800MB RAM guard, nCtx=512. On-demand Gemini fallback. Needs A32 real-world confirmation. |
-| 13 | Startup diagnostics | ■ NEXT — friendly message if brain/TTS/STT missing at boot |
-| 14 | Onboarding flow — build 5 screens in Android | Not started |
+| 13 | Startup diagnostics | ✓ DONE July 4 — TTS failure Toast + STT spoken warning at boot |
+| 14 | Onboarding flow — OnboardingActivity.kt | ✓ DONE July 4 — 5-screen flow, first-boot redirect, offline default |
 | 15 | Fold 7 stability testing | Not started — A32 is current test device |
 | 16 | A32 stability testing | Ongoing — no crashes as of June 21. TinyLlama re-enabled June 28, monitoring. |
 | 17 | Privacy Policy | Not started |
@@ -702,4 +733,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 3, 2026 | Version 39 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 4, 2026 | Version 40 | Single source of truth — upload every session*

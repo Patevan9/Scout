@@ -1,8 +1,24 @@
 # Project Scout — Quick Start
-**Last updated: July 3, 2026 | Version 16**
+**Last updated: July 4, 2026 | Version 17**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v39).
+For full technical details, use the Scout Master Summary (v40).
+
+---
+
+## July 4, 2026 — What Is New:
+
+✓ **PeopleDb threshold raised back to 0.65f** — ArcFace upgrade (July 3) set threshold to 0.60f, which caused Diana's face to match Elijah's stored embeddings. Raised back to 0.65f. cursor.use{} leak fix added. forgetPerson is now atomic. addNamedEmbedding skips insert if person already at max 12 embeddings.
+✓ **VisionAnswerBuilder fixes** — 3+ faces branch gets dogLine (was missing). 2-face branch: secondaryFaceName arm now comes before pendingIntroName arm; new else arm for unknown primary + known secondary. Freshness 3500ms → 1800ms.
+✓ **Secondary face findBestMatch fallback** — Secondary face path now also tries the single-BLOB people.embedding if person_embeddings returns no match.
+✓ **Caption persistence fix** — Last caption line no longer stays on screen after captions are turned off in Settings. onResume() hides it immediately.
+✓ **Startup diagnostics** — TTS failure shows a Toast; STT unavailability triggers a spoken warning 4 seconds after boot. Both logged to JournalDb.
+✓ **Onboarding flow built — OnboardingActivity.kt** — Full 5-screen flow. First-boot redirect in MainActivity.onCreate(). currentPage is the single source of truth for both dots and "X / 5" counter. finishOnboarding() defaults new installs to offline mode (gemini_enabled=false).
+✓ **BOOT_NO_KEY phrases replaced** — Now tells users to slide right to open Settings instead of vague "online mode not configured" message.
+✓ **CLAUDE.md created** — Repo-root file with full git pull/push commands, critical rules, architecture notes — so future Claude sessions always have the branch name and key context.
+✓ **ModelDownloadActivity built** — Portrait loading screen for TinyLlama model download. 39 humorous messages, ObjectAnimator slide-right-in / slide-left-out animation. updateProgress() method ready for Play Asset Delivery wiring.
+
+*(Previous session July 3: ArcFace upgrade 512-dim, Diana secondary face fix, Phrases.kt, adaptive boot, BOOT_ONLINE offline-backup mentions — all DONE)*
 
 ---
 
@@ -150,13 +166,14 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 6. Current Priority — Launch Checklist Order
 
-1. **✓ TinyLlama re-enable path DONE June 28** — 90s delay, 800MB RAM check, nCtx=512. Now needs A32 confirmation.
-2. **Startup diagnostics — NEXT** — friendly message if brain, TTS, or STT missing at boot. (MainActivity.kt)
-3. **Onboarding flow** — build 5 approved screens in Android. (OnboardingActivity.kt)
+1. **✓ TinyLlama re-enable path DONE June 28** — 90s delay, 800MB RAM check, nCtx=512.
+2. **✓ Startup diagnostics DONE July 4** — TTS Toast + STT spoken warning at boot.
+3. **✓ Onboarding flow DONE July 4** — 5-screen OnboardingActivity.kt + first-boot redirect + offline default.
 4. **Fold 7 stability testing** — dedicated session needed on Fold 7.
 5. **Privacy Policy, Terms of Use, Open Source Credits** — write and add to app and website.
 6. **Play Store listing** — description, screenshots, content rating.
 7. **16KB page size warning** — ML Kit + TensorFlow Lite version updates required before Play Store submission.
+8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 - Proposal Sandbox — 'Want me to remember that?' confirm step
@@ -196,4 +213,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 3, 2026 | Version 16 | Upload every session | For full details use Master Summary v39*
+*Project Scout Quick Start | Last updated: July 4, 2026 | Version 17 | Upload every session | For full details use Master Summary v40*

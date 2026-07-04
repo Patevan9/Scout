@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 3, 2026 | Version 10**
+**What Scout needs to be worth $9.99 | Updated July 4, 2026 | Version 11**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -64,6 +64,16 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ **Diana (secondary face) fix** — Secondary face block now consumes pendingFaceIntroName. "This is my wife Diana" with two people in frame now correctly stores and recognizes Diana. DONE July 3.
 ✓ **Personality phrase pools — Phrases.kt** — Scout no longer repeats the same boot greeting, goodbye, or remember confirmation every session. Anti-repeat rolling window prevents back-to-back repeats. DONE July 3.
 ✓ **Adaptive boot greeting** — BOOT_OFFLINE_FAST (no warming-up mention) when TinyLlama loaded in under 2 seconds last session; BOOT_OFFLINE otherwise. TinyLlama load time stored in SharedPreferences. All BOOT_ONLINE phrases now mention offline backup warming up. DONE July 3.
+✓ **PeopleDb threshold raised back to 0.65f** — 0.60f (from ArcFace upgrade) caused Diana/Elijah cross-contamination. Raised to 0.65f in both findBestMatch and findBestMatchName. cursor.use{} prevents cursor leaks. forgetPerson is now atomic. addNamedEmbedding skips insert if person already has 12 embeddings. DONE July 4.
+✓ **VisionAnswerBuilder fixes** — 3+ faces branch now includes dogLine (was missing). 2-face branch: secondaryFaceName arm precedes pendingIntroName arm; new else arm handles unknown primary + known secondary. Freshness 3500ms→1800ms. DONE July 4.
+✓ **Secondary face findBestMatch fallback** — Secondary face recognition now falls back to the single-BLOB people.embedding if person_embeddings has no match. Closes recognition gap on fresh installs. DONE July 4.
+✓ **Caption persistence fix** — Last spoken line no longer lingers on screen after captions are turned off in Settings. onResume() hides the caption view immediately. DONE July 4.
+✓ **Startup diagnostics** — Scout speaks a friendly STT-unavailable warning at boot; shows a Toast if TTS fails to initialize. Both events logged to JournalDb. DONE July 4.
+✓ **Onboarding flow — OnboardingActivity.kt** — Full 5-screen flow built. Screens: Welcome / Trial / This Is Just The Beginning / Privacy / Ready To Begin. currentPage drives both dots and "X / 5" counter. First-boot redirect in MainActivity.onCreate() sends new installs to onboarding. finishOnboarding() defaults new installs to offline mode (gemini_enabled=false). DONE July 4.
+✓ **New installs default to offline mode** — finishOnboarding() writes gemini_enabled=false to scout_memory SharedPrefs. Gemini opt-in only after user adds their key in Settings. DONE July 4.
+✓ **BOOT_NO_KEY phrases** — Replaced vague "online mode not configured" with actionable tip: "Open settings any time by sliding the screen to the right." DONE July 4.
+✓ **CLAUDE.md** — Repo-root file documents git pull/push commands with full branch name, critical no-hardcoding rules, architecture notes. Persists across Claude session compaction. DONE July 4.
+✓ **ModelDownloadActivity** — Portrait-only loading screen for TinyLlama model download. 39 humorous loading messages, ObjectAnimator slide animation, updateProgress() API. Ready for Play Asset Delivery wiring in a future session. DONE July 4.
 
 ---
 
@@ -78,17 +88,16 @@ These are the real blockers. Scout cannot ship without these.
 - Still needs real-world A32 testing to confirm the LMKD crash does not return.
 ■ MainActivity.kt + LlamaEngine.kt — monitor on A32 builds
 
-### 2. Startup diagnostics — Makes Scout start cleanly every time ■ NEXT
+### 2. Startup diagnostics — ✓ DONE July 4
 
-- Scout checks at startup that brain is loaded, TTS is ready, STT is available.
-- If something is missing, Scout says something friendly rather than crashing or freezing.
-■ MainActivity.kt — startup check block — THIS IS NEXT
+- TTS failure: Toast shown to user with restart instructions.
+- STT unavailable: Scout speaks a friendly warning 4 seconds after boot and logs to JournalDb.
 
-### 3. Onboarding flow — First impression matters
+### 3. Onboarding flow — ✓ DONE July 4
 
-- 5-screen flow designed and approved. Blue color scheme. Built by ChatGPT.
-- Screen counter and progress dots must be driven by the same variable — never hardcoded in two places.
-■ New OnboardingActivity.kt — one focused session
+- Full 5-screen OnboardingActivity.kt built. First-boot redirect in MainActivity.onCreate().
+- currentPage is the single source of truth for dots and counter — not hardcoded in two places.
+- finishOnboarding() defaults new installs to offline mode (gemini_enabled=false in scout_memory).
 
 ### 4. Fold 7 stability testing — Ongoing
 
@@ -182,12 +191,12 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, fixes false positives), Diana/secondary face fix, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: Startup diagnostics (#2 on Must Fix list) — friendly messages if brain, TTS, or STT missing at boot. Then: Onboarding flow (#3).**
+**Next session: Fold 7 stability testing (#4), Privacy Policy + Terms of Use (#6–7), Play Store listing (#9), and 16KB page size library updates (#10).**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 3, 2026 | Version 10 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 4, 2026 | Version 11 | For Patrick, Diana, Elijah, and Scout*
