@@ -39,6 +39,12 @@
         </activity>
 
         <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
             android:screenOrientation="sensorLandscape"

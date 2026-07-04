@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D1728"
+    android:orientation="vertical"
+    android:padding="28dp">
+
+    <!-- Main content row: icon (left) + text (right) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!-- Scout icon — visible on screens 1 and 5 -->
+        <ImageView
+            android:id="@+id/onboardIcon"
+            android:layout_width="110dp"
+            android:layout_height="110dp"
+            android:layout_marginEnd="32dp"
+            android:src="@mipmap/ic_launcher"
+            android:visibility="gone" />
+
+        <!-- Title + body + bullet points -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/onboardTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/onboardBody"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="14dp"
+                android:lineSpacingMultiplier="1.4"
+                android:textColor="#B0C4E8"
+                android:textSize="15sp" />
+
+            <LinearLayout
+                android:id="@+id/bulletContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom bar: progress dots · counter · button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingTop="16dp">
+
+        <LinearLayout
+            android:id="@+id/dotsContainer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal" />
+
+        <TextView
+            android:id="@+id/pageCounter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="20dp"
+            android:textColor="#9BBEFF"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnNext"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:backgroundTint="#9BBEFF"
+            android:paddingHorizontal="28dp"
+            android:text="Next"
+            android:textColor="#0D1728"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+</LinearLayout>

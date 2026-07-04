@@ -471,6 +471,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         super.onCreate(savedInstanceState)
 
+        // Show onboarding on first install; skip on every subsequent launch.
+        val scoutPrefsEarly = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+        if (!scoutPrefsEarly.getBoolean(OnboardingActivity.PREF_ONBOARDING_DONE, false)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_main)
 
         setupWindow()
