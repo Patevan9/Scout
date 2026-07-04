@@ -47,11 +47,11 @@ object Phrases {
 
     val BOOT_OFFLINE = listOf(
         "Hey there! Give my offline brain a few seconds to wake up.",
-        "Good to see you! Just warming up my offline brain.",
+        "Good to see you! Just warming up my offline brain. Slide the screen to the right any time to open settings.",
         "Why, hello there! Give me a moment while my offline brain gets itself together.",
-        "Hi! I'm waking up my offline brain. I'll be ready in just a few seconds.",
+        "Hi! I'm waking up my offline brain. I'll be ready in just a few seconds. You can open settings any time by sliding right.",
         "Welcome back! My offline brain is still stretching. I'll be ready in a moment.",
-        "Good to see you! I'm just warming up my offline brain. I'll be ready in a few seconds."
+        "Good to see you! I'm just warming up my offline brain. Open settings any time by sliding the screen to the right."
     )
 
     val BOOT_NO_INTERNET = listOf(
