@@ -157,6 +157,22 @@ Required to submit to Google Play.
 
 ---
 
+## ■ Support Scout Screen — Settings
+
+A "Support Scout" section inside Settings with four optional one-time contribution tiers:
+- **Buy Scout a Coffee** — $3
+- **Support Scout More** — $5
+- **Help Scout Grow** — $10
+- **Founding Supporter** — $25
+
+All clearly labeled as one-time, optional, and never unlocking features. Messaging: "Scout has no required subscriptions. Support is completely optional and helps fund future improvements." Footer: "Scout is a one-time purchase. Support contributions are completely optional and never unlock core features." Three badges: Ad-Free / Private & Local / Built with Care.
+
+Payment options to decide in a future session: Google Play In-App Billing (simplest for Play Store) or external link (Ko-fi / Buy Me a Coffee — no 30% Play Store cut but opens browser). Design mockup saved.
+
+■ Build in a future session before or after launch.
+
+---
+
 ## ■ Post-Trial Strategy
 
 - After 7 days — advanced features lock but Scout stays installed. Still greets the family.
