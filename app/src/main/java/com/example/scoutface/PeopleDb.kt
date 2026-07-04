@@ -114,20 +114,20 @@ class PeopleDb(context: Context) :
     fun addNamedEmbedding(name: String, embedding: FloatArray) {
         try {
             val db = writableDatabase
+            val countCursor = db.rawQuery(
+                "SELECT COUNT(*) FROM person_embeddings WHERE name=?;", arrayOf(name)
+            )
+            val count = countCursor.use { if (it.moveToFirst()) it.getInt(0) else 0 }
+            if (count >= MAX_EMBEDDINGS_PER_PERSON) return
             val cv = ContentValues()
             cv.put("name", name)
             cv.put("embedding", floatArrayToBytes(embedding))
             db.insert("person_embeddings", null, cv)
-            db.execSQL(
-                "DELETE FROM person_embeddings WHERE name=? AND id NOT IN (" +
-                        "SELECT id FROM person_embeddings WHERE name=? ORDER BY id DESC LIMIT ?);",
-                arrayOf(name, name, MAX_EMBEDDINGS_PER_PERSON)
-            )
         } catch (_: Exception) {
         }
     }
 
-    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.60f): String? {
+    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.65f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT name, embedding FROM person_embeddings;",
@@ -135,18 +135,19 @@ class PeopleDb(context: Context) :
             )
             var bestName: String? = null
             var bestScore = threshold
-            while (cursor.moveToNext()) {
-                val name = cursor.getString(0)
-                val blob = cursor.getBlob(1) ?: continue
-                val stored = bytesToFloatArray(blob)
-                if (stored.size != embedding.size) continue
-                val score = cosineSimilarity(embedding, stored)
-                if (score > bestScore) {
-                    bestScore = score
-                    bestName = name
+            cursor.use {
+                while (it.moveToNext()) {
+                    val name = it.getString(0)
+                    val blob = it.getBlob(1) ?: continue
+                    val stored = bytesToFloatArray(blob)
+                    if (stored.size != embedding.size) continue
+                    val score = cosineSimilarity(embedding, stored)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestName = name
+                    }
                 }
             }
-            cursor.close()
             bestName
         } catch (_: Exception) {
             null
@@ -155,19 +156,26 @@ class PeopleDb(context: Context) :
 
     fun forgetPerson(name: String) {
         try {
-            writableDatabase.execSQL(
-                "UPDATE people SET name='', embedding=NULL WHERE LOWER(name)=LOWER(?);",
-                arrayOf(name)
-            )
-            writableDatabase.execSQL(
-                "DELETE FROM person_embeddings WHERE LOWER(name)=LOWER(?);",
-                arrayOf(name)
-            )
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                db.execSQL(
+                    "UPDATE people SET name='', embedding=NULL WHERE LOWER(name)=LOWER(?);",
+                    arrayOf(name)
+                )
+                db.execSQL(
+                    "DELETE FROM person_embeddings WHERE LOWER(name)=LOWER(?);",
+                    arrayOf(name)
+                )
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
         } catch (_: Exception) {
         }
     }
 
-    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.60f): String? {
+    fun findBestMatch(embedding: FloatArray, threshold: Float = 0.65f): String? {
         return try {
             val cursor = readableDatabase.rawQuery(
                 "SELECT face_hash, embedding FROM people WHERE embedding IS NOT NULL AND name IS NOT NULL AND name != '';",
@@ -175,18 +183,19 @@ class PeopleDb(context: Context) :
             )
             var bestHash: String? = null
             var bestScore = threshold
-            while (cursor.moveToNext()) {
-                val hash = cursor.getString(0)
-                val blob = cursor.getBlob(1) ?: continue
-                val stored = bytesToFloatArray(blob)
-                if (stored.size != embedding.size) continue
-                val score = cosineSimilarity(embedding, stored)
-                if (score > bestScore) {
-                    bestScore = score
-                    bestHash = hash
+            cursor.use {
+                while (it.moveToNext()) {
+                    val hash = it.getString(0)
+                    val blob = it.getBlob(1) ?: continue
+                    val stored = bytesToFloatArray(blob)
+                    if (stored.size != embedding.size) continue
+                    val score = cosineSimilarity(embedding, stored)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestHash = hash
+                    }
                 }
             }
-            cursor.close()
             bestHash
         } catch (_: Exception) {
             null

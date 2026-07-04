@@ -193,8 +193,8 @@ class VisionAnswerBuilder(
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
 
-        val faceFresh = lastFaceUpdatedMs != 0L && faceAgeMs <= 3500L
-        val labelFresh = lastSceneUpdatedMs != 0L && labelAgeMs <= 3500L
+        val faceFresh = lastFaceUpdatedMs != 0L && faceAgeMs <= 1800L
+        val labelFresh = lastSceneUpdatedMs != 0L && labelAgeMs <= 1800L
 
         if (!faceFresh && !labelFresh) return voice.say("VISION_STALE")
 
@@ -216,10 +216,15 @@ class VisionAnswerBuilder(
 
         return when {
             faceCount >= 3 -> {
+                val dogLine = when {
+                    seesDog && !dogKnownName.isNullOrBlank() -> " ${dogKnownName} is nearby too."
+                    seesDog -> " I also see a dog nearby."
+                    else -> ""
+                }
                 val objects = if (filteredObjects.isNotEmpty()) {
                     " I also see ${formatLabelList(filteredObjects)}."
                 } else ""
-                "I see several people.$objects"
+                "I see several people.$dogLine$objects"
             }
 
             faceCount == 2 -> {
@@ -229,12 +234,14 @@ class VisionAnswerBuilder(
                     else -> ""
                 }
                 when {
-                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
-                        "I see $knownFaceName and $pendingIntroName.$dogLine"
                     !knownFaceName.isNullOrBlank() && !secondaryFaceName.isNullOrBlank() ->
                         "I see $knownFaceName and $secondaryFaceName.$dogLine"
+                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
+                        "I see $knownFaceName and $pendingIntroName.$dogLine"
                     !knownFaceName.isNullOrBlank() ->
                         "I see $knownFaceName and someone else.$dogLine"
+                    !secondaryFaceName.isNullOrBlank() ->
+                        "I see $secondaryFaceName and someone else.$dogLine"
                     else -> "I see two people.$dogLine"
                 }
             }

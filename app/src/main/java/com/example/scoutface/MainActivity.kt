@@ -1586,6 +1586,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
                                                             var secName = peopleDb.findBestMatchName(emb2, threshold = 0.55f)
+                                                            if (secName == null) {
+                                                                val h2 = peopleDb.findBestMatch(emb2, threshold = 0.55f)
+                                                                if (h2 != null) secName = peopleDb.getName(h2)
+                                                            }
                                                             if (secName == null && pendingFaceIntroName != null) {
                                                                 // Introduction was given while primary face was someone else —
                                                                 // this unknown secondary face is who was being introduced.
