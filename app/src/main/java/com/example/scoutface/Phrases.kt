@@ -62,9 +62,9 @@ object Phrases {
     )
 
     val BOOT_NO_KEY = listOf(
-        "Hi. I'm here. Online mode is enabled but not configured yet.",
-        "Hey! I'm up. You'll need to finish setting up online mode when you get a chance.",
-        "Hello! Online mode needs to be configured. Check Settings when you're ready."
+        "Hi. I'm here. Open settings any time by sliding the screen to the right.",
+        "Hey! I'm up. Slide the screen to the right any time to open settings.",
+        "Hello! You can open settings any time by sliding right."
     )
 
     // ── Remembering ─────────────────────────────────────────────────────────
