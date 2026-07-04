@@ -56,6 +56,12 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
 
+        <activity
+            android:name=".ModelDownloadActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
         <!-- REQUIRED for "export brain" sharing -->
         <provider
             android:name="androidx.core.content.FileProvider"

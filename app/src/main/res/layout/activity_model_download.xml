@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0F1E"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingStart="32dp"
+    android:paddingEnd="32dp"
+    android:paddingBottom="40dp"
+    android:paddingTop="48dp">
+
+    <!-- SCOUT wordmark -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-black"
+        android:letterSpacing="0.15"
+        android:text="SCOUT"
+        android:textColor="#FFFFFF"
+        android:textSize="38sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="24dp"
+        android:letterSpacing="0.25"
+        android:text="AI COMPANION APP"
+        android:textColor="#9BBEFF"
+        android:textSize="12sp" />
+
+    <!-- Scout face icon — fills the center -->
+    <ImageView
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:layout_marginBottom="32dp"
+        android:src="@mipmap/ic_launcher" />
+
+    <!-- Animated rotating message — clip so slide animation stays inside bounds -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:clipChildren="true"
+        android:layout_marginBottom="28dp">
+
+        <TextView
+            android:id="@+id/downloadMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:lineSpacingMultiplier="1.3" />
+
+    </FrameLayout>
+
+    <!-- Spacer pushes progress to bottom -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Progress bar -->
+    <ProgressBar
+        android:id="@+id/downloadProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="8dp"
+        android:layout_marginBottom="8dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="#9BBEFF"
+        android:progressBackgroundTint="#1E2A45" />
+
+    <!-- Percentage + size/time row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/downloadSizeText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#6B7FA8"
+            android:textSize="13sp"
+            android:text="" />
+
+        <TextView
+            android:id="@+id/downloadPercent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#9BBEFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:text="0%" />
+
+    </LinearLayout>
+
+</LinearLayout>
