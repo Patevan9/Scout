@@ -589,6 +589,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
         captionsEnabled = scoutPrefs.getBoolean("closed_captions", false)
+        if (!captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.visibility = View.GONE
+        }
 
         resumeSystems()
 
