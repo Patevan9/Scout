@@ -2352,6 +2352,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             })
 
+            val sttOk = SpeechRecognizer.isRecognitionAvailable(this)
+
             val out = bootStatus.build()
 
             speak(out, true)
@@ -2360,6 +2362,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             journalDb.add("Booted. Spoke: $out")
 
+            if (!sttOk) {
+                handler.postDelayed({
+                    val msg = "One thing — I can't hear on this device. Speech recognition may not be installed. Check your device's voice settings when you get a chance."
+                    speak(msg, false)
+                    journalDb.add("STT unavailable at boot.")
+                }, 4000L)
+            }
+
+        } else {
+            // TTS failed to initialize — Scout cannot speak. Show a visible alert.
+            runOnUiThread {
+                android.widget.Toast.makeText(
+                    this,
+                    "Scout's voice isn't working. Please restart the app. If this keeps happening, check Text-to-Speech in your device settings.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            journalDb.add("TTS init failed at boot.")
         }
 
     }
