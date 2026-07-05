@@ -218,62 +218,72 @@ Three buttons: **Approve** · **Not now** · **Never suggest this**
 
 ---
 
-### Tier 2 — Builder's Workshop (Scout 1.5 / 2.0) — For developers and power users
+### Tier 2 — Scout Dev Build (Patrick only — never on Play Store)
 
-Inside Settings → **Builder's Workshop**, a toggle:
-> *Developer Mode — Allow Scout to create development proposals.*
+**This feature does not ship in the Play Store APK at all.** Not hidden — literally absent from the compiled release build. Android build variants ensure the code is stripped at compile time.
 
-When on, Scout can generate structured development proposals across six categories:
+**Two build variants:**
+- `standard` (Play Store) — Tier 1 behavior suggestions only. No developer code present.
+- `dev` (Patrick's devices only, sideloaded) — Full telemetry + engineering observations.
 
-| Icon | Type | Example |
-|---|---|---|
-| 🐞 | Bug Report | Mis-identification happening too often |
-| 💡 | Feature Idea | New phrase for low-battery response |
-| ⚡ | Performance | Boot time consistently over 8 seconds |
-| 🧠 | Memory Improvement | Same fact corrected 4 times this week |
-| 🎥 | Vision Improvement | Dog recognition missing in certain lighting |
-| 🎤 | Voice Improvement | STT mishearing wake word more than usual |
-
-**Each proposal card shows:**
-- What I noticed
-- Why I think this should change
-- Estimated benefit
-- Risk: Low / Medium / High
-- Files likely affected *(optional)*
-- **Export Proposal** button
-
-**Export Proposal** is the key feature. Scout generates a clean, formatted text brief that Patrick can copy, share, or paste directly into a Claude session. Scout is not editing code — he is writing his own development tickets. Example output:
-
+**Compile-time flag in `build.gradle.kts`:**
+```kotlin
+productFlavors {
+    create("standard") {
+        buildConfigField("boolean", "DEVELOPER_MODE", "false")
+    }
+    create("dev") {
+        buildConfigField("boolean", "DEVELOPER_MODE", "true")
+    }
+}
 ```
-SCOUT DEVELOPMENT PROPOSAL
-Generated: July 5, 2026
+In release builds, `if (BuildConfig.DEVELOPER_MODE)` compiles to `if (false)` — the entire block is stripped. Nothing to decompile or discover.
 
-Type: 🧠 Memory Improvement
-What I noticed: The same face has been mis-identified 4 times this session.
-Why this should change: Recognition confidence is borderline at current threshold.
-Estimated benefit: Fewer corrections during family time.
-Risk: Low
-Files likely affected: PeopleDb.kt, MainActivity.kt
-```
+**What Scout Dev shows — telemetry and observations, not code proposals:**
 
-Builder's Workshop is invisible to regular users. 99% of families will never see it.
+Scout surfaces real data from running on Patrick's devices. Patrick (and Claude) decide what to do with it.
 
----
+> *"I've had 14 failed face recognitions today."*
+> *"Wake-word detection dropped after yesterday's update."*
+> *"Battery usage increased by 12% compared to last week."*
+> *"Gemini failed 8 times today — mostly between 6 and 7pm."*
+> *"TinyLlama boot time has been averaging 11 seconds this week."*
+> *"The same face has been mis-identified 4 times today."*
 
-### ProposalDb schema (shared by both tiers)
+These are observations, not commands. Scout never decides what to fix. Patrick sees the data, starts a Claude session, and says "Scout noticed X — let's fix it." Scout is an engineering partner, not an autonomous programmer.
+
+**Scout Dev telemetry to collect:**
+- Face recognition: success rate, failure rate, per-person accuracy
+- Wake word: detection rate, false positive rate, post-update drops
+- Gemini: call count, failure count, timeout rate, time-of-day patterns
+- TinyLlama: boot time trends, memory usage
+- TTS/STT: failure counts, error codes seen
+- Battery: usage trend week-over-week
+- Memory: correction frequency per fact type
+
+**ProposalDb schema (Tier 1 shared only — Tier 2 uses a separate TelemetryDb):**
 
 ```sql
+-- Tier 1 (standard build)
 CREATE TABLE proposals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    tier            TEXT    NOT NULL,  -- "behavior" (Tier 1) | "developer" (Tier 2)
-    category        TEXT    NOT NULL,  -- "parameter"|"behavior"|"phrase" (T1) or "bug"|"feature"|"performance"|"memory"|"vision"|"voice" (T2)
-    suggestion_text TEXT    NOT NULL,  -- First-person family text (T1) or structured title (T2)
-    detail_json     TEXT    NOT NULL,  -- Full details; apply JSON for T1, export text for T2
-    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"|"exported"
+    category        TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase"
+    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text
+    change_json     TEXT    NOT NULL,  -- What to write to SharedPrefs on approval
+    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"
     trigger_reason  TEXT,
     created_at      INTEGER NOT NULL,
     reviewed_at     INTEGER,
     applied_at      INTEGER
+);
+
+-- Tier 2 (dev build only — not compiled into standard/release)
+CREATE TABLE telemetry_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT    NOT NULL,  -- "face_fail"|"wake_miss"|"gemini_fail"|"tts_error"|"boot_time" etc.
+    value       REAL,              -- Numeric value where applicable (ms, count, %)
+    context     TEXT,              -- Extra detail (person name, error code, etc.)
+    recorded_at INTEGER NOT NULL
 );
 ```
 
@@ -281,10 +291,10 @@ CREATE TABLE proposals (
 
 Tier 1 session: `ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings "Scout's Suggestions" UI · `ApplyProposal.kt`
 
-Tier 2 session (later): Builder's Workshop Settings section · Developer toggle · Export Proposal formatter · Proposal category cards UI
+Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.kt` (hooks into existing fail/miss points) · Scout Dev dashboard UI (observations list) · build variant wiring in `build.gradle.kts`
 
 ■ Tier 1 design approved July 5, 2026 — build post-launch Scout 1.1.
-■ Tier 2 design approved July 5, 2026 — build Scout 1.5 or 2.0.
+■ Tier 2 design approved July 5, 2026 — Scout Dev build, Patrick only, never Play Store.
 
 ---
 

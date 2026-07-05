@@ -629,38 +629,45 @@ Triggers: wrong face corrected 3+ times · user says "stop" repeatedly · greeti
 
 ---
 
-### Tier 2 — Builder's Workshop (Scout 1.5/2.0) — Developers/power users
+### Tier 2 — Scout Dev Build (Patrick only — never ships on Play Store)
 
-Hidden inside Settings → Builder's Workshop behind a toggle: *"Developer Mode — Allow Scout to create development proposals."* 99% of families never see this.
+**Critical architectural decision:** The developer features are NOT hidden in the Play Store APK — they are absent. Android build variants ensure the code is stripped entirely at compile time. Nothing to decompile or discover.
 
-Six proposal categories: 🐞 Bug · 💡 Feature · ⚡ Performance · 🧠 Memory · 🎥 Vision · 🎤 Voice
+**Build variants (`build.gradle.kts`):**
+```kotlin
+productFlavors {
+    create("standard") { buildConfigField("boolean", "DEVELOPER_MODE", "false") }
+    create("dev")      { buildConfigField("boolean", "DEVELOPER_MODE", "true")  }
+}
+```
+`if (BuildConfig.DEVELOPER_MODE)` in release builds compiles to `if (false)` → entire block stripped.
 
-Each card shows: What I noticed · Why this should change · Estimated benefit · Risk (Low/Medium/High) · Files likely affected
+**Scout Dev = telemetry and observations, not code generation.**
 
-**Export Proposal button** — generates a clean formatted brief that Patrick copies into a Claude session. Scout writes his own development tickets. Scout never touches compiled code.
+Scout surfaces real data from running on Patrick's devices. Patrick (and Claude) decide what to do with it. Scout is an engineering partner, not an autonomous programmer.
 
----
+Examples:
+- "I've had 14 failed face recognitions today."
+- "Wake-word detection dropped after yesterday's update."
+- "Battery usage increased by 12% compared to last week."
+- "Gemini failed 8 times today — mostly between 6 and 7pm."
+- "TinyLlama boot time has been averaging 11 seconds this week."
 
-### ProposalDb schema (shared by both tiers)
+**TelemetryDb** (dev build only — not compiled into standard/release):
 ```sql
-CREATE TABLE proposals (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    tier            TEXT    NOT NULL,  -- "behavior" (Tier 1) | "developer" (Tier 2)
-    category        TEXT    NOT NULL,  -- T1: "parameter"|"behavior"|"phrase" / T2: "bug"|"feature"|"performance"|"memory"|"vision"|"voice"
-    suggestion_text TEXT    NOT NULL,  -- First-person family text (T1) or structured title (T2)
-    detail_json     TEXT    NOT NULL,  -- Apply JSON (T1) or export text (T2)
-    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"|"exported"
-    trigger_reason  TEXT,
-    created_at      INTEGER NOT NULL,
-    reviewed_at     INTEGER,
-    applied_at      INTEGER
+CREATE TABLE telemetry_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT    NOT NULL,  -- "face_fail"|"wake_miss"|"gemini_fail"|"tts_error"|"boot_time" etc.
+    value       REAL,
+    context     TEXT,
+    recorded_at INTEGER NOT NULL
 );
 ```
 
 ### Files to build
 Tier 1 session: `ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings "Scout's Suggestions" UI · `ApplyProposal.kt`
 
-Tier 2 session (later): Builder's Workshop Settings section · developer toggle · Export Proposal formatter · proposal category cards UI
+Tier 2 session (Scout Dev, 1.5+): `TelemetryDb.kt` · `TelemetryCollector.kt` · Scout Dev dashboard UI · build variant wiring
 
 ---
 

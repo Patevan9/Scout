@@ -176,7 +176,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
-- **Scout Behavior Learning — two tiers** — Tier 1 (Scout 1.1): "Scout can learn small preferences with your approval." Family sees first-person suggestions + Approve/Not now/Never suggest this. No technical language. Tier 2 (Scout 1.5/2.0): Builder's Workshop — developer toggle reveals six proposal categories (Bug/Feature/Performance/Memory/Vision/Voice) with Export Proposal button that generates a formatted brief for Claude sessions. Scout writes his own development tickets. Schema designed July 5. (Master Summary §16)
+- **Scout Behavior Learning — two tiers** — Tier 1 (Scout 1.1): "Scout can learn small preferences with your approval." Family sees first-person suggestions + Approve/Not now/Never suggest this. No technical language. Tier 2 (Scout Dev build, 1.5+): NOT in the Play Store APK — absent, not hidden. Android build variants (`standard` vs `dev`, `BuildConfig.DEVELOPER_MODE`). Scout Dev is a telemetry/observation dashboard: "I've had 14 failed face recognitions today." / "Wake-word detection dropped after yesterday's update." Scout surfaces the data; Patrick and Claude decide the fix. TelemetryDb + TelemetryCollector. (Master Summary §16)
 - Permanent vs temporary memory sorting
 - Caring follow-up loop
 - Full mood system wired in
