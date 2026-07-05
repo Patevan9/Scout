@@ -184,68 +184,78 @@ Payment: Google Play In-App Billing. All four products are consumable (so users 
 
 ---
 
-## ■ Scout Self-Improvement Proposal System — Scout 1.1+
+## ■ Scout Behavior Learning — Scout 1.1+
 
-One of Scout's most unique long-term features. Scout acts as a junior developer who notices problems and opportunities, generates proposals, and waits for Patrick's approval before anything changes. Patrick stays in full control. Nothing ever changes silently.
+**Public-facing description:** "Scout can learn small preferences with your approval."
 
-### How it works
+Scout notices patterns and suggests small adjustments to how he behaves. The family sees simple, friendly suggestions in plain English and taps one button to decide. Nothing ever changes without approval.
 
-1. **Scout notices something** — a repeated face recognition miss, too many Gemini timeouts, a phrase appearing too often, a behavior the user keeps correcting.
-2. **Scout generates a proposal** — explains the problem, describes the change, shows the risk level, lists affected files.
-3. **Patrick reviews in Settings → "Scout's Ideas"** — Approve / Deny / Ask for revision.
-4. **If approved:**
-   - *Parameter proposals* → Scout writes the new value to SharedPrefs/DB immediately. No build needed.
-   - *Code proposals* → Scout formats the change clearly so the next Claude session can implement it.
-5. **Everything is logged** — what changed, why, when. Revert is always possible.
+### What families see (Settings → "Scout's Suggestions")
 
-### Proposal types
+Scout speaks in first person, warmly:
 
-| Type | Example | Can self-apply? |
-|---|---|---|
-| `parameter` | Raise face threshold from 0.65 to 0.68 | ✓ Yes — writes to SharedPrefs |
-| `phrase` | Add 3 new BOOT_OFFLINE phrases | ✓ Yes — writes to config DB |
-| `behavior` | Stop greeting after 3 greetings per day | ✓ Yes — writes behavior flag |
-| `code` | Add low-light face detection boost | ✗ No — formatted for next Claude session |
+> *"I think I should wait a little longer before answering."*
+> *"I should be quieter at night."*
+> *"I should stop mentioning the weather unless asked."*
+> *"I should use shorter answers."*
+> *"I should not greet you every time you walk by."*
+> *"I should be more careful recognizing Elijah."*
+
+Three buttons per suggestion:
+- **Approve** → Scout applies the change immediately
+- **Not now** → dismissed for this session, may resurface later
+- **Never suggest this** → permanently suppressed, never shown again
+
+No technical language. No file names. No risk levels visible to the family.
+
+### What triggers a suggestion (behind the scenes)
+
+- Same wrong face name corrected 3+ times → "I should be more careful recognizing [name]."
+- User frequently says "stop" or "that's enough" → "I should use shorter answers."
+- Gemini fails repeatedly → "I should rely more on my offline brain."
+- Greeting fires within seconds of a previous greeting → "I should not greet you every time you walk by."
+- Same fact corrected more than once → "I should ask before remembering new things."
+- TTS fires after 9pm frequently → "I should be quieter at night."
+
+### Architecture (behind the scenes — not visible to families)
+
+Same safe architecture as originally designed. Nothing Scout suggests is visible as "code" or "developer work" to the family. Internally:
+- `parameter` proposals → write to SharedPrefs/ScoutConfig on approval
+- `behavior` proposals → write a behavior flag to SharedPrefs
+- `phrase` proposals → update phrase pool in config DB
+- `code` proposals → internal only, never shown to family, flagged for next Claude session
 
 ### ProposalDb schema (SQLite)
 
 ```sql
 CREATE TABLE proposals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    type            TEXT    NOT NULL,  -- "parameter" | "code" | "phrase" | "behavior"
-    title           TEXT    NOT NULL,  -- "Raise face threshold to 0.68f"
-    description     TEXT    NOT NULL,  -- Why Scout wants the change
-    proposed_change TEXT    NOT NULL,  -- JSON for params; formatted diff summary for code
-    affected_files  TEXT,              -- Comma-separated (code proposals only)
-    risk_level      TEXT    NOT NULL,  -- "low" | "medium" | "high"
-    status          TEXT    NOT NULL,  -- "pending" | "approved" | "denied" | "applied" | "reverted"
-    scout_reasoning TEXT,              -- What triggered this proposal (e.g. "corrected 3 times today")
-    created_at      INTEGER NOT NULL,  -- Unix timestamp ms
-    reviewed_at     INTEGER,           -- When Patrick decided
-    applied_at      INTEGER            -- When change was actually applied (approved params only)
+    type            TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase" | "code" (internal only)
+    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text shown in UI
+    change_json     TEXT    NOT NULL,  -- JSON describing what to apply on approval
+    status          TEXT    NOT NULL,  -- "pending" | "approved" | "dismissed" | "suppressed" | "applied" | "reverted"
+    trigger_reason  TEXT,              -- Internal: what pattern triggered this
+    created_at      INTEGER NOT NULL,
+    reviewed_at     INTEGER,
+    applied_at      INTEGER
 );
 ```
 
-`proposed_change` JSON examples:
-- Parameter: `{"key":"face_threshold","current":"0.65","proposed":"0.68","prefs_file":"scout_memory"}`
-- Code: `{"summary":"Add low-light boost in FaceEmbedder","files":["FaceEmbedder.kt"],"change":"Increase contrast normalization for embeddings below brightness threshold 0.3"}`
-
-### What ProposalDetector watches for (automatic triggers)
-
-- Same wrong face name corrected 3+ times → propose threshold adjustment
-- Gemini fails >5 times in a day → propose timeout reduction
-- TinyLlama takes >10s to load consistently → propose nThreads or nCtx reduction
-- Same phrase appears back-to-back despite anti-repeat → propose adding more pool variety
-- Same fact corrected multiple times → propose a "confirm before storing" mode
-- User opens Settings >3 times in a week → propose adding a shortcut
+`status` values:
+- `pending` — waiting for family decision
+- `approved` → triggers apply logic
+- `dismissed` — "Not now" — can resurface after a cooldown
+- `suppressed` — "Never suggest this" — ProposalDetector skips this suggestion type permanently
+- `applied` — change was written successfully
+- `reverted` — change was undone
 
 ### Files needed (future session)
 
-- `ProposalDb.kt` — SQLite table, insert/query/update status methods
-- `ProposalDetector.kt` — watches patterns, generates proposals automatically
+- `ProposalDb.kt` — SQLite, insert/query/update status
+- `ProposalDetector.kt` — watches patterns, generates suggestions
 - `ScoutProposal.kt` — data class
-- Settings UI section "Scout's Ideas" — list of pending proposals with Approve/Deny buttons
-- `ApplyProposal.kt` — applies parameter/phrase/behavior proposals; displays code proposals for Claude
+- Settings UI "Scout's Suggestions" — card per pending suggestion, three buttons
+- `ApplyProposal.kt` — applies parameter/behavior/phrase changes on approval
 
 ■ Design approved July 5, 2026. Build in a dedicated session post-launch.
 

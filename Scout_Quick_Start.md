@@ -176,7 +176,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
-- **Scout Self-Improvement Proposal System** — Scout notices problems, generates proposals (type/title/description/risk), Patrick approves/denies in Settings → "Scout's Ideas". Parameter/phrase/behavior proposals self-apply; code proposals formatted for next Claude session. ProposalDb schema designed July 5. Build in dedicated session. (Master Summary §16)
+- **Scout Behavior Learning** — "Scout can learn small preferences with your approval." Scout suggests plain-English adjustments ("I should be quieter at night." / "I should use shorter answers."). Family sees Approve / Not now / Never suggest this. Safe architecture behind the scenes: ProposalDb, SharedPrefs, no silent changes, no code shown to family. Schema designed July 5. Build in dedicated session. (Master Summary §16)
 - Permanent vs temporary memory sorting
 - Caring follow-up loop
 - Full mood system wired in

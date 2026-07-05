@@ -606,49 +606,57 @@ Humans don't remember every sentence — they remember important moments. Scout 
 
 ---
 
-## 16. Scout Self-Improvement Proposal System (Scout 1.1+)
+## 16. Scout Behavior Learning (Scout 1.1+)
 
 **Design approved July 5, 2026.** One of Scout's most unique planned features.
 
-Scout acts as a junior developer — he notices problems and opportunities, generates structured proposals, and waits for Patrick's approval before anything changes. Patrick stays in full control. Nothing ever changes silently.
+**Public-facing name:** "Scout Behavior Learning"
+**Public-facing tagline:** "Scout can learn small preferences with your approval."
+
+Families see friendly first-person suggestions ("I should be quieter at night.") with three buttons: **Approve / Not now / Never suggest this**. No technical language is ever shown to the family. Code proposals are internal only and never surfaced in the UI.
+
+### Family-facing suggestion examples
+- "I think I should wait a little longer before answering."
+- "I should be quieter at night."
+- "I should stop mentioning the weather unless asked."
+- "I should use shorter answers."
+- "I should not greet you every time you walk by."
+- "I should be more careful recognizing [name]."
 
 ### Workflow
-1. Scout notices a pattern (wrong face corrected 3 times, Gemini failing repeatedly, etc.)
-2. Scout generates a proposal: title, description, what changes, which files, risk level
-3. Patrick reviews in Settings → "Scout's Ideas" — Approve / Deny / Revise
-4. If approved: parameter/phrase/behavior proposals apply immediately; code proposals are formatted for the next Claude session
+1. Scout notices a pattern → ProposalDetector generates a suggestion
+2. Family sees suggestion in Settings → "Scout's Suggestions" — Approve / Not now / Never suggest this
+3. If Approved: parameter/behavior/phrase proposals apply immediately (no build)
+4. `code` type proposals exist internally but are never shown to family — flagged for next Claude session
 5. Full log — what changed, why, when. Always revertible.
-
-### Two classes of proposal
-- **Self-applicable** (parameter, phrase, behavior) — Scout writes the change to SharedPrefs or a config DB immediately after approval. No build needed.
-- **Code proposals** — Scout formats the change clearly (files, what to change, risk) so the next Claude session can implement it. Scout is writing his own tickets.
 
 ### ProposalDb schema
 ```sql
 CREATE TABLE proposals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    type            TEXT    NOT NULL,  -- "parameter" | "code" | "phrase" | "behavior"
-    title           TEXT    NOT NULL,
-    description     TEXT    NOT NULL,
-    proposed_change TEXT    NOT NULL,  -- JSON for params; formatted summary for code
-    affected_files  TEXT,
-    risk_level      TEXT    NOT NULL,  -- "low" | "medium" | "high"
-    status          TEXT    NOT NULL,  -- "pending" | "approved" | "denied" | "applied" | "reverted"
-    scout_reasoning TEXT,
+    type            TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase" | "code" (internal only)
+    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text shown in UI
+    change_json     TEXT    NOT NULL,  -- JSON describing what to apply on approval
+    status          TEXT    NOT NULL,  -- "pending" | "approved" | "dismissed" | "suppressed" | "applied" | "reverted"
+    trigger_reason  TEXT,              -- Internal: what pattern triggered this
     created_at      INTEGER NOT NULL,
     reviewed_at     INTEGER,
     applied_at      INTEGER
 );
 ```
 
-### Files to build (future session)
-`ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings UI "Scout's Ideas" · `ApplyProposal.kt`
+`status` values: `pending` → waiting · `approved` → triggers apply · `dismissed` → "Not now", can resurface · `suppressed` → "Never suggest this", ProposalDetector skips permanently · `applied` → written · `reverted` → undone
 
 ### ProposalDetector trigger examples
-- Same wrong face corrected 3+ times → propose threshold adjustment
-- Gemini fails >5 times/day → propose timeout reduction
-- TinyLlama load >10s consistently → propose nCtx/nThreads reduction
-- Same fact corrected multiple times → propose confirm-before-store mode
+- Same wrong face corrected 3+ times → "I should be more careful recognizing [name]."
+- User says "stop" / "that's enough" frequently → "I should use shorter answers."
+- Gemini fails repeatedly → "I should rely more on my offline brain."
+- Greeting fires within seconds of last greeting → "I should not greet you every time you walk by."
+- Same fact corrected more than once → "I should ask before remembering new things."
+- TTS fires after 9pm frequently → "I should be quieter at night."
+
+### Files to build (future session)
+`ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings UI "Scout's Suggestions" (card + 3 buttons) · `ApplyProposal.kt`
 
 ---
 
