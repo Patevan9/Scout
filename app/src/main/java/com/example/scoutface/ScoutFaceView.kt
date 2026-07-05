@@ -647,6 +647,21 @@ class ScoutFaceView @JvmOverloads constructor(
             )
             c.drawRect(tmpLidRect, pLidGrad)
             pLidGrad.shader = null
+            // Dome highlight: radial soft spot near top-center → lid reads as convex/rounded bump
+            val lidSpan = (lidBottom - tmpParallaxRect.top).coerceAtLeast(4f)
+            val domeAlpha = (b * 58f).toInt().coerceIn(0, 58)
+            if (domeAlpha > 6) {
+                pLidGrad.shader = RadialGradient(
+                    eye.cx,
+                    tmpParallaxRect.top + lidSpan * 0.20f,
+                    lidSpan * 1.05f,
+                    intArrayOf(Color.argb(domeAlpha, 95, 135, 172), Color.TRANSPARENT),
+                    floatArrayOf(0f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                c.drawRect(tmpLidRect, pLidGrad)
+                pLidGrad.shader = null
+            }
             // Lash-line shadow at the lid's closing edge
             if (b > 0.06f) {
                 pLashLine.color = Color.argb((b * 155).toInt().coerceIn(0, 155), 6, 10, 18)
