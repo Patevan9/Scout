@@ -3099,6 +3099,16 @@ Respond only with Scout's next short reply.
 
             val (factKey, value) = teach
 
+            // Context-aware dog redirect: user said something like "that's Nicolas" (extracted
+            // as FactKey.NAME) but no face is visible and a dog IS visible — they are naming
+            // the dog, not a person. Re-route straight to DOG_NAME.
+            if (factKey == FactKey.NAME && lastFaceCount == 0 &&
+                lastSceneLabels.any { it.first.lowercase() in setOf("dog", "puppy") }) {
+                truthDb.upsertFact(ENTITY_USER_PRIMARY, FactKey.DOG_NAME, value, 1.0f, "spoken_teach")
+                respond(Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value))
+                return true
+            }
+
             if (factKey == FactKey.NAME) {
                 // Hard blocklist — words that can never be a person’s name.
                 // Catches garbled STT output regardless of which pattern matched.

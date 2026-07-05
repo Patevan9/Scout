@@ -34,6 +34,8 @@ object TeachExtractor {
 
     fun extract(input: String): Pair<String, String>? {
         val s = input.lowercase().trim()
+            .replace("that's", "that is")
+            .replace("it's", "it is")
 
         // -------------------------
         // NAME
@@ -137,6 +139,18 @@ object TeachExtractor {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my dog ([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        // "the dog is Nicolas" / "the dog's name is Nicolas"
+        Regex("""\bthe dog'?s name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthe dog is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.DOG_NAME to cleanName(word)
+        }
+        // "that is my dog Nicolas" (also catches "that's my dog Nicolas" via contraction expansion above)
+        Regex("""\bthat is my dog[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
         }
 
