@@ -106,7 +106,11 @@ class ScoutFaceView @JvmOverloads constructor(
 
         lookX  = 0f; lookY  = 0f
         lookVX = 0f; lookVY = 0f
-        thinkGazeY     = 0f
+        thinkGazeY        = 0f
+        thinkGazeX        = 0f
+        thinkGlanceActive = false
+        thinkGlanceSideX  = 0f
+        nextThinkGlanceAt = 0L
         vergenceSmooth = 0f
 
         // FIX 1: reset listening bias smoother
@@ -209,7 +213,11 @@ class ScoutFaceView @JvmOverloads constructor(
     // Tau 160ms — fast enough to feel responsive, slow enough to kill the twitch.
     private var listeningBiasSmooth = 0f
 
-    private var thinkGazeY = 0f
+    private var thinkGazeY       = 0f
+    private var thinkGazeX       = 0f   // X component of thinking glance
+    private var thinkGlanceActive = false
+    private var thinkGlanceSideX  = 0f
+    private var nextThinkGlanceAt = 0L
 
     private var browMicroY      = 0f
     private var browMicroTarget = 0f
@@ -825,11 +833,11 @@ class ScoutFaceView @JvmOverloads constructor(
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
         val thinkingLift  = if (vThinking) {
-            (if (side < 0) 34f else 12f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
+            (if (side < 0) 18f else 16f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
-        val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)  // brows rise slightly when speaking
+        val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)
         val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop +
                 browMicroY + blinkBrowRelax - speechBrowLift
 
@@ -838,19 +846,22 @@ class ScoutFaceView @JvmOverloads constructor(
         val x1   = eye.cx - bw
         val x2   = eye.cx + bw
 
+        // Curious look: inner edges raise slightly, outer edges relax → questioning arch
         val thinkInward = if (vThinking) {
-            if (side < 0) 6f else -6f
+            if (side < 0) 2f else -2f
         } else 0f
+        val thinkInnerLift = if (vThinking) 12f else 0f
 
-        val thinkTilt = if (vThinking && side > 0) 16f else 0f
+        // thinkTilt < 0 on right brow: inner end (x1) goes UP → curious arch
+        val thinkTilt = if (vThinking && side > 0) -10f else 0f
 
         val y1: Float
         val y2: Float
         if (side < 0) {
             y1 = browCy + tilt * 0.5f
-            y2 = browCy - tilt * 0.5f
+            y2 = browCy - tilt * 0.5f - thinkInnerLift  // inner edge of left brow rises when curious
         } else {
-            y1 = browCy - tilt * 0.5f + thinkTilt  // inner end drops when thinking → furrowed look
+            y1 = browCy - tilt * 0.5f + thinkTilt  // inner end of right brow rises (thinkTilt = -10f)
             y2 = browCy + tilt * 0.5f
         }
 
@@ -925,7 +936,7 @@ class ScoutFaceView @JvmOverloads constructor(
 
         } else {
             val mw    = 80f
-            val ctrY  = if (vThinking) cy - 8f else cy + 18f  // control point Y
+            val ctrY  = if (vThinking) cy + 14f else cy + 18f  // control point Y
             val ctrXo = mw * 0.44f                             // control point X offset from cx
             val corY  = cy + 2f                                // corners sit just below center
             tmpPath.reset()
@@ -1063,7 +1074,7 @@ class ScoutFaceView @JvmOverloads constructor(
             focusBreathPhase -= (2f * Math.PI).toFloat()
         }
 
-        val thinkLid = if (vThinking) 0.22f else 0f
+        val thinkLid = 0f
         val targetL = (if (vBatteryPct < 20) lidTiredL else 0.07f) + thinkLid
         val targetR = (if (vBatteryPct < 20) lidTiredR else 0.07f) + thinkLid
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
@@ -1071,17 +1082,32 @@ class ScoutFaceView @JvmOverloads constructor(
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
-            vThinking  -> maxOf(34f, smileLift)
+            vThinking  -> smileLift
             vListening -> maxOf(8f, smileLift)
             else       -> smileLift
         }
         lowerLidSmooth += (lowerLidTarget - lowerLidSmooth) * smoothAlpha(dtMs, 200f)
 
-        val vergenceTarget = if (vThinking) maxOf(vVergence, 0.7f) else vVergence
+        val vergenceTarget = if (vThinking) maxOf(vVergence, 0.3f) else vVergence
         vergenceSmooth += (vergenceTarget - vergenceSmooth) * smoothAlpha(dtMs, 280f)
 
-        val thinkTarget = if (vThinking) -34f else 0f
-        thinkGazeY += (thinkTarget - thinkGazeY) * smoothAlpha(dtMs, 300f)
+        if (vThinking) {
+            if (now >= nextThinkGlanceAt) {
+                thinkGlanceActive = !thinkGlanceActive
+                if (thinkGlanceActive) {
+                    thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (8f + Random.nextFloat() * 12f)
+                    nextThinkGlanceAt = now + Random.nextLong(800, 1800)
+                } else {
+                    nextThinkGlanceAt = now + Random.nextLong(1500, 3800)
+                }
+            }
+        } else {
+            thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
+        }
+        val thinkGazeTargetY = if (thinkGlanceActive) -20f else 0f
+        val thinkGazeTargetX = if (thinkGlanceActive) thinkGlanceSideX else 0f
+        thinkGazeY += (thinkGazeTargetY - thinkGazeY) * smoothAlpha(dtMs, 350f)
+        thinkGazeX += (thinkGazeTargetX - thinkGazeX) * smoothAlpha(dtMs, 380f)
 
         if (!vListening && !vThinking) {
             if (now >= nextBrowMicroAt) {
@@ -1167,7 +1193,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val targetX = if (vDownloading || vSpeaking) {
             0f
         } else {
-            if (vThinking) idleDriftX * 0.5f else if (vThinking) idleDriftX * 0.5f else vLookTargetX + idleDriftX + thinkingScanX
+            if (vThinking) thinkGazeX + idleDriftX * 0.3f else vLookTargetX + idleDriftX + thinkingScanX
         }
 
         val targetY = if (vDownloading || vSpeaking) {
@@ -1315,13 +1341,13 @@ class ScoutFaceView @JvmOverloads constructor(
         val movingSaccade  = abs(saccadeX) > 0.3f || abs(saccadeY) > 0.3f
         val movingBrow     = abs(browMicroY - browMicroTarget) > 0.3f
         val movingVergence = abs(
-            vergenceSmooth - (if (vThinking) maxOf(vVergence, 0.7f) else vVergence)
+            vergenceSmooth - (if (vThinking) maxOf(vVergence, 0.3f) else vVergence)
         ) > 0.01f
         val movingMouth    = abs(mouthOpen) > 0.01f
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
-            vThinking  -> maxOf(34f, smileLift)
+            vThinking  -> smileLift
             vListening -> maxOf(8f, smileLift)
             else       -> smileLift
         }
