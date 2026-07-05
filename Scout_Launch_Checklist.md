@@ -184,80 +184,107 @@ Payment: Google Play In-App Billing. All four products are consumable (so users 
 
 ---
 
-## ■ Scout Behavior Learning — Scout 1.1+
+## ■ Scout Behavior Learning — Two Tiers
 
-**Public-facing description:** "Scout can learn small preferences with your approval."
+---
 
-Scout notices patterns and suggests small adjustments to how he behaves. The family sees simple, friendly suggestions in plain English and taps one button to decide. Nothing ever changes without approval.
+### Tier 1 — Regular Mode (Scout 1.1) — For everyone
 
-### What families see (Settings → "Scout's Suggestions")
+**Public tagline:** "Scout can learn small preferences with your approval."
 
-Scout speaks in first person, warmly:
+Scout notices patterns and suggests simple behavior adjustments in plain, friendly English. The family taps one button. Nothing ever changes without approval. No technical language, no file names, no risk levels shown.
 
-> *"I think I should wait a little longer before answering."*
+**Settings → "Scout's Suggestions"** — Scout speaks warmly in first person:
+
+> *"I'd like to answer a little faster."*
+> *"I noticed you prefer shorter replies."*
+> *"Would you like me to stop announcing battery percentage?"*
 > *"I should be quieter at night."*
-> *"I should stop mentioning the weather unless asked."*
-> *"I should use shorter answers."*
 > *"I should not greet you every time you walk by."*
-> *"I should be more careful recognizing Elijah."*
+> *"I should be more careful recognizing [name]."*
 
-Three buttons per suggestion:
-- **Approve** → Scout applies the change immediately
-- **Not now** → dismissed for this session, may resurface later
-- **Never suggest this** → permanently suppressed, never shown again
+Three buttons: **Approve** · **Not now** · **Never suggest this**
 
-No technical language. No file names. No risk levels visible to the family.
+- Approve → Scout writes the change to SharedPrefs/behavior flag immediately. No build needed.
+- Not now → dismissed, may resurface after cooldown
+- Never suggest this → `suppressed` status, ProposalDetector skips permanently
 
-### What triggers a suggestion (behind the scenes)
-
-- Same wrong face name corrected 3+ times → "I should be more careful recognizing [name]."
-- User frequently says "stop" or "that's enough" → "I should use shorter answers."
-- Gemini fails repeatedly → "I should rely more on my offline brain."
-- Greeting fires within seconds of a previous greeting → "I should not greet you every time you walk by."
-- Same fact corrected more than once → "I should ask before remembering new things."
+**What triggers a suggestion:**
+- Same wrong face corrected 3+ times → "I should be more careful recognizing [name]."
+- User says "stop" / "that's enough" frequently → "I noticed you prefer shorter replies."
+- Greeting fires within seconds of last greeting → "I should not greet you every time you walk by."
 - TTS fires after 9pm frequently → "I should be quieter at night."
+- Same fact corrected more than once → "I should ask before remembering new things."
 
-### Architecture (behind the scenes — not visible to families)
+---
 
-Same safe architecture as originally designed. Nothing Scout suggests is visible as "code" or "developer work" to the family. Internally:
-- `parameter` proposals → write to SharedPrefs/ScoutConfig on approval
-- `behavior` proposals → write a behavior flag to SharedPrefs
-- `phrase` proposals → update phrase pool in config DB
-- `code` proposals → internal only, never shown to family, flagged for next Claude session
+### Tier 2 — Builder's Workshop (Scout 1.5 / 2.0) — For developers and power users
 
-### ProposalDb schema (SQLite)
+Inside Settings → **Builder's Workshop**, a toggle:
+> *Developer Mode — Allow Scout to create development proposals.*
+
+When on, Scout can generate structured development proposals across six categories:
+
+| Icon | Type | Example |
+|---|---|---|
+| 🐞 | Bug Report | Mis-identification happening too often |
+| 💡 | Feature Idea | New phrase for low-battery response |
+| ⚡ | Performance | Boot time consistently over 8 seconds |
+| 🧠 | Memory Improvement | Same fact corrected 4 times this week |
+| 🎥 | Vision Improvement | Dog recognition missing in certain lighting |
+| 🎤 | Voice Improvement | STT mishearing wake word more than usual |
+
+**Each proposal card shows:**
+- What I noticed
+- Why I think this should change
+- Estimated benefit
+- Risk: Low / Medium / High
+- Files likely affected *(optional)*
+- **Export Proposal** button
+
+**Export Proposal** is the key feature. Scout generates a clean, formatted text brief that Patrick can copy, share, or paste directly into a Claude session. Scout is not editing code — he is writing his own development tickets. Example output:
+
+```
+SCOUT DEVELOPMENT PROPOSAL
+Generated: July 5, 2026
+
+Type: 🧠 Memory Improvement
+What I noticed: The same face has been mis-identified 4 times this session.
+Why this should change: Recognition confidence is borderline at current threshold.
+Estimated benefit: Fewer corrections during family time.
+Risk: Low
+Files likely affected: PeopleDb.kt, MainActivity.kt
+```
+
+Builder's Workshop is invisible to regular users. 99% of families will never see it.
+
+---
+
+### ProposalDb schema (shared by both tiers)
 
 ```sql
 CREATE TABLE proposals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    type            TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase" | "code" (internal only)
-    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text shown in UI
-    change_json     TEXT    NOT NULL,  -- JSON describing what to apply on approval
-    status          TEXT    NOT NULL,  -- "pending" | "approved" | "dismissed" | "suppressed" | "applied" | "reverted"
-    trigger_reason  TEXT,              -- Internal: what pattern triggered this
+    tier            TEXT    NOT NULL,  -- "behavior" (Tier 1) | "developer" (Tier 2)
+    category        TEXT    NOT NULL,  -- "parameter"|"behavior"|"phrase" (T1) or "bug"|"feature"|"performance"|"memory"|"vision"|"voice" (T2)
+    suggestion_text TEXT    NOT NULL,  -- First-person family text (T1) or structured title (T2)
+    detail_json     TEXT    NOT NULL,  -- Full details; apply JSON for T1, export text for T2
+    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"|"exported"
+    trigger_reason  TEXT,
     created_at      INTEGER NOT NULL,
     reviewed_at     INTEGER,
     applied_at      INTEGER
 );
 ```
 
-`status` values:
-- `pending` — waiting for family decision
-- `approved` → triggers apply logic
-- `dismissed` — "Not now" — can resurface after a cooldown
-- `suppressed` — "Never suggest this" — ProposalDetector skips this suggestion type permanently
-- `applied` — change was written successfully
-- `reverted` — change was undone
+### Files needed (future sessions)
 
-### Files needed (future session)
+Tier 1 session: `ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings "Scout's Suggestions" UI · `ApplyProposal.kt`
 
-- `ProposalDb.kt` — SQLite, insert/query/update status
-- `ProposalDetector.kt` — watches patterns, generates suggestions
-- `ScoutProposal.kt` — data class
-- Settings UI "Scout's Suggestions" — card per pending suggestion, three buttons
-- `ApplyProposal.kt` — applies parameter/behavior/phrase changes on approval
+Tier 2 session (later): Builder's Workshop Settings section · Developer toggle · Export Proposal formatter · Proposal category cards UI
 
-■ Design approved July 5, 2026. Build in a dedicated session post-launch.
+■ Tier 1 design approved July 5, 2026 — build post-launch Scout 1.1.
+■ Tier 2 design approved July 5, 2026 — build Scout 1.5 or 2.0.
 
 ---
 

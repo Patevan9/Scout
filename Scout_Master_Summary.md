@@ -615,48 +615,52 @@ Humans don't remember every sentence — they remember important moments. Scout 
 
 Families see friendly first-person suggestions ("I should be quieter at night.") with three buttons: **Approve / Not now / Never suggest this**. No technical language is ever shown to the family. Code proposals are internal only and never surfaced in the UI.
 
-### Family-facing suggestion examples
-- "I think I should wait a little longer before answering."
-- "I should be quieter at night."
-- "I should stop mentioning the weather unless asked."
-- "I should use shorter answers."
-- "I should not greet you every time you walk by."
-- "I should be more careful recognizing [name]."
+**Two-tier system. Design approved July 5, 2026.**
 
-### Workflow
-1. Scout notices a pattern → ProposalDetector generates a suggestion
-2. Family sees suggestion in Settings → "Scout's Suggestions" — Approve / Not now / Never suggest this
-3. If Approved: parameter/behavior/phrase proposals apply immediately (no build)
-4. `code` type proposals exist internally but are never shown to family — flagged for next Claude session
-5. Full log — what changed, why, when. Always revertible.
+---
 
-### ProposalDb schema
+### Tier 1 — Regular Mode (Scout 1.1) — For everyone
+
+Family sees "Scout's Suggestions" in Settings. Scout speaks in first person, warmly. Three buttons: **Approve / Not now / Never suggest this**. No technical language ever shown. Applies immediately to SharedPrefs/behavior flags on approval.
+
+Example suggestions: "I'd like to answer a little faster." · "I noticed you prefer shorter replies." · "I should be quieter at night." · "I should be more careful recognizing [name]."
+
+Triggers: wrong face corrected 3+ times · user says "stop" repeatedly · greeting fires within seconds of last · TTS after 9pm · same fact corrected more than once
+
+---
+
+### Tier 2 — Builder's Workshop (Scout 1.5/2.0) — Developers/power users
+
+Hidden inside Settings → Builder's Workshop behind a toggle: *"Developer Mode — Allow Scout to create development proposals."* 99% of families never see this.
+
+Six proposal categories: 🐞 Bug · 💡 Feature · ⚡ Performance · 🧠 Memory · 🎥 Vision · 🎤 Voice
+
+Each card shows: What I noticed · Why this should change · Estimated benefit · Risk (Low/Medium/High) · Files likely affected
+
+**Export Proposal button** — generates a clean formatted brief that Patrick copies into a Claude session. Scout writes his own development tickets. Scout never touches compiled code.
+
+---
+
+### ProposalDb schema (shared by both tiers)
 ```sql
 CREATE TABLE proposals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    type            TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase" | "code" (internal only)
-    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text shown in UI
-    change_json     TEXT    NOT NULL,  -- JSON describing what to apply on approval
-    status          TEXT    NOT NULL,  -- "pending" | "approved" | "dismissed" | "suppressed" | "applied" | "reverted"
-    trigger_reason  TEXT,              -- Internal: what pattern triggered this
+    tier            TEXT    NOT NULL,  -- "behavior" (Tier 1) | "developer" (Tier 2)
+    category        TEXT    NOT NULL,  -- T1: "parameter"|"behavior"|"phrase" / T2: "bug"|"feature"|"performance"|"memory"|"vision"|"voice"
+    suggestion_text TEXT    NOT NULL,  -- First-person family text (T1) or structured title (T2)
+    detail_json     TEXT    NOT NULL,  -- Apply JSON (T1) or export text (T2)
+    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"|"exported"
+    trigger_reason  TEXT,
     created_at      INTEGER NOT NULL,
     reviewed_at     INTEGER,
     applied_at      INTEGER
 );
 ```
 
-`status` values: `pending` → waiting · `approved` → triggers apply · `dismissed` → "Not now", can resurface · `suppressed` → "Never suggest this", ProposalDetector skips permanently · `applied` → written · `reverted` → undone
+### Files to build
+Tier 1 session: `ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings "Scout's Suggestions" UI · `ApplyProposal.kt`
 
-### ProposalDetector trigger examples
-- Same wrong face corrected 3+ times → "I should be more careful recognizing [name]."
-- User says "stop" / "that's enough" frequently → "I should use shorter answers."
-- Gemini fails repeatedly → "I should rely more on my offline brain."
-- Greeting fires within seconds of last greeting → "I should not greet you every time you walk by."
-- Same fact corrected more than once → "I should ask before remembering new things."
-- TTS fires after 9pm frequently → "I should be quieter at night."
-
-### Files to build (future session)
-`ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings UI "Scout's Suggestions" (card + 3 buttons) · `ApplyProposal.kt`
+Tier 2 session (later): Builder's Workshop Settings section · developer toggle · Export Proposal formatter · proposal category cards UI
 
 ---
 
