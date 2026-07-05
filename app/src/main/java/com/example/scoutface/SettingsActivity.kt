@@ -224,10 +224,10 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("CONNECTION"))
         body.addView(cardGroup(
-            toggleRow("Offline Mode", "Only use data stored on this device",
-                !memPrefs.getBoolean("gemini_enabled", true)
-            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", !on).apply() },
-            navRow("API Key", "", "Connect Scout to online services") { push(S_APIKEY) },
+            toggleRow("Online Features", "Use internet services when available",
+                memPrefs.getBoolean("gemini_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", on).apply() },
+            navRow("Online Services", "", "Manage API keys and providers") { push(S_APIKEY) },
             navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") }
         ))
 
@@ -399,7 +399,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun apiKeyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("API Key", "Connect Scout to online services."))
+        root.addView(subHeader("Online Services", "Manage API keys and providers."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
