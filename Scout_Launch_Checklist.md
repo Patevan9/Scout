@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 4, 2026 | Version 11**
+**What Scout needs to be worth $9.99 | Updated July 5, 2026 | Version 12**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -184,9 +184,75 @@ Payment: Google Play In-App Billing. All four products are consumable (so users 
 
 ---
 
+## ■ Scout Self-Improvement Proposal System — Scout 1.1+
+
+One of Scout's most unique long-term features. Scout acts as a junior developer who notices problems and opportunities, generates proposals, and waits for Patrick's approval before anything changes. Patrick stays in full control. Nothing ever changes silently.
+
+### How it works
+
+1. **Scout notices something** — a repeated face recognition miss, too many Gemini timeouts, a phrase appearing too often, a behavior the user keeps correcting.
+2. **Scout generates a proposal** — explains the problem, describes the change, shows the risk level, lists affected files.
+3. **Patrick reviews in Settings → "Scout's Ideas"** — Approve / Deny / Ask for revision.
+4. **If approved:**
+   - *Parameter proposals* → Scout writes the new value to SharedPrefs/DB immediately. No build needed.
+   - *Code proposals* → Scout formats the change clearly so the next Claude session can implement it.
+5. **Everything is logged** — what changed, why, when. Revert is always possible.
+
+### Proposal types
+
+| Type | Example | Can self-apply? |
+|---|---|---|
+| `parameter` | Raise face threshold from 0.65 to 0.68 | ✓ Yes — writes to SharedPrefs |
+| `phrase` | Add 3 new BOOT_OFFLINE phrases | ✓ Yes — writes to config DB |
+| `behavior` | Stop greeting after 3 greetings per day | ✓ Yes — writes behavior flag |
+| `code` | Add low-light face detection boost | ✗ No — formatted for next Claude session |
+
+### ProposalDb schema (SQLite)
+
+```sql
+CREATE TABLE proposals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    type            TEXT    NOT NULL,  -- "parameter" | "code" | "phrase" | "behavior"
+    title           TEXT    NOT NULL,  -- "Raise face threshold to 0.68f"
+    description     TEXT    NOT NULL,  -- Why Scout wants the change
+    proposed_change TEXT    NOT NULL,  -- JSON for params; formatted diff summary for code
+    affected_files  TEXT,              -- Comma-separated (code proposals only)
+    risk_level      TEXT    NOT NULL,  -- "low" | "medium" | "high"
+    status          TEXT    NOT NULL,  -- "pending" | "approved" | "denied" | "applied" | "reverted"
+    scout_reasoning TEXT,              -- What triggered this proposal (e.g. "corrected 3 times today")
+    created_at      INTEGER NOT NULL,  -- Unix timestamp ms
+    reviewed_at     INTEGER,           -- When Patrick decided
+    applied_at      INTEGER            -- When change was actually applied (approved params only)
+);
+```
+
+`proposed_change` JSON examples:
+- Parameter: `{"key":"face_threshold","current":"0.65","proposed":"0.68","prefs_file":"scout_memory"}`
+- Code: `{"summary":"Add low-light boost in FaceEmbedder","files":["FaceEmbedder.kt"],"change":"Increase contrast normalization for embeddings below brightness threshold 0.3"}`
+
+### What ProposalDetector watches for (automatic triggers)
+
+- Same wrong face name corrected 3+ times → propose threshold adjustment
+- Gemini fails >5 times in a day → propose timeout reduction
+- TinyLlama takes >10s to load consistently → propose nThreads or nCtx reduction
+- Same phrase appears back-to-back despite anti-repeat → propose adding more pool variety
+- Same fact corrected multiple times → propose a "confirm before storing" mode
+- User opens Settings >3 times in a week → propose adding a shortcut
+
+### Files needed (future session)
+
+- `ProposalDb.kt` — SQLite table, insert/query/update status methods
+- `ProposalDetector.kt` — watches patterns, generates proposals automatically
+- `ScoutProposal.kt` — data class
+- Settings UI section "Scout's Ideas" — list of pending proposals with Approve/Deny buttons
+- `ApplyProposal.kt` — applies parameter/phrase/behavior proposals; displays code proposals for Claude
+
+■ Design approved July 5, 2026. Build in a dedicated session post-launch.
+
+---
+
 ## ■ After Launch — Scout 1.1 Growing Up and Beyond
 
-- Proposal Sandbox — 'Want me to remember that?' confirm step
 - Permanent vs temporary memory — birthday vs appointment sorting
 - Caring follow-up loop — 'How was your appointment?' then forget
 - Full mood system — CALM / CURIOUS / HAPPY / THINKING / CONCERNED
@@ -215,4 +281,4 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Updated July 4, 2026 | Version 11 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 5, 2026 | Version 12 | For Patrick, Diana, Elijah, and Scout*

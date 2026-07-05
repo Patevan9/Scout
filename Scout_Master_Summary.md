@@ -1,5 +1,5 @@
 # Project Scout — Master Project Summary
-**Last updated: July 4, 2026 | Version 40**
+**Last updated: July 5, 2026 | Version 41**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
@@ -606,11 +606,53 @@ Humans don't remember every sentence — they remember important moments. Scout 
 
 ---
 
-## 16. Future Vision — Scout Writes His Own Behavioral Code
+## 16. Scout Self-Improvement Proposal System (Scout 1.1+)
 
-Scout notices patterns in user behavior, generates a suggestion for a new behavior, and asks permission before activating it. Nothing changes without explicit consent. Scout cannot write compiled Kotlin — but CAN generate behavioral scripts, response patterns, routing rules, and habit triggers within the existing safe framework.
+**Design approved July 5, 2026.** One of Scout's most unique planned features.
 
-**Future Polish Ideas (Post-Launch, Scout 2.0+):**
+Scout acts as a junior developer — he notices problems and opportunities, generates structured proposals, and waits for Patrick's approval before anything changes. Patrick stays in full control. Nothing ever changes silently.
+
+### Workflow
+1. Scout notices a pattern (wrong face corrected 3 times, Gemini failing repeatedly, etc.)
+2. Scout generates a proposal: title, description, what changes, which files, risk level
+3. Patrick reviews in Settings → "Scout's Ideas" — Approve / Deny / Revise
+4. If approved: parameter/phrase/behavior proposals apply immediately; code proposals are formatted for the next Claude session
+5. Full log — what changed, why, when. Always revertible.
+
+### Two classes of proposal
+- **Self-applicable** (parameter, phrase, behavior) — Scout writes the change to SharedPrefs or a config DB immediately after approval. No build needed.
+- **Code proposals** — Scout formats the change clearly (files, what to change, risk) so the next Claude session can implement it. Scout is writing his own tickets.
+
+### ProposalDb schema
+```sql
+CREATE TABLE proposals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    type            TEXT    NOT NULL,  -- "parameter" | "code" | "phrase" | "behavior"
+    title           TEXT    NOT NULL,
+    description     TEXT    NOT NULL,
+    proposed_change TEXT    NOT NULL,  -- JSON for params; formatted summary for code
+    affected_files  TEXT,
+    risk_level      TEXT    NOT NULL,  -- "low" | "medium" | "high"
+    status          TEXT    NOT NULL,  -- "pending" | "approved" | "denied" | "applied" | "reverted"
+    scout_reasoning TEXT,
+    created_at      INTEGER NOT NULL,
+    reviewed_at     INTEGER,
+    applied_at      INTEGER
+);
+```
+
+### Files to build (future session)
+`ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings UI "Scout's Ideas" · `ApplyProposal.kt`
+
+### ProposalDetector trigger examples
+- Same wrong face corrected 3+ times → propose threshold adjustment
+- Gemini fails >5 times/day → propose timeout reduction
+- TinyLlama load >10s consistently → propose nCtx/nThreads reduction
+- Same fact corrected multiple times → propose confirm-before-store mode
+
+---
+
+## 16b. Future Polish Ideas (Post-Launch, Scout 2.0+)
 
 - Voice Recognition (Future) — Optional voice enrollment for family members. Advisory only — does not replace TruthDb or user-confirmed identity. Not for launch or 1.1.
 - Fun startup/loading messages — Rotating, self-aware, Scout-voiced lines for the first-launch brain download screen.
@@ -733,4 +775,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 4, 2026 | Version 40 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 5, 2026 | Version 41 | Single source of truth — upload every session*

@@ -1,5 +1,5 @@
 # Project Scout — Quick Start
-**Last updated: July 4, 2026 | Version 17**
+**Last updated: July 5, 2026 | Version 18**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
 For full technical details, use the Scout Master Summary (v40).
@@ -176,7 +176,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
-- Proposal Sandbox — 'Want me to remember that?' confirm step
+- **Scout Self-Improvement Proposal System** — Scout notices problems, generates proposals (type/title/description/risk), Patrick approves/denies in Settings → "Scout's Ideas". Parameter/phrase/behavior proposals self-apply; code proposals formatted for next Claude session. ProposalDb schema designed July 5. Build in dedicated session. (Master Summary §16)
 - Permanent vs temporary memory sorting
 - Caring follow-up loop
 - Full mood system wired in
@@ -186,6 +186,7 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 - Robot renaming in Settings
 - "Test Connection" button — verify API key without burning quota
 - Public roadmap / What's New page on website
+- Support Scout screen (Google Play Billing, 4 tiers: $3/$5/$10/$25, product IDs support_3/5/10/25, consumable)
 
 ---
 
@@ -213,4 +214,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 4, 2026 | Version 17 | Upload every session | For full details use Master Summary v40*
+*Project Scout Quick Start | Last updated: July 5, 2026 | Version 18 | Upload every session | For full details use Master Summary v41*
