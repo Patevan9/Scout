@@ -708,7 +708,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
         val thinkingLift  = if (vThinking) {
-            (if (side < 0) 34f else 0f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
+            (if (side < 0) 34f else 12f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
@@ -731,7 +731,7 @@ class ScoutFaceView @JvmOverloads constructor(
             y1 = browCy + tilt * 0.5f
             y2 = browCy - tilt * 0.5f
         } else {
-            y1 = browCy - tilt * 0.5f
+            y1 = browCy - tilt * 0.5f + thinkTilt  // inner end drops when thinking → furrowed look
             y2 = browCy + tilt * 0.5f
         }
 
@@ -808,7 +808,8 @@ class ScoutFaceView @JvmOverloads constructor(
             val mw = 80f
             tmpPath.reset()
             tmpPath.moveTo(cx - mw, cy)
-            tmpPath.quadTo(cx, cy + 20f, cx + mw, cy)
+            val mouthControlY = if (vThinking) cy - 10f else cy + 20f
+            tmpPath.quadTo(cx, mouthControlY, cx + mw, cy)
             pMouthLine.strokeWidth = 10f
             c.drawPath(tmpPath, pMouthLine)
         }
