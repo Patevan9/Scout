@@ -140,6 +140,11 @@ class ScoutFaceView @JvmOverloads constructor(
         nextMicroTremorAt = 0L
         pendingDoubleBlink = false
 
+        faceIdleDriftX = 0f; faceIdleDriftY = 0f
+        faceIdleDriftTargetX = 0f; faceIdleDriftTargetY = 0f
+        nextFaceDriftAt = 0L
+        blinkDipY = 0f; blinkBrowRelax = 0f
+
         // FIX 3: reset wave gate
         waveActive = false
 
@@ -234,6 +239,17 @@ class ScoutFaceView @JvmOverloads constructor(
 
     // Double-blink: when set, nextBlinkAt fires quickly for a follow-up blink
     private var pendingDoubleBlink = false
+
+    // Whole-face gentle drift — every feature moves together as one unit (the "alive" feel)
+    private var faceIdleDriftX       = 0f
+    private var faceIdleDriftY       = 0f
+    private var faceIdleDriftTargetX = 0f
+    private var faceIdleDriftTargetY = 0f
+    private var nextFaceDriftAt      = 0L
+
+    // Secondary blink motion: face dips + brows relax when a blink fires
+    private var blinkDipY      = 0f
+    private var blinkBrowRelax = 0f
 
     private var saccadeX       = 0f
     private var saccadeY       = 0f
@@ -461,9 +477,10 @@ class ScoutFaceView @JvmOverloads constructor(
     //  DRAW FACE
     // ======================================================
     private fun drawFace(c: Canvas, now: Long) {
-        val breathOffset = sin(breathPhase) * BREATH_AMPLITUDE
-        val faceCy       = VH * 0.46f + breathOffset
-        val faceCx       = VW * 0.50f
+        val breathOffset  = sin(breathPhase) * BREATH_AMPLITUDE
+        val breathOffsetX = sin(breathPhase * 0.618f + 1.1f) * 1.5f  // gentle X sway on a different phase
+        val faceCy = VH * 0.46f + breathOffset  + faceIdleDriftY + blinkDipY
+        val faceCx = VW * 0.50f + breathOffsetX + faceIdleDriftX
 
         val eyeW      = 510f
         val eyeH      = 394f
@@ -812,7 +829,9 @@ class ScoutFaceView @JvmOverloads constructor(
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
-        val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop + browMicroY
+        val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)  // brows rise slightly when speaking
+        val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop +
+                browMicroY + blinkBrowRelax - speechBrowLift
 
         val bw   = eye.eyeRect.width() * 0.40f
         val tilt = 22f
@@ -1117,6 +1136,15 @@ class ScoutFaceView @JvmOverloads constructor(
         microTremorX += (microTremorTargetX - microTremorX) * smoothAlpha(dtMs, 380f)
         microTremorY += (microTremorTargetY - microTremorY) * smoothAlpha(dtMs, 380f)
 
+        // Whole-face idle drift: slow wandering of the entire face position as one unit
+        if (now >= nextFaceDriftAt) {
+            faceIdleDriftTargetX = (Random.nextFloat() * 2f - 1f) * 3f
+            faceIdleDriftTargetY = (Random.nextFloat() * 2f - 1f) * 2f
+            nextFaceDriftAt      = now + Random.nextLong(3500, 7000)
+        }
+        faceIdleDriftX += (faceIdleDriftTargetX - faceIdleDriftX) * smoothAlpha(dtMs, 2800f)
+        faceIdleDriftY += (faceIdleDriftTargetY - faceIdleDriftY) * smoothAlpha(dtMs, 2800f)
+
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
         // dampK   0.83 → 0.80 — slightly less resistance, livelier feel.
@@ -1178,7 +1206,9 @@ class ScoutFaceView @JvmOverloads constructor(
                 vBatteryPct < 20 -> 0.55f + Random.nextFloat() * 0.20f
                 else             -> 0.85f + Random.nextFloat() * 0.40f
             }
-            blinkMaxPhase = if (!isFollowUp && Random.nextFloat() < 0.18f) 1.35f else 2.0f
+            blinkMaxPhase  = if (!isFollowUp && Random.nextFloat() < 0.18f) 1.35f else 2.0f
+            blinkDipY      = if (isFollowUp) 3f else 6f   // follow-up blinks have a shallower dip
+            blinkBrowRelax = 5f
 
             if (isFollowUp) {
                 // Resume normal interval after the second blink of a double
@@ -1231,6 +1261,10 @@ class ScoutFaceView @JvmOverloads constructor(
             blinkL *= 0.76f
             blinkR *= 0.76f
         }
+
+        // Secondary blink motion decays back to rest after each blink
+        blinkDipY      += (0f - blinkDipY)      * smoothAlpha(dtMs, 160f)
+        blinkBrowRelax += (0f - blinkBrowRelax) * smoothAlpha(dtMs, 200f)
 
         if (vSpeaking) {
             speechPhase += dtMs / 85f
