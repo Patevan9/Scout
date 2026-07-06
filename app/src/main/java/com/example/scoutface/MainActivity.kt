@@ -2658,8 +2658,14 @@ Respond only with Scout's next short reply.
 
         }
 
-        // Nothing available — speak the Gemini unavailable message or random fallback
-        scoutGeminiManager.speakUnavailableIfNeeded()
+        // Nothing available — only report a connectivity problem if online features were
+        // actually expected to work. When the user deliberately turned off online features,
+        // don't say "having trouble connecting" — they know, they turned it off.
+        if (isGeminiEnabled()) {
+            scoutGeminiManager.speakUnavailableIfNeeded()
+        } else {
+            respond("I'm working offline right now, so that one's a bit beyond me.")
+        }
 
     }
 
