@@ -853,8 +853,59 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         setupRecognizerWatchdog()
 
+        bootstrapModelFile()
+
         startOfflineBrain()
 
+    }
+
+    private val MODEL_FILENAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+
+    /**
+     * Copies the TinyLlama model from external storage into filesDir if it isn't there yet.
+     * Checks two source locations:
+     *   1. App-specific external dir (/sdcard/Android/data/<pkg>/files/) — no permission needed
+     *   2. Root external storage (/sdcard/) — requires READ_EXTERNAL_STORAGE (Android ≤12 only)
+     * Safe to call multiple times; no-ops immediately if the dest file already looks complete.
+     */
+    private fun bootstrapModelFile() {
+        val dest = File(filesDir, MODEL_FILENAME)
+        if (dest.exists() && dest.length() > 100_000_000L) return
+
+        Thread {
+            val sources = mutableListOf<File>()
+            getExternalFilesDir(null)?.let { sources.add(File(it, MODEL_FILENAME)) }
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                @Suppress("DEPRECATION")
+                sources.add(File(android.os.Environment.getExternalStorageDirectory(), MODEL_FILENAME))
+            }
+
+            val src = sources.firstOrNull { it.exists() && it.canRead() }
+            if (src == null) {
+                android.util.Log.w("ScoutBrain",
+                    "Model not found in external storage. Place $MODEL_FILENAME at: " +
+                    (getExternalFilesDir(null)?.absolutePath ?: "n/a"))
+                return@Thread
+            }
+
+            android.util.Log.i("ScoutBrain",
+                "Copying model from ${src.absolutePath} (${src.length() / 1_048_576}MB)…")
+            try {
+                src.inputStream().use { input ->
+                    dest.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                android.util.Log.i("ScoutBrain", "Model copy complete (${dest.length() / 1_048_576}MB)")
+            } catch (e: Exception) {
+                android.util.Log.e("ScoutBrain", "Model copy failed", e)
+                dest.delete()
+            }
+        }.start()
     }
 
     private fun startOfflineBrain() {
@@ -990,6 +1041,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (micOk) safeSetupSpeech("permissionCallback")
 
+            // If READ_EXTERNAL_STORAGE was just granted, retry the model copy now.
+            if (results[Manifest.permission.READ_EXTERNAL_STORAGE] == true) bootstrapModelFile()
+
         }
 
     }
@@ -1106,6 +1160,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             need.add(Manifest.permission.ACCESS_COARSE_LOCATION)
 
+        }
+
+        // READ_EXTERNAL_STORAGE is only grantable on Android 12 and below (maxSdkVersion="32").
+        // On Android 13+ the permission is not granted; bootstrapModelFile() will fall back
+        // to the app-specific external dir which needs no permission.
+        if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.S_V2 &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            need.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
         if (need.isNotEmpty()) {
