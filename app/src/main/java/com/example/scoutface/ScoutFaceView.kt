@@ -840,7 +840,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
         val thinkingLift  = if (vThinking) {
-            (if (side < 0) 18f else 16f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
+            (if (side < 0) 26f else 24f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 4f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
@@ -857,7 +857,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val thinkInward = if (vThinking) {
             if (side < 0) 2f else -2f
         } else 0f
-        val thinkInnerLift = if (vThinking) 12f else 0f
+        val thinkInnerLift = if (vThinking) 20f else 0f
 
         // thinkTilt < 0 on right brow: inner end (x1) goes UP → curious arch
         val thinkTilt = if (vThinking && side > 0) -10f else 0f
@@ -1181,10 +1181,10 @@ class ScoutFaceView @JvmOverloads constructor(
         // Gaze-driven face drift: face slowly follows where the eyes are pointing.
         // lookX/Y represent where the spring-driven iris has settled, so face lags
         // naturally behind — eyes move first, head "turns" to follow (~900ms tau).
-        // Amplitude is small (±5.6px X, ±3.3px Y at full gaze) — just enough to
-        // read as head movement without the face sliding off screen.
-        faceGazeDriftX += (lookX * 0.07f - faceGazeDriftX) * smoothAlpha(dtMs, 900f)
-        faceGazeDriftY += (lookY * 0.06f - faceGazeDriftY) * smoothAlpha(dtMs, 900f)
+        // ±24px X / ±14px Y at full gaze on a 1920×1080 virtual canvas — clearly
+        // readable as a neck turn without the face sliding off screen.
+        faceGazeDriftX += (lookX * 0.32f - faceGazeDriftX) * smoothAlpha(dtMs, 900f)
+        faceGazeDriftY += (lookY * 0.26f - faceGazeDriftY) * smoothAlpha(dtMs, 900f)
 
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
