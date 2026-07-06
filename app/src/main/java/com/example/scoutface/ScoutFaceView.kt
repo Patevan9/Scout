@@ -147,6 +147,7 @@ class ScoutFaceView @JvmOverloads constructor(
         faceIdleDriftX = 0f; faceIdleDriftY = 0f
         faceIdleDriftTargetX = 0f; faceIdleDriftTargetY = 0f
         nextFaceDriftAt = 0L
+        faceGazeDriftX = 0f; faceGazeDriftY = 0f
         blinkDipY = 0f; blinkBrowRelax = 0f
 
         // FIX 3: reset wave gate
@@ -254,6 +255,12 @@ class ScoutFaceView @JvmOverloads constructor(
     private var faceIdleDriftTargetX = 0f
     private var faceIdleDriftTargetY = 0f
     private var nextFaceDriftAt      = 0L
+
+    // Gaze-driven face drift — whole face slowly follows the gaze direction.
+    // Eyes arrive at target first (spring physics); face lags ~900ms behind.
+    // Creates a "head turning to look" feel instead of just eyeballs rolling.
+    private var faceGazeDriftX = 0f
+    private var faceGazeDriftY = 0f
 
     // Secondary blink motion: face dips + brows relax when a blink fires
     private var blinkDipY      = 0f
@@ -487,8 +494,8 @@ class ScoutFaceView @JvmOverloads constructor(
     private fun drawFace(c: Canvas, now: Long) {
         val breathOffset  = sin(breathPhase) * BREATH_AMPLITUDE
         val breathOffsetX = sin(breathPhase * 0.618f + 1.1f) * 1.5f  // gentle X sway on a different phase
-        val faceCy = VH * 0.46f + breathOffset  + faceIdleDriftY + blinkDipY
-        val faceCx = VW * 0.50f + breathOffsetX + faceIdleDriftX
+        val faceCy = VH * 0.46f + breathOffset  + faceIdleDriftY + blinkDipY + faceGazeDriftY
+        val faceCx = VW * 0.50f + breathOffsetX + faceIdleDriftX + faceGazeDriftX
 
         val eyeW      = 510f
         val eyeH      = 394f
@@ -1171,6 +1178,14 @@ class ScoutFaceView @JvmOverloads constructor(
         faceIdleDriftX += (faceIdleDriftTargetX - faceIdleDriftX) * smoothAlpha(dtMs, 2800f)
         faceIdleDriftY += (faceIdleDriftTargetY - faceIdleDriftY) * smoothAlpha(dtMs, 2800f)
 
+        // Gaze-driven face drift: face slowly follows where the eyes are pointing.
+        // lookX/Y represent where the spring-driven iris has settled, so face lags
+        // naturally behind — eyes move first, head "turns" to follow (~900ms tau).
+        // Amplitude is small (±5.6px X, ±3.3px Y at full gaze) — just enough to
+        // read as head movement without the face sliding off screen.
+        faceGazeDriftX += (lookX * 0.07f - faceGazeDriftX) * smoothAlpha(dtMs, 900f)
+        faceGazeDriftY += (lookY * 0.06f - faceGazeDriftY) * smoothAlpha(dtMs, 900f)
+
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
         // dampK   0.83 → 0.80 — slightly less resistance, livelier feel.
@@ -1357,13 +1372,14 @@ class ScoutFaceView @JvmOverloads constructor(
         // Keep ticking while locked on so focus breathing renders each frame
         val isLockedOn       = abs(vLookTargetX) > 1f || abs(vLookTargetY) > 1f
 
-        val movingTremor = (abs(microTremorX) + abs(microTremorY)) > 0.05f
+        val movingTremor    = (abs(microTremorX) + abs(microTremorY)) > 0.05f
+        val movingGazeDrift = (abs(faceGazeDriftX) + abs(faceGazeDriftY)) > 0.08f
 
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
                 movingLowerLid || movingListenBias || isLockedOn ||
-                micSmooth > 0.04f || movingTremor
+                micSmooth > 0.04f || movingTremor || movingGazeDrift
 
         if (active) {
             idleMode = false
