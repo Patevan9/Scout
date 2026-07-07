@@ -842,7 +842,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
         val thinkingLift = if (vThinking) {
-            if (side > 0) 22f + sin(System.currentTimeMillis() / 900.0).toFloat() * 3f else 5f
+            if (side > 0) 38f + sin(System.currentTimeMillis() / 900.0).toFloat() * 3f else 0f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
@@ -862,7 +862,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val thinkInnerLift = if (vThinking && side < 0) 6f else 0f
 
         // thinkTilt < 0 on right brow: inner end (x1) goes UP → curious arch
-        val thinkTilt = if (vThinking && side > 0) -10f else 0f
+        val thinkTilt = if (vThinking && side > 0) -18f else 0f
 
         val y1: Float
         val y2: Float
@@ -1089,7 +1089,7 @@ class ScoutFaceView @JvmOverloads constructor(
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
         // Thinking lid: fast-responding right-eye relaxation (350ms tau — visible within glance window)
-        val thinkLidTarget = if (vThinking) 0.10f else 0f
+        val thinkLidTarget = if (vThinking) 0.28f else 0f
         thinkLidSmooth += (thinkLidTarget - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
@@ -1105,15 +1105,13 @@ class ScoutFaceView @JvmOverloads constructor(
 
         if (vThinking) {
             if (nextThinkGlanceAt == 0L) {
-                // Thinking just started: fire one glance up and to the side
+                // Thinking just started: lock gaze upper-left for the entire thinking period.
+                // Right lid droops → irises look away to upper-left (opposite side).
                 thinkGlanceActive = true
-                thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (35f + Random.nextFloat() * 30f)
-                nextThinkGlanceAt = now + Random.nextLong(900, 1600)
-            } else if (thinkGlanceActive && now >= nextThinkGlanceAt) {
-                // Glance is done — eyes return to center and stay there for the rest of thinking
-                thinkGlanceActive = false
-                nextThinkGlanceAt = Long.MAX_VALUE
+                thinkGlanceSideX  = -(35f + Random.nextFloat() * 15f)  // always left
+                nextThinkGlanceAt = 1L  // mark initialized; no timeout while thinking
             }
+            // thinkGlanceActive stays true until vThinking becomes false
         } else {
             thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
         }
