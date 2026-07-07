@@ -1089,7 +1089,8 @@ class ScoutFaceView @JvmOverloads constructor(
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
         // Thinking lid: fast-responding right-eye relaxation (350ms tau — visible within glance window)
-        thinkLidSmooth += (if (vThinking) 0.10f else 0f - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
+        val thinkLidTarget = if (vThinking) 0.10f else 0f
+        thinkLidSmooth += (thinkLidTarget - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
@@ -1103,14 +1104,15 @@ class ScoutFaceView @JvmOverloads constructor(
         vergenceSmooth += (vergenceTarget - vergenceSmooth) * smoothAlpha(dtMs, 280f)
 
         if (vThinking) {
-            if (now >= nextThinkGlanceAt) {
-                thinkGlanceActive = !thinkGlanceActive
-                if (thinkGlanceActive) {
-                    thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (35f + Random.nextFloat() * 30f)
-                    nextThinkGlanceAt = now + Random.nextLong(800, 1800)
-                } else {
-                    nextThinkGlanceAt = now + Random.nextLong(1500, 3800)
-                }
+            if (nextThinkGlanceAt == 0L) {
+                // Thinking just started: fire one glance up and to the side
+                thinkGlanceActive = true
+                thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (35f + Random.nextFloat() * 30f)
+                nextThinkGlanceAt = now + Random.nextLong(900, 1600)
+            } else if (thinkGlanceActive && now >= nextThinkGlanceAt) {
+                // Glance is done — eyes return to center and stay there for the rest of thinking
+                thinkGlanceActive = false
+                nextThinkGlanceAt = Long.MAX_VALUE
             }
         } else {
             thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
