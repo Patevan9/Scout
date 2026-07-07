@@ -1,12 +1,25 @@
 # Project Scout — Master Project Summary
-**Last updated: July 7, 2026 | Version 42**
+**Last updated: July 7, 2026 | Version 43**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
 
 ---
 
-## July 7, 2026 — What Changed Since Version 41
+## July 7, 2026 (Session 2) — What Changed Since Version 42
+
+✓ **Thinking glance amplitude raised** — `thinkGlanceSideX` raised from `8–20px` to `35–65px`. Previous range drove only 3–6px of face drift (invisible). New range drives 12–21px with the 0.32f faceGazeDriftX multiplier — clearly visible as a side glance. DONE July 7.
+
+✓ **Thinking expression redesigned — curious and engaged** — Patrick provided clear direction: expression should read "Hmm, let me think" not "I'm tired." Four changes made:
+- **Brow asymmetry**: One brow (side > 0) lifts 22px + gentle sine oscillation with questioning arch (thinkTilt -10f retained). Other brow (side < 0) barely moves (5px). Was both brows lifting nearly equally (24/26px) — that read as surprised, not curious.
+- **thinkInnerLift reduced**: Was 20px on both sides (made quiet brow look worried/furrowed). Now 6px on side < 0 only — relaxed, natural.
+- **Lid asymmetry**: Right eye target gains +0.08f droop during thinking (total ~0.15f vs left's 0.07f). Still mostly open — concentration, not sleepiness.
+- **Mouth corner asymmetry**: Right corner sits 3px higher than left when thinking (corYR = cy - 3f vs corYL = cy + 2f). Barely perceptible thoughtful side-smile. Friendly and warm.
+DONE July 7.
+
+---
+
+## July 7, 2026 (Session 1) — What Changed Since Version 41
 
 ✓ **16KB page alignment fix confirmed** — `target_link_options(scout_llama PRIVATE -Wl,-z,max-page-size=16384)` added to CMakeLists.txt. Fixes `dlopen` failure on Samsung devices running Linux 6.x kernels (Android 15 / Galaxy A32, Fold 7). Logcat confirmed: "scout_llama native library loaded successfully." DONE July 7.
 
@@ -15,8 +28,6 @@ This is the single source of truth.
 ✓ **Offline fallback message fix** — When Online Features are deliberately turned OFF by the user, Scout no longer says "I'm having trouble connecting." Now says "I'm working offline right now, so that one's a bit beyond me." `speakUnavailableIfNeeded()` is only called when `isGeminiEnabled()` is true. DONE July 7.
 
 ✓ **TinyLlama confirmed working on A32 and Fold 7** — Model file pushed to both devices via adb. `bootstrapModelFile()` successfully copies from external to internal storage on both. TinyLlama answers questions with Online Features OFF. DONE July 7.
-
-✓ **Thinking expression amplitude increased** — Previous values (thinkingLift 16–18px, thinkInnerLift 12px) were too subtle against idle micro-animation. Raised to thinkingLift 24–26px, thinkInnerLift 20px. Clearly visible on device. DONE July 7.
 
 ✓ **Head-turn amplitude fixed** — `faceGazeDriftX` multiplier was `0.07f` (max ±5px on 1920px canvas = ~2 physical pixels, completely invisible). Raised to `0.32f` for X and `0.26f` for Y — max ±24px X / ±14px Y. Now clearly readable as a neck turn when Scout looks toward someone. DONE July 7.
 
@@ -300,7 +311,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ ScoutPresenceDecider — four time-of-day modes
 ✓ Identity questions hardcoded — routing expanded
 ✓ Total offline mode — 'go offline' blocks ALL internet features
-✓ Thinking-state expression — drift, narrowed lids, asymmetric brows
+✓ Thinking-state expression — curious/engaged expression: one brow clearly raised (22px + sine) with questioning arch, other barely moves (5px); right lid subtly more relaxed (+0.08f droop); mouth right corner 3px higher (thoughtful side-smile). Iris glances 35–65px to side + upward (-20px). Head-turn faceGazeDrift 0.32f drives 12–21px visible drift. Redesigned July 7 from Patrick's direction with reference images.
 ✓ TinyLlama rambling fix — offline replies capped at 2 sentences (limitToSentences)
 ✓ Self-echo guard — Scout ignores his own TTS voice bleeding back into mic
 ✓ MainActivity.kt blank line cleanup — complete
@@ -406,7 +417,8 @@ Do not act on this area without his input. His expertise is the right lens for t
 - June 29: Launcher icon fixed — face 68% of canvas, all 5 mipmap densities regenerated, eyes inside circular mask. Face threshold raised 0.75→0.82 (Patrick/Elijah genetic similarity fix). "Scout, forget [name]" voice command added (clears people + person_embeddings). TTS deafness bug fixed — speak() return check + speakingStartedMs + 45s watchdog. Voice slider now sticks — scout_prefs in both SettingsActivity and MainActivity.onResume(). Greeting words blocked from name storage (hello/hi/hey/howdy/greetings/sup/yo). Gemini maxOutputTokens raised 250→600, "Always end on a complete sentence" added to system prompt, MAX_TOKENS boundary trim. Gemini quota announced — speakUnavailableIfNeeded() returns Boolean, cooldown check at top of tryTinyLlamaOrFallback(). Secondary face recognition — PeopleDb v3 with person_embeddings table, addNamedEmbedding(), findBestMatchName(); secondFace embedded in same executor job, lastSecondaryFaceName (@Volatile); VisionAnswerBuilder uses secondaryFaceName.
 - June 30: Dynamic robot name — boot greeting, identity feelings reply, identity fallback, offline brain fallback all read from TruthDb. No hardcoded "Scout" in any spoken response. TeachExtractor.kt: 8 new patterns for "that is my son/wife", "that person is my son/wife", "that is [name]", "that person is [name]", "his name is", "her name is". VisionAnswerBuilder freshness 1800ms→3500ms (camera blocked during TTS). registerFamilyMemberFace() guard prevents overwriting a known face hash with a wrong name. TinyLlama filter: "family friendly companion" + "family companion robot" added. Pet Mode design locked: any animal → soft greeting using stored name or "Well... hello there little one. I hope someone will tell me your name soon." Scout continues normally after greeting. Nicolas Protocol renamed Pet Mode (covers all animals). Settings Architecture and Visual Elements specs restored to summary. Summary updated to version 38.
 - July 3: ArcFace upgrade — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces 192-dim model. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, single-batch output. PeopleDb v4: migration clears 192-dim embeddings, preserves names/hashes, threshold 0.60f. "I see X" phrasing replaces "I can see you, X" throughout VisionAnswerBuilder and MainActivity. Diana fix — secondary face block now consumes pendingFaceIntroName. Phrases.kt new file: anti-repeat phrase pools for boot, goodbye, and all remember responses. ScoutBootStatus.kt rewritten: uses Phrases pools, adaptive BOOT_OFFLINE_FAST (< 2s load) vs BOOT_OFFLINE. BOOT_ONLINE phrases all mention offline backup warming up. TinyLlama load time measured and stored in SharedPreferences. Goodbye and remember responses now varied via Phrases pools. Summary updated to version 39.
-- July 7: 16KB page alignment fix confirmed working on A32 and Fold 7 (scout_llama.so, CMakeLists.txt). bootstrapModelFile() added — auto-copies TinyLlama model from external storage to filesDir on startup (no permission needed via app-specific external dir; READ_EXTERNAL_STORAGE with maxSdkVersion="32" for root /sdcard/ on Android ≤12). Offline fallback message fixed — "I'm working offline" when Gemini disabled (not "having trouble connecting"). TinyLlama confirmed working on both A32 and Fold 7. Thinking brow lift raised 18/16px → 26/24px, inner arch 12px → 20px (was too subtle to see). Head-turn faceGazeDrift multipliers 0.07/0.06 → 0.32/0.26 (was ±5px virtual = invisible; now ±24px X / ±14px Y, clearly readable). Summary updated to version 42.
+- July 7 S1: 16KB page alignment fix confirmed working on A32 and Fold 7 (scout_llama.so, CMakeLists.txt). bootstrapModelFile() added — auto-copies TinyLlama model from external storage to filesDir on startup (no permission needed via app-specific external dir; READ_EXTERNAL_STORAGE with maxSdkVersion="32" for root /sdcard/ on Android ≤12). Offline fallback message fixed — "I'm working offline" when Gemini disabled (not "having trouble connecting"). TinyLlama confirmed working on both A32 and Fold 7. Head-turn faceGazeDrift multipliers 0.07/0.06 → 0.32/0.26 (was ±5px virtual = invisible; now ±24px X / ±14px Y, clearly readable). Summary updated to version 42.
+- July 7 S2: Thinking expression completely redesigned based on Patrick's direction and reference images. Goal: curious/engaged ("Hmm, let me think") not sleepy/tired. thinkGlanceSideX 8–20px → 35–65px (drives visible face drift). Brow: one brow raises 22px + sine with questioning arch; other barely moves (5px); thinkInnerLift reduced 20px → 6px on quiet brow only (was making it look worried). Lid: right eye +0.08f droop during thinking (subtle asymmetry — concentration not sleep). Mouth: corYR 3px higher than corYL (tiny thoughtful side-smile). Summary updated to version 43.
 - July 4: PeopleDb threshold raised back to 0.65f (0.60f caused Diana/Elijah cross-contamination at ArcFace scale). cursor.use{} in findBestMatch + findBestMatchName (leak fix). forgetPerson made atomic with transactions. addNamedEmbedding COUNT(*) guard. VisionAnswerBuilder: freshness 3500ms→1800ms, 3+ faces branch gets dogLine, 2-face branch secondaryFaceName arm precedes pendingIntroName arm, new else arm for unknown primary + known secondary. Secondary face path adds findBestMatch fallback after findBestMatchName. Caption persistence fix — onResume() hides caption immediately when captions disabled. Startup diagnostics: TTS failure Toast + STT unavailability spoken warning at boot + JournalDb log. First-boot onboarding redirect at top of MainActivity.onCreate(). OnboardingActivity.kt built — full 5-screen flow, currentPage single source of truth for dots + counter, finishOnboarding() sets offline default. BOOT_NO_KEY phrases replaced with settings slide-right tip. CLAUDE.md created with git commands and critical rules for all future Claude sessions. ModelDownloadActivity.kt built — 39 messages, ObjectAnimator animation, updateProgress() API, portrait-only, AndroidManifest registered. Summary updated to version 40.
 
 ---
@@ -831,4 +843,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 5, 2026 | Version 41 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 7, 2026 | Version 43 | Single source of truth — upload every session*
