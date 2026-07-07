@@ -111,6 +111,7 @@ class ScoutFaceView @JvmOverloads constructor(
         thinkGlanceActive = false
         thinkGlanceSideX  = 0f
         nextThinkGlanceAt = 0L
+        thinkEndedAt      = 0L
         vergenceSmooth = 0f
 
         // FIX 1: reset listening bias smoother
@@ -221,6 +222,7 @@ class ScoutFaceView @JvmOverloads constructor(
     private var thinkGlanceActive = false
     private var thinkGlanceSideX  = 0f
     private var nextThinkGlanceAt = 0L
+    private var thinkEndedAt      = 0L  // timestamp thinking stopped; drives reconnect snap
 
     private var browMicroY      = 0f
     private var browMicroTarget = 0f
@@ -947,10 +949,10 @@ class ScoutFaceView @JvmOverloads constructor(
 
         } else {
             val mw    = 80f
-            val ctrY  = if (vThinking) cy + 13f else cy + 18f
+            val ctrY  = if (vThinking) cy + 11f else cy + 18f
             val ctrXo = mw * 0.44f
-            val corYL = cy + 2f
-            val corYR = if (vThinking) cy - 3f else cy + 2f
+            val corYL = if (vThinking) cy - 2f else cy + 2f   // both corners rise → warm smile
+            val corYR = if (vThinking) cy - 4f else cy + 2f   // right corner slightly higher
             tmpPath.reset()
             tmpPath.moveTo(cx - mw, corYL)
             tmpPath.quadTo(cx - ctrXo, ctrY, cx, ctrY * 0.72f + cy * 0.28f)
@@ -1090,8 +1092,8 @@ class ScoutFaceView @JvmOverloads constructor(
         val targetR = if (vBatteryPct < 20) lidTiredR else 0.07f
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
-        // Thinking lid: fast-responding right-eye relaxation (350ms tau — visible within glance window)
-        val thinkLidTarget = if (vThinking) 0.28f else 0f
+        // Thinking lid: right-eye concentration narrowing (13% — focused, not sleepy)
+        val thinkLidTarget = if (vThinking) 0.13f else 0f
         thinkLidSmooth += (thinkLidTarget - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
@@ -1106,21 +1108,26 @@ class ScoutFaceView @JvmOverloads constructor(
         vergenceSmooth += (vergenceTarget - vergenceSmooth) * smoothAlpha(dtMs, 280f)
 
         if (vThinking) {
+            thinkEndedAt = 0L
             if (nextThinkGlanceAt == 0L) {
-                // Thinking just started: lock gaze upper-left for the entire thinking period.
-                // Right lid droops → irises look away to upper-left (opposite side).
                 thinkGlanceActive = true
                 thinkGlanceSideX  = -(35f + Random.nextFloat() * 15f)  // always left
-                nextThinkGlanceAt = 1L  // mark initialized; no timeout while thinking
+                nextThinkGlanceAt = 1L
             }
-            // thinkGlanceActive stays true until vThinking becomes false
         } else {
+            if (thinkGlanceActive) thinkEndedAt = now  // record moment thinking stopped
             thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
         }
-        val thinkGazeTargetY = if (thinkGlanceActive) -20f else 0f
-        val thinkGazeTargetX = if (thinkGlanceActive) thinkGlanceSideX else 0f
-        thinkGazeY += (thinkGazeTargetY - thinkGazeY) * smoothAlpha(dtMs, 350f)
-        thinkGazeX += (thinkGazeTargetX - thinkGazeX) * smoothAlpha(dtMs, 380f)
+        // Micro-drift: slow organic wandering around the upper-left anchor while thinking
+        val thinkMicroX = if (thinkGlanceActive) sin(now / 1400.0).toFloat() * 6f else 0f
+        val thinkMicroY = if (thinkGlanceActive) cos(now / 1100.0).toFloat() * 4f else 0f
+        val thinkGazeTargetY = if (thinkGlanceActive) -20f + thinkMicroY else 0f
+        val thinkGazeTargetX = if (thinkGlanceActive) thinkGlanceSideX + thinkMicroX else 0f
+        // Reconnect snap: fast tau for ~400ms after thinking ends so eyes return to user visibly
+        val reconnecting = !vThinking && thinkEndedAt > 0L && (now - thinkEndedAt) < 400L
+        val thinkGazeTau = if (reconnecting) 80f else 350f
+        thinkGazeY += (thinkGazeTargetY - thinkGazeY) * smoothAlpha(dtMs, thinkGazeTau)
+        thinkGazeX += (thinkGazeTargetX - thinkGazeX) * smoothAlpha(dtMs, thinkGazeTau)
 
         if (!vListening && !vThinking) {
             if (now >= nextBrowMicroAt) {
