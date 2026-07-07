@@ -40,3 +40,17 @@ Android Studio only — Build → Clean Project, then Build → Assemble Project
 - `Scout_Master_Summary.md` — full project history and architecture (upload to new sessions)
 - `Scout_Launch_Checklist.md` — what's done and what's next for Play Store launch
 - `Scout_Quick_Start.md` — quick reference
+
+## Scout development philosophy — do not violate
+- **TinyLlama is the primary brain.** Scout works fully offline. Gemini is an optional enhancement.
+- **Scout never surprises the user.** He may notice patterns and suggest improvements, but every
+  meaningful change requires explicit user approval (Approve / Not Now / Never Suggest This Again).
+- **Public Scout (Play Store):** Behavior suggestions only — "I'd like to answer a little faster."
+  No technical language. No code. No silent self-modification. SharedPreferences updates on approval only.
+- **Scout Dev (Patrick's build only):** Telemetry and observations — face recognition failures,
+  wake-word accuracy, battery trends, TinyLlama load times, Gemini failures. NOT in the Play Store
+  APK — absent from the compiled release, not hidden. Build variant `dev` only.
+  Scout Dev reports observations. Patrick and Claude decide the fixes.
+- **Launch priority order:** Stability → Fold 7 / A32 testing → Play Store compliance
+  (16KB libraries, Privacy Policy, Terms, Open Source notices) → Website → Launch.
+  Behavior Learning and Scout Dev are post-launch. Do not add feature bloat before launch.
