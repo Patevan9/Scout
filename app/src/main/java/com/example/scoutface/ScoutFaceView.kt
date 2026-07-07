@@ -1102,7 +1102,7 @@ class ScoutFaceView @JvmOverloads constructor(
             if (now >= nextThinkGlanceAt) {
                 thinkGlanceActive = !thinkGlanceActive
                 if (thinkGlanceActive) {
-                    thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (8f + Random.nextFloat() * 12f)
+                    thinkGlanceSideX  = (if (Random.nextBoolean()) 1f else -1f) * (35f + Random.nextFloat() * 30f)
                     nextThinkGlanceAt = now + Random.nextLong(800, 1800)
                 } else {
                     nextThinkGlanceAt = now + Random.nextLong(1500, 3800)
