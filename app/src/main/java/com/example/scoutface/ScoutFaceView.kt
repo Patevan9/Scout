@@ -839,8 +839,8 @@ class ScoutFaceView @JvmOverloads constructor(
 
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
-        val thinkingLift  = if (vThinking) {
-            (if (side < 0) 26f else 24f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 4f
+        val thinkingLift = if (vThinking) {
+            if (side > 0) 22f + sin(System.currentTimeMillis() / 900.0).toFloat() * 3f else 5f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
@@ -857,7 +857,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val thinkInward = if (vThinking) {
             if (side < 0) 2f else -2f
         } else 0f
-        val thinkInnerLift = if (vThinking) 20f else 0f
+        val thinkInnerLift = if (vThinking && side < 0) 6f else 0f
 
         // thinkTilt < 0 on right brow: inner end (x1) goes UP → curious arch
         val thinkTilt = if (vThinking && side > 0) -10f else 0f
@@ -943,13 +943,14 @@ class ScoutFaceView @JvmOverloads constructor(
 
         } else {
             val mw    = 80f
-            val ctrY  = if (vThinking) cy + 14f else cy + 18f  // control point Y
-            val ctrXo = mw * 0.44f                             // control point X offset from cx
-            val corY  = cy + 2f                                // corners sit just below center
+            val ctrY  = if (vThinking) cy + 13f else cy + 18f
+            val ctrXo = mw * 0.44f
+            val corYL = cy + 2f
+            val corYR = if (vThinking) cy - 3f else cy + 2f
             tmpPath.reset()
-            tmpPath.moveTo(cx - mw, corY)
+            tmpPath.moveTo(cx - mw, corYL)
             tmpPath.quadTo(cx - ctrXo, ctrY, cx, ctrY * 0.72f + cy * 0.28f)
-            tmpPath.quadTo(cx + ctrXo, ctrY, cx + mw, corY)
+            tmpPath.quadTo(cx + ctrXo, ctrY, cx + mw, corYR)
             pMouthLine.strokeWidth = 10f
             c.drawPath(tmpPath, pMouthLine)
         }
@@ -1081,9 +1082,8 @@ class ScoutFaceView @JvmOverloads constructor(
             focusBreathPhase -= (2f * Math.PI).toFloat()
         }
 
-        val thinkLid = 0f
-        val targetL = (if (vBatteryPct < 20) lidTiredL else 0.07f) + thinkLid
-        val targetR = (if (vBatteryPct < 20) lidTiredR else 0.07f) + thinkLid
+        val targetL = if (vBatteryPct < 20) lidTiredL else 0.07f
+        val targetR = (if (vBatteryPct < 20) lidTiredR else 0.07f) + if (vThinking) 0.08f else 0f
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
 
