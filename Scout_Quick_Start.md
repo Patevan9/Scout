@@ -1,8 +1,21 @@
 # Project Scout — Quick Start
-**Last updated: July 5, 2026 | Version 18**
+**Last updated: July 7, 2026 | Version 19**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v40).
+For full technical details, use the Scout Master Summary (v42).
+
+---
+
+## July 7, 2026 — What Is New:
+
+✓ **16KB page alignment fix confirmed** — `scout_llama.so` now builds with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels. Confirmed working on both A32 and Fold 7.
+✓ **bootstrapModelFile() added** — Scout auto-copies the TinyLlama model from external storage to filesDir on startup. Checks app-specific external dir first (no permission needed), then root /sdcard/ if READ_EXTERNAL_STORAGE is granted (Android ≤12). READ_EXTERNAL_STORAGE added to manifest with maxSdkVersion="32". Model file survives reinstalls automatically.
+✓ **TinyLlama confirmed working on A32 and Fold 7** — Both devices tested with Online Features OFF. TinyLlama answers questions from local model. Primary brain confirmed.
+✓ **Offline fallback message fixed** — When Online Features are deliberately OFF, Scout no longer says "having trouble connecting." Now says "I'm working offline right now, so that one's a bit beyond me."
+✓ **Thinking expression amplitude increased** — thinkingLift raised 18/16px → 26/24px, thinkInnerLift 12px → 20px. Previous values were too subtle to see against idle micro-animation.
+✓ **Head-turn amplitude fixed** — faceGazeDrift multipliers were 0.07/0.06 (max ±5px = ~2 physical pixels, invisible). Raised to 0.32/0.26 (max ±24px X / ±14px Y). Now clearly readable as a neck turn when Scout follows someone with his gaze.
+
+*(Previous session July 4: Onboarding, startup diagnostics, PeopleDb 0.65f threshold, CLAUDE.md, ModelDownloadActivity — all DONE)*
 
 ---
 
@@ -153,7 +166,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-⚠ **TinyLlama re-enabled but not yet confirmed on A32** — Re-enabled June 28 with 90s delayed load + 800MB RAM guard + nCtx=512. Needs real-world testing on A32 to confirm LMKD crash does not return under memory pressure.
+✓ **TinyLlama confirmed working on A32 and Fold 7** — Confirmed July 7. bootstrapModelFile() auto-copies model from external storage. Both devices tested with Online Features OFF.
 ⚠ **Gemini daily quota** — 1-hour cooldown after daily limit hit. Scout now announces it instead of going silent. Test Gemini the next day by watching for "Gemini (online)" Toast.
 ⚠ **Secondary face bootstrap** — The first time Patrick and Elijah are in frame together after a pull, Elijah may still show as "someone else." Once Elijah faces Scout alone once (so his embedding is added to person_embeddings), subsequent two-person scenes should name him correctly.
 

@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 5, 2026 | Version 12**
+**What Scout needs to be worth $9.99 | Updated July 7, 2026 | Version 13**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -74,6 +74,11 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ **BOOT_NO_KEY phrases** — Replaced vague "online mode not configured" with actionable tip: "Open settings any time by sliding the screen to the right." DONE July 4.
 ✓ **CLAUDE.md** — Repo-root file documents git pull/push commands with full branch name, critical no-hardcoding rules, architecture notes. Persists across Claude session compaction. DONE July 4.
 ✓ **ModelDownloadActivity** — Portrait-only loading screen for TinyLlama model download. 39 humorous loading messages, ObjectAnimator slide animation, updateProgress() API. Ready for Play Asset Delivery wiring in a future session. DONE July 4.
+✓ **16KB page alignment fix confirmed** — scout_llama.so built with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels (Android 15). Confirmed working on A32 and Fold 7. DONE July 7.
+✓ **bootstrapModelFile() — auto-copy on startup** — Scout copies the TinyLlama model from app-specific external storage to filesDir automatically. No more "model not found" after reinstall. READ_EXTERNAL_STORAGE added to manifest with maxSdkVersion="32" for Android ≤12 fallback. DONE July 7.
+✓ **TinyLlama confirmed working on A32 and Fold 7** — Both devices tested with Online Features OFF. TinyLlama answers questions. Primary brain confirmed operational. DONE July 7.
+✓ **Offline fallback message fixed** — When user deliberately turns off Online Features, Scout says "I'm working offline" not "having trouble connecting." DONE July 7.
+✓ **Thinking expression and head-turn amplitude fixed** — Brow lifts raised to visible levels (26/24px). Head-turn face drift raised from invisible 5px to ±24px X / ±14px Y. DONE July 7.
 
 ---
 
@@ -81,12 +86,12 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 
 These are the real blockers. Scout cannot ship without these.
 
-### 1. A32 stability — TinyLlama re-enable path ✓ DONE June 28
+### 1. A32 stability — TinyLlama re-enable path ✓ DONE June 28 / CONFIRMED July 7
 
 - TinyLlama re-enabled with delayed load strategy: 90s delay after boot, 800MB RAM guard, nCtx=512, nThreads=2.
 - On-demand load also wired as Gemini fallback — if Gemini fails and TinyLlama hasn't loaded yet, tryLoadOfflineBrain() fires and Scout says "warming up."
-- Still needs real-world A32 testing to confirm the LMKD crash does not return.
-■ MainActivity.kt + LlamaEngine.kt — monitor on A32 builds
+- bootstrapModelFile() added July 7 — auto-copies model from external storage to filesDir on startup. Model survives reinstalls.
+- CONFIRMED WORKING on A32 and Fold 7 July 7.
 
 ### 2. Startup diagnostics — ✓ DONE July 4
 
@@ -320,12 +325,12 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: Fold 7 stability testing (#4), Privacy Policy + Terms of Use (#6–7), Play Store listing (#9), and 16KB page size library updates (#10).**
+**Next session: Privacy Policy + Terms of Use, Play Store listing, and 16KB page size ML Kit library updates.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 5, 2026 | Version 12 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 7, 2026 | Version 13 | For Patrick, Diana, Elijah, and Scout*
