@@ -699,8 +699,10 @@ class ScoutFaceView @JvmOverloads constructor(
             // Lash-line shadow at the lid's closing edge
             if (b > 0.06f) {
                 pLashLine.color = Color.argb((b * 155).toInt().coerceIn(0, 155), 6, 10, 18)
+                // During thinking, right eye lash-line angles down toward inner (nose) corner
+                val lashAngle = if (!isLeft) thinkLidSmooth * 22f else 0f
                 c.drawLine(
-                    tmpParallaxRect.left + 16f, lidBottom,
+                    tmpParallaxRect.left + 16f, lidBottom + lashAngle,
                     tmpParallaxRect.right - 16f, lidBottom,
                     pLashLine
                 )
