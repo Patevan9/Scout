@@ -118,6 +118,8 @@ class ScoutFaceView @JvmOverloads constructor(
         listeningBiasSmooth = 0f
 
         lowerLidSmooth = 0f
+        lowerLidExprL  = 0f
+        lowerLidExprR  = 0f
         thinkLidSmooth = 0f
 
         blinking      = false
@@ -206,8 +208,10 @@ class ScoutFaceView @JvmOverloads constructor(
     private val lidTiredL = 0.54f + Random.nextFloat() * 0.08f
     private val lidTiredR = 0.54f + Random.nextFloat() * 0.08f
 
-    private var lowerLidSmooth  = 0f
-    private var thinkLidSmooth  = 0f  // fast-responding right-eye droop during thinking
+    private var lowerLidSmooth  = 0f   // speech/breath base lower lid, both eyes
+    private var lowerLidExprL   = 0f   // expression layer, left eye (px, upward)
+    private var lowerLidExprR   = 0f   // expression layer, right eye (px, upward)
+    private var thinkLidSmooth  = 0f   // fast-responding right-eye droop during thinking
 
     private var vergenceSmooth    = 0f
     private val VERGENCE_MAX_BIAS = 18f
@@ -544,8 +548,11 @@ class ScoutFaceView @JvmOverloads constructor(
         rightGeom.cx = rightCx
         rightGeom.cy = faceCy
 
-        drawEye(c, leftGeom, blinkL, lidDroopL, now)
-        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, now)
+        // Per-eye lower lid: base (speech/breath) + expression layer + blink rise
+        val lowerL = (lowerLidSmooth + lowerLidExprL + blinkL * 6f).coerceIn(0f, 20f)
+        val lowerR = (lowerLidSmooth + lowerLidExprR + blinkR * 6f).coerceIn(0f, 20f)
+        drawEye(c, leftGeom,  blinkL, lidDroopL,                lowerL, now)
+        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, lowerR, now)
         drawBrow(c, leftGeom, side = -1)
         drawBrow(c, rightGeom, side = 1)
         drawMouth(c, faceCx, faceCy + 240f)
@@ -556,7 +563,7 @@ class ScoutFaceView @JvmOverloads constructor(
     //  EYE
     // ======================================================
     private fun drawEye(c: Canvas, eye: EyeGeom, blinkAmount: Float,
-                        lidDroop: Float, now: Long) {
+                        lidDroop: Float, lowerLid: Float, now: Long) {
 
         val pxSocket = lookX * 0.03f
         val pySocket = lookY * 0.03f
@@ -711,8 +718,8 @@ class ScoutFaceView @JvmOverloads constructor(
             }
         }
 
-        if (lowerLidSmooth > 0.5f) {
-            val lowerLidTop = tmpParallaxRect.bottom - lowerLidSmooth
+        if (lowerLid > 0.5f) {
+            val lowerLidTop = tmpParallaxRect.bottom - lowerLid
             tmpLidRect.set(
                 tmpParallaxRect.left - 4f,
                 lowerLidTop,
@@ -1104,6 +1111,20 @@ class ScoutFaceView @JvmOverloads constructor(
         }
         lowerLidSmooth += (lowerLidTarget - lowerLidSmooth) * smoothAlpha(dtMs, 200f)
 
+        // Per-eye expression lower lids: emotions tighten/relax each cheek independently
+        val exprTargetL = when {
+            vThinking  -> 2f   // slight sympathetic tighten under non-concentrating eye
+            vListening -> 1f   // attentive — barely perceptible
+            else       -> 0f
+        }
+        val exprTargetR = when {
+            vThinking  -> 5f   // tighten under the concentrating (right) eye
+            vListening -> 1f
+            else       -> 0f
+        }
+        lowerLidExprL += (exprTargetL - lowerLidExprL) * smoothAlpha(dtMs, 250f)
+        lowerLidExprR += (exprTargetR - lowerLidExprR) * smoothAlpha(dtMs, 250f)
+
         val vergenceTarget = if (vThinking) maxOf(vVergence, 0.3f) else vVergence
         vergenceSmooth += (vergenceTarget - vergenceSmooth) * smoothAlpha(dtMs, 280f)
 
@@ -1378,7 +1399,8 @@ class ScoutFaceView @JvmOverloads constructor(
             vListening -> maxOf(8f, smileLift)
             else       -> smileLift
         }
-        val movingLowerLid   = abs(lowerLidSmooth - lowerLidTarget) > 0.3f
+        val movingLowerLid   = abs(lowerLidSmooth - lowerLidTarget) > 0.3f ||
+                               lowerLidExprL > 0.1f || lowerLidExprR > 0.1f
         // Keep ticking while listening bias is transitioning
         val movingListenBias = abs(listeningBiasSmooth - (if (vListening) 10f else 0f)) > 0.1f
         // Keep ticking while locked on so focus breathing renders each frame
