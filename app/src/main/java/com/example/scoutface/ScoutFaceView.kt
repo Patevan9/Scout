@@ -117,6 +117,7 @@ class ScoutFaceView @JvmOverloads constructor(
         listeningBiasSmooth = 0f
 
         lowerLidSmooth = 0f
+        thinkLidSmooth = 0f
 
         blinking      = false
         blinkPhaseL   = 0f; blinkPhaseR   = 0f
@@ -204,7 +205,8 @@ class ScoutFaceView @JvmOverloads constructor(
     private val lidTiredL = 0.54f + Random.nextFloat() * 0.08f
     private val lidTiredR = 0.54f + Random.nextFloat() * 0.08f
 
-    private var lowerLidSmooth = 0f
+    private var lowerLidSmooth  = 0f
+    private var thinkLidSmooth  = 0f  // fast-responding right-eye droop during thinking
 
     private var vergenceSmooth    = 0f
     private val VERGENCE_MAX_BIAS = 18f
@@ -541,7 +543,7 @@ class ScoutFaceView @JvmOverloads constructor(
         rightGeom.cy = faceCy
 
         drawEye(c, leftGeom, blinkL, lidDroopL, now)
-        drawEye(c, rightGeom, blinkR, lidDroopR, now)
+        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, now)
         drawBrow(c, leftGeom, side = -1)
         drawBrow(c, rightGeom, side = 1)
         drawMouth(c, faceCx, faceCy + 240f)
@@ -1083,9 +1085,11 @@ class ScoutFaceView @JvmOverloads constructor(
         }
 
         val targetL = if (vBatteryPct < 20) lidTiredL else 0.07f
-        val targetR = (if (vBatteryPct < 20) lidTiredR else 0.07f) + if (vThinking) 0.08f else 0f
+        val targetR = if (vBatteryPct < 20) lidTiredR else 0.07f
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
+        // Thinking lid: fast-responding right-eye relaxation (350ms tau — visible within glance window)
+        thinkLidSmooth += (if (vThinking) 0.10f else 0f - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
@@ -1179,12 +1183,11 @@ class ScoutFaceView @JvmOverloads constructor(
         faceIdleDriftY += (faceIdleDriftTargetY - faceIdleDriftY) * smoothAlpha(dtMs, 2800f)
 
         // Gaze-driven face drift: face slowly follows where the eyes are pointing.
-        // lookX/Y represent where the spring-driven iris has settled, so face lags
-        // naturally behind — eyes move first, head "turns" to follow (~900ms tau).
-        // ±24px X / ±14px Y at full gaze on a 1920×1080 virtual canvas — clearly
-        // readable as a neck turn without the face sliding off screen.
-        faceGazeDriftX += (lookX * 0.32f - faceGazeDriftX) * smoothAlpha(dtMs, 900f)
-        faceGazeDriftY += (lookY * 0.26f - faceGazeDriftY) * smoothAlpha(dtMs, 900f)
+        // Thinking uses 220ms tau so the face catches up within the short glance window.
+        // Face-tracking of a real person uses 900ms — natural "head turns to look" lag.
+        val gazeDriftTau = if (vThinking) 220f else 900f
+        faceGazeDriftX += (lookX * 0.32f - faceGazeDriftX) * smoothAlpha(dtMs, gazeDriftTau)
+        faceGazeDriftY += (lookY * 0.26f - faceGazeDriftY) * smoothAlpha(dtMs, gazeDriftTau)
 
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
@@ -1374,12 +1377,13 @@ class ScoutFaceView @JvmOverloads constructor(
 
         val movingTremor    = (abs(microTremorX) + abs(microTremorY)) > 0.05f
         val movingGazeDrift = (abs(faceGazeDriftX) + abs(faceGazeDriftY)) > 0.08f
+        val movingThinkLid  = thinkLidSmooth > 0.004f
 
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
                 movingLowerLid || movingListenBias || isLockedOn ||
-                micSmooth > 0.04f || movingTremor || movingGazeDrift
+                micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid
 
         if (active) {
             idleMode = false
