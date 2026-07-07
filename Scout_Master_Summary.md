@@ -688,6 +688,26 @@ Tier 2 session (Scout Dev, 1.5+): `TelemetryDb.kt` · `TelemetryCollector.kt` ·
 
 ---
 
+## 16c. Autonomy Direction — Future (Post-Launch)
+
+**Goal:** Scout acts autonomously, but changes himself with permission.
+
+Two kinds of autonomy — both approved:
+- **Behavioral autonomy** (Scout 1.x+): Scout decides *how* to act in the moment — when to speak, when to stay quiet, when to notice something and comment without being asked. No approval needed for moment-to-moment behavior.
+- **Self-modification autonomy** (requires approval always): Scout changing his own settings, memory rules, or behavior flags. Always requires Approve / Not Now / Never Suggest This Again.
+
+**What true behavioral autonomy looks like for Scout:**
+- Noticing the room is quiet and checking in unprompted
+- Noticing a pattern in conversations and mentioning it naturally
+- Noticing a family member hasn't been seen in a while
+- Environmental awareness driving initiated behavior — not just reacting to being called
+
+**The hard part:** Knowing *when not* to speak is what separates a present companion from an annoying one. Timing and presence matter more than capability.
+
+**Status:** Future session. Do not build before launch.
+
+---
+
 ## 16b. Future Polish Ideas (Post-Launch, Scout 2.0+)
 
 - Voice Recognition (Future) — Optional voice enrollment for family members. Advisory only — does not replace TruthDb or user-confirmed identity. Not for launch or 1.1.
