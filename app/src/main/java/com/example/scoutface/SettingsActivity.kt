@@ -237,9 +237,6 @@ class SettingsActivity : AppCompatActivity() {
             toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
                 scoutPrefs.getBoolean("kid_safe_filter", true)
             ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() },
-            toggleRow("Pet Safety Protocol Awareness", "Scout mentions pet safety when relevant",
-                scoutPrefs.getBoolean("pet_safety", true)
-            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() },
             toggleRow("Presence Mode", "Scout adapts when you're nearby",
                 memPrefs.getBoolean("presence_mode_enabled", true)
             ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
@@ -268,6 +265,14 @@ class SettingsActivity : AppCompatActivity() {
             ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() },
             navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") },
             navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("SAFETY"))
+        body.addView(cardGroup(
+            toggleRow("Pet Awareness", "Scout uses extra caution around pets",
+                scoutPrefs.getBoolean("pet_safety", true)
+            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() }
         ))
 
         body.addView(footerNote("More hardware controls coming in a future update."))

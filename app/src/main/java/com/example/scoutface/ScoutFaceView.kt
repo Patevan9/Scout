@@ -1100,8 +1100,8 @@ class ScoutFaceView @JvmOverloads constructor(
         val targetR = if (vBatteryPct < 20) lidTiredR else 0.07f
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
-        // Thinking lid: right-eye concentration narrowing (13% — focused, not sleepy)
-        val thinkLidTarget = if (vThinking) 0.13f else 0f
+        // Thinking lid: right-eye hint of concentration (7% — whisper, not focal point)
+        val thinkLidTarget = if (vThinking) 0.07f else 0f
         thinkLidSmooth += (thinkLidTarget - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
@@ -1114,12 +1114,12 @@ class ScoutFaceView @JvmOverloads constructor(
 
         // Per-eye expression lower lids: emotions tighten/relax each cheek independently
         val exprTargetL = when {
-            vThinking  -> 2f   // slight sympathetic tighten under non-concentrating eye
-            vListening -> 1f   // attentive — barely perceptible
+            vThinking  -> 1f   // barely perceptible sympathetic tighten
+            vListening -> 1f
             else       -> 0f
         }
         val exprTargetR = when {
-            vThinking  -> 5f   // tighten under the concentrating (right) eye
+            vThinking  -> 2f   // subtle tighten — brow is the hero, this is support
             vListening -> 1f
             else       -> 0f
         }
