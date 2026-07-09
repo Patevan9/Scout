@@ -1663,9 +1663,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         }
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
-                                                            var secName = peopleDb.findBestMatchName(emb2, threshold = 0.55f)
+                                                            var secName = peopleDb.findBestMatchName(emb2, threshold = 0.62f)
                                                             if (secName == null) {
-                                                                val h2 = peopleDb.findBestMatch(emb2, threshold = 0.55f)
+                                                                val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
                                                                 if (h2 != null) secName = peopleDb.getName(h2)
                                                             }
                                                             if (secName == null && pendingFaceIntroName != null) {
@@ -2658,9 +2658,9 @@ Do not say you cannot see.
 
 If unsure, say you do not know yet.
 
-Give a direct, friendly answer in one or two short complete sentences.
+Give a warm, natural answer in two or three sentences. Be conversational but concise.
 
-Respond only with Scout's next short reply.
+Respond only with Scout's next reply.
 """.trimIndent()
 
             val sb = StringBuilder()
@@ -2686,7 +2686,7 @@ Respond only with Scout's next short reply.
 
             Thread {
 
-                val reply = LlamaEngine.generate(sb.toString(), nPredict = 64)
+                val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
 
                 runOnUiThread {
                     if (!reply.isNullOrBlank()) {
@@ -2777,7 +2777,7 @@ Respond only with Scout's next short reply.
 
     private fun cleanOfflineReply(reply: String): String {
 
-        val limited = limitToSentences(reply, maxSentences = 2)
+        val limited = limitToSentences(reply, maxSentences = 3)
 
         val lower = limited.lowercase()
 
