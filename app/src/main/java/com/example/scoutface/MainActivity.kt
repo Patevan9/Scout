@@ -397,6 +397,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var recognizerIntent: Intent
 
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var modelDownloadLauncher: ActivityResultLauncher<Intent>
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -886,9 +887,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val src = sources.firstOrNull { it.exists() && it.canRead() }
             if (src == null) {
-                android.util.Log.w("ScoutBrain",
-                    "Model not found in external storage. Place $MODEL_FILENAME at: " +
-                    (getExternalFilesDir(null)?.absolutePath ?: "n/a"))
+                android.util.Log.w("ScoutBrain", "Model not found locally — launching download screen.")
+                runOnUiThread {
+                    modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+                }
                 return@Thread
             }
 
@@ -1044,6 +1046,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // If READ_EXTERNAL_STORAGE was just granted, retry the model copy now.
             if (results[Manifest.permission.READ_EXTERNAL_STORAGE] == true) bootstrapModelFile()
 
+        }
+
+        // When ModelDownloadActivity finishes (download complete), bootstrap and start the brain.
+        modelDownloadLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                bootstrapModelFile()
+                startOfflineBrain()
+            }
         }
 
     }

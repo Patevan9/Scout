@@ -765,12 +765,24 @@ class SettingsActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Open Source Licenses")
             .setMessage(
-                "MobileFaceNet — MIT License\n" +
-                "TensorFlow Lite — Apache 2.0\n" +
-                "ML Kit — Google APIs Terms\n" +
-                "CameraX — Apache 2.0\n" +
-                "OkHttp — Apache 2.0\n" +
-                "Room — Apache 2.0"
+                "llama.cpp\n" +
+                "MIT License — github.com/ggerganov/llama.cpp\n\n" +
+                "TinyLlama 1.1B Chat v1.0\n" +
+                "Apache 2.0 — huggingface.co/TinyLlama\n\n" +
+                "ArcFace MobileFaceNet (InsightFace)\n" +
+                "MIT License — github.com/deepinsight/insightface\n\n" +
+                "TensorFlow Lite\n" +
+                "Apache 2.0 — tensorflow.org\n\n" +
+                "ML Kit (Face Detection, Image Labeling)\n" +
+                "Google APIs Terms of Service\n\n" +
+                "CameraX\n" +
+                "Apache 2.0 — developer.android.com/jetpack/camerax\n\n" +
+                "OkHttp\n" +
+                "Apache 2.0 — github.com/square/okhttp\n\n" +
+                "Room\n" +
+                "Apache 2.0 — developer.android.com/jetpack/room\n\n" +
+                "NWS Weather API (weather.gov)\n" +
+                "Public Domain — U.S. Government"
             )
             .setPositiveButton("Close", null)
             .show()
