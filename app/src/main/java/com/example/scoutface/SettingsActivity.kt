@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -303,6 +304,13 @@ class SettingsActivity : AppCompatActivity() {
             toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
                 scoutPrefs.getBoolean("voice_cam_cmds", true)
             ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("LEGAL"))
+        body.addView(cardGroup(
+            navRow("Privacy Policy", "", "How Scout handles your data") { openUrl("https://lippy-robotics.gt.tc/privacy.html") },
+            navRow("Terms of Use", "", "Terms for using Scout") { openUrl("https://lippy-robotics.gt.tc/terms.html") }
         ))
 
         body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
@@ -751,6 +759,10 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0")
             .setPositiveButton("Close", null)
             .show()
+    }
+
+    private fun openUrl(url: String) {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
     private fun showSupport() {
