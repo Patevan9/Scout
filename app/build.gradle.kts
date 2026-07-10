@@ -65,12 +65,19 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
 
-    // ML Kit
-    implementation("com.google.mlkit:face-detection:16.1.6")
-    implementation("com.google.mlkit:image-labeling:17.0.7")
+    // ML Kit — versions confirmed 16KB page-aligned on arm64-v8a (Scout's only ABI).
+    // face-detection 16.1.7: arm64 fixed Dec 2025 (issue #986); 32-bit still 4KB but Scout
+    // doesn't ship armeabi-v7a. image-labeling 17.0.9: used by official ML Kit sample;
+    // pulls in fixed vision-common that resolves libimage_processing_util_jni.so alignment.
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.mlkit:image-labeling:17.0.9")
 
-    // TensorFlow Lite (on-device face recognition)
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    // TensorFlow Lite — ⚠️ VERIFY 16KB ALIGNMENT AFTER BUILDING.
+    // org.tensorflow:tensorflow-lite 2.17.0 has been reported as still 4KB-aligned on
+    // libtensorflowlite_jni.so. If APK Analyzer flags this library after your build, migrate
+    // to com.google.ai.edge.litert:litert (LiteRT — TF Lite's successor, 16KB-aligned as of
+    // its Oct 2025 release). The LiteRT Java API is drop-in compatible with TF Lite.
+    implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
