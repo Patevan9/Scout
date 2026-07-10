@@ -26,6 +26,8 @@ class ModelDownloadActivity : AppCompatActivity() {
         const val MODEL_DOWNLOAD_URL =
             "https://PLACEHOLDER_FILL_IN_BEFORE_LAUNCH/$MODEL_FILENAME"
         private const val PREF_DOWNLOAD_ID = "model_download_id"
+        // Minimum byte size for a valid Q4_K_M download — anything below this is truncated.
+        const val MIN_MODEL_BYTES = 500_000_000L
     }
 
     private val messages = mutableListOf(
@@ -134,8 +136,16 @@ class ModelDownloadActivity : AppCompatActivity() {
     }
 
     private fun startDownload() {
-        val dest = getExternalFilesDir(null) ?: filesDir
-        val destFile = File(dest, MODEL_FILENAME)
+        val dir = getExternalFilesDir(null) ?: filesDir
+        val stat = android.os.StatFs(dir.absolutePath)
+        val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
+        if (freeBytes < MIN_MODEL_BYTES + 50_000_000L) {
+            sizeText.text = "Not enough storage — free up at least 700 MB and reopen Scout."
+            percentText.text = ""
+            return
+        }
+
+        val destFile = File(dir, MODEL_FILENAME)
         if (destFile.exists()) destFile.delete()
 
         val request = DownloadManager.Request(Uri.parse(MODEL_DOWNLOAD_URL))
@@ -168,7 +178,7 @@ class ModelDownloadActivity : AppCompatActivity() {
             }
             if (status == DownloadManager.STATUS_FAILED) {
                 cursor.close()
-                sizeText.text = "Download failed. Check your connection and reopen Scout."
+                showRetry("Download failed — tap here to try again.")
                 return
             }
             val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
@@ -191,6 +201,14 @@ class ModelDownloadActivity : AppCompatActivity() {
 
     private fun onDownloadComplete() {
         if (downloadDone) return
+        val dest = File(getExternalFilesDir(null) ?: filesDir, MODEL_FILENAME)
+        if (!dest.exists() || dest.length() < MIN_MODEL_BYTES) {
+            dest.delete()
+            getSharedPreferences("scout_prefs", MODE_PRIVATE).edit()
+                .remove(PREF_DOWNLOAD_ID).apply()
+            showRetry("Download incomplete — tap here to try again.")
+            return
+        }
         downloadDone = true
         getSharedPreferences("scout_prefs", MODE_PRIVATE).edit()
             .remove(PREF_DOWNLOAD_ID).apply()
@@ -198,6 +216,16 @@ class ModelDownloadActivity : AppCompatActivity() {
         // Signal MainActivity that the model file is ready
         setResult(RESULT_OK)
         finish()
+    }
+
+    private fun showRetry(message: String) {
+        percentText.text = ""
+        sizeText.text = message
+        sizeText.setOnClickListener {
+            sizeText.setOnClickListener(null)
+            sizeText.text = "Retrying…"
+            startDownload()
+        }
     }
 
     private fun isDownloadActive(id: Long): Boolean {

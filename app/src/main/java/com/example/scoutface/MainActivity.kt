@@ -871,7 +871,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
      */
     private fun bootstrapModelFile() {
         val dest = File(filesDir, MODEL_FILENAME)
-        if (dest.exists() && dest.length() > 100_000_000L) return
+        if (dest.exists() && dest.length() >= ModelDownloadActivity.MIN_MODEL_BYTES) return
 
         Thread {
             val sources = mutableListOf<File>()
@@ -885,7 +885,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 sources.add(File(android.os.Environment.getExternalStorageDirectory(), MODEL_FILENAME))
             }
 
-            val src = sources.firstOrNull { it.exists() && it.canRead() }
+            val src = sources.firstOrNull { it.exists() && it.canRead() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
             if (src == null) {
                 android.util.Log.w("ScoutBrain", "Model not found locally — launching download screen.")
                 runOnUiThread {
@@ -938,9 +938,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
             java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
         )
-        val modelFile = candidates.firstOrNull { it.exists() }
+        val modelFile = candidates.firstOrNull { it.exists() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
         if (modelFile == null) {
-            android.util.Log.e("ScoutBrain", "TinyLlama model file not found in any location")
+            android.util.Log.e("ScoutBrain", "TinyLlama model file not found or is incomplete")
             return
         }
 
