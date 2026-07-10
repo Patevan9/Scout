@@ -9,30 +9,18 @@ import java.nio.ByteOrder
 import java.nio.channels.FileChannel
 import kotlin.math.sqrt
 
-/**
- * Wraps the bundled MobileFaceNet TFLite model to turn a cropped face
- * image into a 192-dim, L2-normalized embedding that can be compared
- * across frames/sessions to recognize the same person.
- *
- * Model: MobileFaceNet.tflite (MIT licensed, bundled in assets/).
- * Input: 112x112 RGB, pixels normalized to roughly [-1, 1] via (px - 127.5) / 128.
- * Output: 192-dim float embedding.
- */
+// MobileFaceNet trained with InsightFace/ArcFace loss (512-dim embeddings).
+// Input: 112x112 RGB, (px - 127.5) / 128 per channel. Output: [1, 512] float.
 class FaceEmbedder(context: Context) {
 
     companion object {
         private const val MODEL_FILE = "MobileFaceNet.tflite"
         private const val INPUT_SIZE = 112
-        private const val EMBEDDING_SIZE = 192
+        private const val EMBEDDING_SIZE = 512
     }
 
     private val interpreter: Interpreter = Interpreter(loadModelFile(context))
 
-    /**
-     * Returns a 192-dim L2-normalized embedding for the given face image.
-     * The bitmap should already be cropped tightly around the face; it
-     * will be resized to 112x112 before inference.
-     */
     fun getEmbedding(faceBitmap: Bitmap): FloatArray {
         val resized = if (faceBitmap.width == INPUT_SIZE && faceBitmap.height == INPUT_SIZE) {
             faceBitmap
@@ -41,7 +29,7 @@ class FaceEmbedder(context: Context) {
         }
 
         val input = bitmapToInputBuffer(resized)
-        val output = Array(2) { FloatArray(EMBEDDING_SIZE) }
+        val output = Array(1) { FloatArray(EMBEDDING_SIZE) }
 
         interpreter.run(input, output)
 
@@ -49,22 +37,19 @@ class FaceEmbedder(context: Context) {
     }
 
     private fun bitmapToInputBuffer(bitmap: Bitmap): ByteBuffer {
-        // Model was compiled with batch_size=2; allocate 2× and fill both slots
-        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3 * 2)
+        val buffer = ByteBuffer.allocateDirect(4 * INPUT_SIZE * INPUT_SIZE * 3)
         buffer.order(ByteOrder.nativeOrder())
 
         val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
         bitmap.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
 
-        repeat(2) {
-            for (pixel in pixels) {
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-                buffer.putFloat((r - 127.5f) / 128f)
-                buffer.putFloat((g - 127.5f) / 128f)
-                buffer.putFloat((b - 127.5f) / 128f)
-            }
+        for (pixel in pixels) {
+            val r = (pixel shr 16) and 0xFF
+            val g = (pixel shr 8) and 0xFF
+            val b = pixel and 0xFF
+            buffer.putFloat((r - 127.5f) / 128f)
+            buffer.putFloat((g - 127.5f) / 128f)
+            buffer.putFloat((b - 127.5f) / 128f)
         }
 
         buffer.rewind()

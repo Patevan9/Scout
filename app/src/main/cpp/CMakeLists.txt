@@ -9,6 +9,10 @@ target_include_directories(scout_llama PRIVATE ${CMAKE_SOURCE_DIR})
 
 target_compile_options(scout_llama PRIVATE -std=c++17 -O2)
 
+# Required for Android 15+ and Samsung devices with 16KB page-size kernels.
+# Without this the system linker rejects the .so with EINVAL at dlopen time.
+target_link_options(scout_llama PRIVATE -Wl,-z,max-page-size=16384)
+
 target_link_libraries(
         scout_llama
         -L${JNILIB}

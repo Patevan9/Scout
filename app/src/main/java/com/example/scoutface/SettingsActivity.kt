@@ -13,10 +13,13 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.abs
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -29,6 +32,8 @@ class SettingsActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private val previewHandler = Handler(Looper.getMainLooper())
     private var previewRunnable: Runnable? = null
+
+    private lateinit var swipeDetector: GestureDetector
 
     private val BG           = Color.parseColor("#0D1728")
     private val CARD         = Color.parseColor("#19293F")
@@ -64,7 +69,30 @@ class SettingsActivity : AppCompatActivity() {
         container  = FrameLayout(this).apply { setBackgroundColor(BG) }
         setContentView(container)
         tts = TextToSpeech(this) { /* init silent — ready by the time the user touches sliders */ }
+
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vX: Float, vY: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: return false)
+                if (dx < -160f && vX < -400f && abs(vY) < abs(vX)) {
+                    finish()
+                    return true
+                }
+                return false
+            }
+        })
+
         push(S_MAIN)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipeDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun finish() {
+        super.finish()
+        overridePendingTransition(R.anim.stay_still, R.anim.slide_out_to_left)
     }
 
     override fun onDestroy() {
@@ -93,8 +121,7 @@ class SettingsActivity : AppCompatActivity() {
             screenStack.removeLast()
             show(screenStack.last())
         } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
+            finish()
         }
     }
 
@@ -169,6 +196,14 @@ class SettingsActivity : AppCompatActivity() {
         ))
 
         body.addView(cardSpacer())
+        body.addView(sectionLabel("ACCESSIBILITY"))
+        body.addView(cardGroup(
+            toggleRow("Closed Captions", "Show Scout's words as text at the bottom of the screen",
+                scoutPrefs.getBoolean("closed_captions", false)
+            ) { on -> scoutPrefs.edit().putBoolean("closed_captions", on).apply() }
+        ))
+
+        body.addView(cardSpacer())
         body.addView(cardGroup(
             navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") }
         ))
@@ -189,10 +224,10 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("CONNECTION"))
         body.addView(cardGroup(
-            toggleRow("Offline Mode", "Only use data stored on this device",
-                !memPrefs.getBoolean("gemini_enabled", true)
-            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", !on).apply() },
-            navRow("API Key", "", "Connect Scout to online services") { push(S_APIKEY) },
+            toggleRow("Online Features", "Use internet services when available",
+                memPrefs.getBoolean("gemini_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", on).apply() },
+            navRow("Online Services", "", "Manage API keys and providers") { push(S_APIKEY) },
             navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") }
         ))
 
@@ -202,9 +237,6 @@ class SettingsActivity : AppCompatActivity() {
             toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
                 scoutPrefs.getBoolean("kid_safe_filter", true)
             ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() },
-            toggleRow("Pet Safety Protocol Awareness", "Scout mentions pet safety when relevant",
-                scoutPrefs.getBoolean("pet_safety", true)
-            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() },
             toggleRow("Presence Mode", "Scout adapts when you're nearby",
                 memPrefs.getBoolean("presence_mode_enabled", true)
             ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
@@ -233,6 +265,14 @@ class SettingsActivity : AppCompatActivity() {
             ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() },
             navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") },
             navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("SAFETY"))
+        body.addView(cardGroup(
+            toggleRow("Pet Awareness", "Scout uses extra caution around pets",
+                scoutPrefs.getBoolean("pet_safety", true)
+            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() }
         ))
 
         body.addView(footerNote("More hardware controls coming in a future update."))
@@ -364,7 +404,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun apiKeyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("API Key", "Connect Scout to online services."))
+        root.addView(subHeader("Online Services", "Manage API keys and providers."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -725,12 +765,24 @@ class SettingsActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Open Source Licenses")
             .setMessage(
-                "MobileFaceNet — MIT License\n" +
-                "TensorFlow Lite — Apache 2.0\n" +
-                "ML Kit — Google APIs Terms\n" +
-                "CameraX — Apache 2.0\n" +
-                "OkHttp — Apache 2.0\n" +
-                "Room — Apache 2.0"
+                "llama.cpp\n" +
+                "MIT License — github.com/ggerganov/llama.cpp\n\n" +
+                "TinyLlama 1.1B Chat v1.0\n" +
+                "Apache 2.0 — huggingface.co/TinyLlama\n\n" +
+                "ArcFace MobileFaceNet (InsightFace)\n" +
+                "MIT License — github.com/deepinsight/insightface\n\n" +
+                "TensorFlow Lite\n" +
+                "Apache 2.0 — tensorflow.org\n\n" +
+                "ML Kit (Face Detection, Image Labeling)\n" +
+                "Google APIs Terms of Service\n\n" +
+                "CameraX\n" +
+                "Apache 2.0 — developer.android.com/jetpack/camerax\n\n" +
+                "OkHttp\n" +
+                "Apache 2.0 — github.com/square/okhttp\n\n" +
+                "Room\n" +
+                "Apache 2.0 — developer.android.com/jetpack/room\n\n" +
+                "NWS Weather API (weather.gov)\n" +
+                "Public Domain — U.S. Government"
             )
             .setPositiveButton("Close", null)
             .show()

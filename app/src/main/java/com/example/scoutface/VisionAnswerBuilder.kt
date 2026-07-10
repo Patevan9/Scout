@@ -216,10 +216,15 @@ class VisionAnswerBuilder(
 
         return when {
             faceCount >= 3 -> {
+                val dogLine = when {
+                    seesDog && !dogKnownName.isNullOrBlank() -> " ${dogKnownName} is nearby too."
+                    seesDog -> " I also see a dog nearby."
+                    else -> ""
+                }
                 val objects = if (filteredObjects.isNotEmpty()) {
                     " I also see ${formatLabelList(filteredObjects)}."
                 } else ""
-                "I see several people.$objects"
+                "I see several people.$dogLine$objects"
             }
 
             faceCount == 2 -> {
@@ -229,12 +234,14 @@ class VisionAnswerBuilder(
                     else -> ""
                 }
                 when {
-                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
-                        "I can see you, $knownFaceName and $pendingIntroName.$dogLine"
                     !knownFaceName.isNullOrBlank() && !secondaryFaceName.isNullOrBlank() ->
-                        "I can see you, $knownFaceName and $secondaryFaceName.$dogLine"
+                        "I see $knownFaceName and $secondaryFaceName.$dogLine"
+                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
+                        "I see $knownFaceName and $pendingIntroName.$dogLine"
                     !knownFaceName.isNullOrBlank() ->
-                        "I can see you, $knownFaceName and someone else.$dogLine"
+                        "I see $knownFaceName and someone else.$dogLine"
+                    !secondaryFaceName.isNullOrBlank() ->
+                        "I see $secondaryFaceName and someone else.$dogLine"
                     else -> "I see two people.$dogLine"
                 }
             }
@@ -252,7 +259,7 @@ class VisionAnswerBuilder(
                 }
 
                 if (knownName != null) {
-                    "I can see you, $knownName.$objectLine"
+                    "I see $knownName.$objectLine"
                 } else {
                     "I see one person in front of me.$objectLine"
                 }

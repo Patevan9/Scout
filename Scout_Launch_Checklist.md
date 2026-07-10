@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated June 29, 2026 | Version 9**
+**What Scout needs to be worth $9.99 | Updated July 7, 2026 | Version 13**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -59,6 +59,26 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ Gemini responses no longer cut off mid-sentence — maxOutputTokens raised 250→600. "Always end on a complete sentence" added to system prompt. MAX_TOKENS trim logic finds last sentence boundary; returns null if none (falls through to TinyLlama). DONE June 29.
 ✓ Gemini quota/cooldown announced — Scout now speaks "Gemini says you've reached your daily limit" instead of silently falling through to TinyLlama. speakUnavailableIfNeeded() returns Boolean (true=spoken, false=suppressed). Cooldown check added at top of tryTinyLlamaOrFallback(). DONE June 29.
 ✓ Secondary face recognition — Both faces now get embedded in two-person scenes, not just the primary. PeopleDb v3 adds person_embeddings table (up to 5 per person). VisionAnswerBuilder uses secondaryFaceName — Scout says "I can see you, Patrick and Elijah" instead of "someone else." DONE June 29.
+✓ **ArcFace face recognition upgrade** — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces old 192-dim model. PeopleDb v4: migration clears incompatible embeddings (preserves names and face hashes). Threshold 0.60f fixes "everyone is Patrick" false positive. DONE July 3.
+✓ **"I see X" phrasing** — Scout now says "I see Patrick" and "I see Patrick and Diana" instead of "I can see you, Patrick." Better match for a seeing-eye companion. DONE July 3.
+✓ **Diana (secondary face) fix** — Secondary face block now consumes pendingFaceIntroName. "This is my wife Diana" with two people in frame now correctly stores and recognizes Diana. DONE July 3.
+✓ **Personality phrase pools — Phrases.kt** — Scout no longer repeats the same boot greeting, goodbye, or remember confirmation every session. Anti-repeat rolling window prevents back-to-back repeats. DONE July 3.
+✓ **Adaptive boot greeting** — BOOT_OFFLINE_FAST (no warming-up mention) when TinyLlama loaded in under 2 seconds last session; BOOT_OFFLINE otherwise. TinyLlama load time stored in SharedPreferences. All BOOT_ONLINE phrases now mention offline backup warming up. DONE July 3.
+✓ **PeopleDb threshold raised back to 0.65f** — 0.60f (from ArcFace upgrade) caused Diana/Elijah cross-contamination. Raised to 0.65f in both findBestMatch and findBestMatchName. cursor.use{} prevents cursor leaks. forgetPerson is now atomic. addNamedEmbedding skips insert if person already has 12 embeddings. DONE July 4.
+✓ **VisionAnswerBuilder fixes** — 3+ faces branch now includes dogLine (was missing). 2-face branch: secondaryFaceName arm precedes pendingIntroName arm; new else arm handles unknown primary + known secondary. Freshness 3500ms→1800ms. DONE July 4.
+✓ **Secondary face findBestMatch fallback** — Secondary face recognition now falls back to the single-BLOB people.embedding if person_embeddings has no match. Closes recognition gap on fresh installs. DONE July 4.
+✓ **Caption persistence fix** — Last spoken line no longer lingers on screen after captions are turned off in Settings. onResume() hides the caption view immediately. DONE July 4.
+✓ **Startup diagnostics** — Scout speaks a friendly STT-unavailable warning at boot; shows a Toast if TTS fails to initialize. Both events logged to JournalDb. DONE July 4.
+✓ **Onboarding flow — OnboardingActivity.kt** — Full 5-screen flow built. Screens: Welcome / Trial / This Is Just The Beginning / Privacy / Ready To Begin. currentPage drives both dots and "X / 5" counter. First-boot redirect in MainActivity.onCreate() sends new installs to onboarding. finishOnboarding() defaults new installs to offline mode (gemini_enabled=false). DONE July 4.
+✓ **New installs default to offline mode** — finishOnboarding() writes gemini_enabled=false to scout_memory SharedPrefs. Gemini opt-in only after user adds their key in Settings. DONE July 4.
+✓ **BOOT_NO_KEY phrases** — Replaced vague "online mode not configured" with actionable tip: "Open settings any time by sliding the screen to the right." DONE July 4.
+✓ **CLAUDE.md** — Repo-root file documents git pull/push commands with full branch name, critical no-hardcoding rules, architecture notes. Persists across Claude session compaction. DONE July 4.
+✓ **ModelDownloadActivity** — Portrait-only loading screen for TinyLlama model download. 39 humorous loading messages, ObjectAnimator slide animation, updateProgress() API. Ready for Play Asset Delivery wiring in a future session. DONE July 4.
+✓ **16KB page alignment fix confirmed** — scout_llama.so built with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels (Android 15). Confirmed working on A32 and Fold 7. DONE July 7.
+✓ **bootstrapModelFile() — auto-copy on startup** — Scout copies the TinyLlama model from app-specific external storage to filesDir automatically. No more "model not found" after reinstall. READ_EXTERNAL_STORAGE added to manifest with maxSdkVersion="32" for Android ≤12 fallback. DONE July 7.
+✓ **TinyLlama confirmed working on A32 and Fold 7** — Both devices tested with Online Features OFF. TinyLlama answers questions. Primary brain confirmed operational. DONE July 7.
+✓ **Offline fallback message fixed** — When user deliberately turns off Online Features, Scout says "I'm working offline" not "having trouble connecting." DONE July 7.
+✓ **Thinking expression and head-turn amplitude fixed** — Brow lifts raised to visible levels (26/24px). Head-turn face drift raised from invisible 5px to ±24px X / ±14px Y. DONE July 7.
 
 ---
 
@@ -66,24 +86,23 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 
 These are the real blockers. Scout cannot ship without these.
 
-### 1. A32 stability — TinyLlama re-enable path ✓ DONE June 28
+### 1. A32 stability — TinyLlama re-enable path ✓ DONE June 28 / CONFIRMED July 7
 
 - TinyLlama re-enabled with delayed load strategy: 90s delay after boot, 800MB RAM guard, nCtx=512, nThreads=2.
 - On-demand load also wired as Gemini fallback — if Gemini fails and TinyLlama hasn't loaded yet, tryLoadOfflineBrain() fires and Scout says "warming up."
-- Still needs real-world A32 testing to confirm the LMKD crash does not return.
-■ MainActivity.kt + LlamaEngine.kt — monitor on A32 builds
+- bootstrapModelFile() added July 7 — auto-copies model from external storage to filesDir on startup. Model survives reinstalls.
+- CONFIRMED WORKING on A32 and Fold 7 July 7.
 
-### 2. Startup diagnostics — Makes Scout start cleanly every time ■ NEXT
+### 2. Startup diagnostics — ✓ DONE July 4
 
-- Scout checks at startup that brain is loaded, TTS is ready, STT is available.
-- If something is missing, Scout says something friendly rather than crashing or freezing.
-■ MainActivity.kt — startup check block — THIS IS NEXT
+- TTS failure: Toast shown to user with restart instructions.
+- STT unavailable: Scout speaks a friendly warning 4 seconds after boot and logs to JournalDb.
 
-### 3. Onboarding flow — First impression matters
+### 3. Onboarding flow — ✓ DONE July 4
 
-- 5-screen flow designed and approved. Blue color scheme. Built by ChatGPT.
-- Screen counter and progress dots must be driven by the same variable — never hardcoded in two places.
-■ New OnboardingActivity.kt — one focused session
+- Full 5-screen OnboardingActivity.kt built. First-boot redirect in MainActivity.onCreate().
+- currentPage is the single source of truth for dots and counter — not hardcoded in two places.
+- finishOnboarding() defaults new installs to offline mode (gemini_enabled=false in scout_memory).
 
 ### 4. Fold 7 stability testing — Ongoing
 
@@ -143,6 +162,22 @@ Required to submit to Google Play.
 
 ---
 
+## ■ Support Scout Screen — Settings
+
+A "Support Scout" section inside Settings with four optional one-time contribution tiers:
+- **Buy Scout a Coffee** — $3 (product ID: `support_3`)
+- **Support Scout More** — $5 (product ID: `support_5`)
+- **Help Scout Grow** — $10 (product ID: `support_10`)
+- **Scout Supporter** — $25 (product ID: `support_25`)
+
+All clearly labeled as one-time, optional, and never unlocking features. Messaging: "Scout has no required subscriptions. Support is completely optional and helps fund future improvements." Footer: "Scout is a one-time purchase. Support contributions are completely optional and never unlock core features." Three badges: Ad-Free / Private & Local / Built with Care.
+
+Payment: Google Play In-App Billing. All four products are consumable (so users can give more than once). Create product IDs in Play Console before building. Design mockup approved — final card names confirmed July 4.
+
+■ Build in a future session before or after launch.
+
+---
+
 ## ■ Post-Trial Strategy
 
 - After 7 days — advanced features lock but Scout stays installed. Still greets the family.
@@ -154,9 +189,122 @@ Required to submit to Google Play.
 
 ---
 
+## ■ Scout Behavior Learning — Two Tiers
+
+---
+
+### Tier 1 — Regular Mode (Scout 1.1) — For everyone
+
+**Public tagline:** "Scout can learn small preferences with your approval."
+
+Scout notices patterns and suggests simple behavior adjustments in plain, friendly English. The family taps one button. Nothing ever changes without approval. No technical language, no file names, no risk levels shown.
+
+**Settings → "Scout's Suggestions"** — Scout speaks warmly in first person:
+
+> *"I'd like to answer a little faster."*
+> *"I noticed you prefer shorter replies."*
+> *"Would you like me to stop announcing battery percentage?"*
+> *"I should be quieter at night."*
+> *"I should not greet you every time you walk by."*
+> *"I should be more careful recognizing [name]."*
+
+Three buttons: **Approve** · **Not now** · **Never suggest this**
+
+- Approve → Scout writes the change to SharedPrefs/behavior flag immediately. No build needed.
+- Not now → dismissed, may resurface after cooldown
+- Never suggest this → `suppressed` status, ProposalDetector skips permanently
+
+**What triggers a suggestion:**
+- Same wrong face corrected 3+ times → "I should be more careful recognizing [name]."
+- User says "stop" / "that's enough" frequently → "I noticed you prefer shorter replies."
+- Greeting fires within seconds of last greeting → "I should not greet you every time you walk by."
+- TTS fires after 9pm frequently → "I should be quieter at night."
+- Same fact corrected more than once → "I should ask before remembering new things."
+
+---
+
+### Tier 2 — Scout Dev Build (Patrick only — never on Play Store)
+
+**This feature does not ship in the Play Store APK at all.** Not hidden — literally absent from the compiled release build. Android build variants ensure the code is stripped at compile time.
+
+**Two build variants:**
+- `standard` (Play Store) — Tier 1 behavior suggestions only. No developer code present.
+- `dev` (Patrick's devices only, sideloaded) — Full telemetry + engineering observations.
+
+**Compile-time flag in `build.gradle.kts`:**
+```kotlin
+productFlavors {
+    create("standard") {
+        buildConfigField("boolean", "DEVELOPER_MODE", "false")
+    }
+    create("dev") {
+        buildConfigField("boolean", "DEVELOPER_MODE", "true")
+    }
+}
+```
+In release builds, `if (BuildConfig.DEVELOPER_MODE)` compiles to `if (false)` — the entire block is stripped. Nothing to decompile or discover.
+
+**What Scout Dev shows — telemetry and observations, not code proposals:**
+
+Scout surfaces real data from running on Patrick's devices. Patrick (and Claude) decide what to do with it.
+
+> *"I've had 14 failed face recognitions today."*
+> *"Wake-word detection dropped after yesterday's update."*
+> *"Battery usage increased by 12% compared to last week."*
+> *"Gemini failed 8 times today — mostly between 6 and 7pm."*
+> *"TinyLlama boot time has been averaging 11 seconds this week."*
+> *"The same face has been mis-identified 4 times today."*
+
+These are observations, not commands. Scout never decides what to fix. Patrick sees the data, starts a Claude session, and says "Scout noticed X — let's fix it." Scout is an engineering partner, not an autonomous programmer.
+
+**Scout Dev telemetry to collect:**
+- Face recognition: success rate, failure rate, per-person accuracy
+- Wake word: detection rate, false positive rate, post-update drops
+- Gemini: call count, failure count, timeout rate, time-of-day patterns
+- TinyLlama: boot time trends, memory usage
+- TTS/STT: failure counts, error codes seen
+- Battery: usage trend week-over-week
+- Memory: correction frequency per fact type
+
+**ProposalDb schema (Tier 1 shared only — Tier 2 uses a separate TelemetryDb):**
+
+```sql
+-- Tier 1 (standard build)
+CREATE TABLE proposals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    category        TEXT    NOT NULL,  -- "parameter" | "behavior" | "phrase"
+    suggestion_text TEXT    NOT NULL,  -- First-person family-friendly text
+    change_json     TEXT    NOT NULL,  -- What to write to SharedPrefs on approval
+    status          TEXT    NOT NULL,  -- "pending"|"approved"|"dismissed"|"suppressed"|"applied"|"reverted"
+    trigger_reason  TEXT,
+    created_at      INTEGER NOT NULL,
+    reviewed_at     INTEGER,
+    applied_at      INTEGER
+);
+
+-- Tier 2 (dev build only — not compiled into standard/release)
+CREATE TABLE telemetry_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT    NOT NULL,  -- "face_fail"|"wake_miss"|"gemini_fail"|"tts_error"|"boot_time" etc.
+    value       REAL,              -- Numeric value where applicable (ms, count, %)
+    context     TEXT,              -- Extra detail (person name, error code, etc.)
+    recorded_at INTEGER NOT NULL
+);
+```
+
+### Files needed (future sessions)
+
+Tier 1 session: `ProposalDb.kt` · `ProposalDetector.kt` · `ScoutProposal.kt` · Settings "Scout's Suggestions" UI · `ApplyProposal.kt`
+
+Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.kt` (hooks into existing fail/miss points) · Scout Dev dashboard UI (observations list) · build variant wiring in `build.gradle.kts`
+
+■ Tier 1 design approved July 5, 2026 — build post-launch Scout 1.1.
+■ Tier 2 design approved July 5, 2026 — Scout Dev build, Patrick only, never Play Store.
+
+---
+
 ## ■ After Launch — Scout 1.1 Growing Up and Beyond
 
-- Proposal Sandbox — 'Want me to remember that?' confirm step
 - Permanent vs temporary memory — birthday vs appointment sorting
 - Caring follow-up loop — 'How was your appointment?' then forget
 - Full mood system — CALM / CURIOUS / HAPPY / THINKING / CONCERNED
@@ -177,12 +325,12 @@ Required to submit to Google Play.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, full reliable face recognition for the whole family (including both people in a two-person frame), a settings screen, and a stable icon. The A32 is stable. TinyLlama is re-enabled. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: Startup diagnostics (#2 on Must Fix list) — friendly messages if brain, TTS, or STT missing at boot. Then: Onboarding flow (#3).**
+**Next session: Privacy Policy + Terms of Use, Play Store listing, and 16KB page size ML Kit library updates.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated June 29, 2026 | Version 9 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 7, 2026 | Version 13 | For Patrick, Diana, Elijah, and Scout*

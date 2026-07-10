@@ -94,15 +94,7 @@ import com.google.mlkit.vision.label.ImageLabeling
 
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 
-import java.io.BufferedInputStream
-
 import java.io.File
-
-import java.io.FileOutputStream
-
-import java.net.HttpURLConnection
-
-import java.net.URL
 
 import java.text.SimpleDateFormat
 
@@ -126,8 +118,6 @@ import android.graphics.Bitmap
 
 import android.graphics.Matrix
 
-import java.util.zip.ZipInputStream
-
 import kotlin.math.abs
 
 enum class IntentType {
@@ -135,10 +125,6 @@ enum class IntentType {
     TIME, DATE, CONNECTIVITY,
 
     GO_ONLINE, GO_OFFLINE,
-
-    DOWNLOAD_ALL, DOWNLOAD_STATUS, DOWNLOAD_DICT, DOWNLOAD_IDIOMS, DOWNLOAD_WORDNET, DOWNLOAD_SENTIMENT, DOWNLOAD_SLANG,
-
-    RESET_DOWNLOAD_DECISIONS, REMOVE_DOWNLOADS,
 
     EXPORT_BRAIN,
 
@@ -165,8 +151,6 @@ enum class IntentType {
 }
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
-
-    private lateinit var datasetStore: ScoutDatasetStore
 
     // =======================
 
@@ -197,38 +181,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
-    // FALLBACK DATASET URLS
-
-    // =======================
-
-    private val URL_WIKDICT_ZIP = "https://download.wikdict.com/dictionaries/sqlite/en.db.zip"
-
-    private val URL_IDIOMS_JSON_FALLBACKS = listOf(
-
-        "https://raw.githubusercontent.com/yuxiaojian/most-common-american-idioms-with-synonyms/main/idioms.json",
-
-        "https://raw.githubusercontent.com/leonardlin/common-english-idioms/master/idioms.json"
-
-    )
-
-    private val URL_WORDNET_ZIP = "https://en-word.net/static/english-wordnet-2025-json.zip"
-
-    private val URL_POS_WORDS =
-
-        "https://raw.githubusercontent.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/master/data/opinion-lexicon-English/positive-words.txt"
-
-    private val URL_NEG_WORDS =
-
-        "https://raw.githubusercontent.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/master/data/opinion-lexicon-English/negative-words.txt"
-
-    private val URL_SLANG_JSON_FALLBACKS = listOf(
-
-        "https://raw.githubusercontent.com/words/slang/master/slang.json"
-
-    )
-
-    // =======================
-
     // IDENTITIES / FACT KEYS
 
     // =======================
@@ -250,38 +202,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val PREF_PRESENCE_MODE_ENABLED = "presence_mode_enabled"
 
     private val PREF_SPONTANEOUS_ENABLED = "spontaneous_enabled"
-
-    private val PREF_DL_DICT_DECISION = "dl_dict_decision"
-
-    private val PREF_DL_IDIOMS_DECISION = "dl_idioms_decision"
-
-    private val PREF_DL_WORDNET_DECISION = "dl_wordnet_decision"
-
-    private val PREF_DL_SENTIMENT_DECISION = "dl_sentiment_decision"
-
-    private val PREF_DL_SLANG_DECISION = "dl_slang_decision"
-
-    private val DECISION_UNKNOWN = "unknown"
-
-    private val DECISION_ACCEPTED = "accepted"
-
-    private val DECISION_DECLINED = "declined"
-
-    private val PREF_PENDING_APPROVAL = "pending_approval"
-
-    private val PENDING_NONE = "none"
-
-    private val PENDING_DICT = "dict"
-
-    private val PENDING_WORDNET = "wordnet"
-
-    private val PENDING_IDIOMS = "idioms"
-
-    private val PENDING_SENTIMENT = "sentiment"
-
-    private val PENDING_SLANG = "slang"
-
-    private val PENDING_ALL = "all"
 
     // =======================
 
@@ -305,19 +225,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var isThinking = false
 
-    @Volatile
-
-    private var isDownloading = false
-
-    private val downloadLock = AtomicBoolean(false)
-
     // =======================
 
+    // MIC DISCIPLINE
+
     // =======================
-
-// MIC DISCIPLINE
-
-// =======================
 
     private var lastSpeechDoneMs = 0L
     private var lastScoutResponseMs = 0L
@@ -485,6 +397,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var recognizerIntent: Intent
 
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var modelDownloadLauncher: ActivityResultLauncher<Intent>
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -497,6 +410,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var viewFinder: PreviewView
 
     private lateinit var swipeDetector: GestureDetector
+
+    private lateinit var captionsText: android.widget.TextView
+
+    private var captionsEnabled = false
+
+    private val captionHideRunnable = Runnable {
+        captionsText.visibility = View.GONE
+    }
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -550,6 +471,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
+
+        // Show onboarding on first install; skip on every subsequent launch.
+        val scoutPrefsEarly = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+        if (!scoutPrefsEarly.getBoolean(OnboardingActivity.PREF_ONBOARDING_DONE, false)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
 
         setContentView(R.layout.activity_main)
 
@@ -652,7 +581,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             hasApiKey = { apiKey.trim().isNotBlank() },
 
-            hasValidatedInternet = { connectivityManager.hasValidatedInternet() }
+            hasValidatedInternet = { connectivityManager.hasValidatedInternet() },
+
+            lastLlamaLoadMs = { scoutPrefs.getLong("llama_last_load_ms", Long.MAX_VALUE) }
 
         )
 
@@ -665,6 +596,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Re-apply voice settings in case they were changed in SettingsActivity.
         tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
         tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
+
+        captionsEnabled = scoutPrefs.getBoolean("closed_captions", false)
+        if (!captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.visibility = View.GONE
+        }
 
         resumeSystems()
 
@@ -788,6 +725,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         viewFinder = findViewById(R.id.viewFinder)
 
+        captionsText = findViewById(R.id.captionsText)
+
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
 
             override fun onDown(e: MotionEvent): Boolean = true
@@ -799,6 +738,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (dx > 160f && vX > 400f && abs(vY) < abs(vX)) {
 
                     startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                    overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
 
                     return true
 
@@ -900,7 +840,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupWindow() {
 
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -914,8 +854,60 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         setupRecognizerWatchdog()
 
+        bootstrapModelFile()
+
         startOfflineBrain()
 
+    }
+
+    private val MODEL_FILENAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+
+    /**
+     * Copies the TinyLlama model from external storage into filesDir if it isn't there yet.
+     * Checks two source locations:
+     *   1. App-specific external dir (/sdcard/Android/data/<pkg>/files/) — no permission needed
+     *   2. Root external storage (/sdcard/) — requires READ_EXTERNAL_STORAGE (Android ≤12 only)
+     * Safe to call multiple times; no-ops immediately if the dest file already looks complete.
+     */
+    private fun bootstrapModelFile() {
+        val dest = File(filesDir, MODEL_FILENAME)
+        if (dest.exists() && dest.length() >= ModelDownloadActivity.MIN_MODEL_BYTES) return
+
+        Thread {
+            val sources = mutableListOf<File>()
+            getExternalFilesDir(null)?.let { sources.add(File(it, MODEL_FILENAME)) }
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                @Suppress("DEPRECATION")
+                sources.add(File(android.os.Environment.getExternalStorageDirectory(), MODEL_FILENAME))
+            }
+
+            val src = sources.firstOrNull { it.exists() && it.canRead() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
+            if (src == null) {
+                android.util.Log.w("ScoutBrain", "Model not found locally — launching download screen.")
+                runOnUiThread {
+                    modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+                }
+                return@Thread
+            }
+
+            android.util.Log.i("ScoutBrain",
+                "Copying model from ${src.absolutePath} (${src.length() / 1_048_576}MB)…")
+            try {
+                src.inputStream().use { input ->
+                    dest.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                android.util.Log.i("ScoutBrain", "Model copy complete (${dest.length() / 1_048_576}MB)")
+            } catch (e: Exception) {
+                android.util.Log.e("ScoutBrain", "Model copy failed", e)
+                dest.delete()
+            }
+        }.start()
     }
 
     private fun startOfflineBrain() {
@@ -946,19 +938,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
             java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
         )
-        val modelFile = candidates.firstOrNull { it.exists() }
+        val modelFile = candidates.firstOrNull { it.exists() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
         if (modelFile == null) {
-            android.util.Log.e("ScoutBrain", "TinyLlama model file not found in any location")
+            android.util.Log.e("ScoutBrain", "TinyLlama model file not found or is incomplete")
             return
         }
 
         android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
 
+        val llamaLoadStart = System.currentTimeMillis()
         // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
         // uses 2 conversation turns, so 512 tokens is more than enough.
         LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+            val loadMs = System.currentTimeMillis() - llamaLoadStart
+            scoutPrefs.edit().putLong("llama_last_load_ms", loadMs).apply()
             android.util.Log.i("ScoutBrain",
-                if (success) "Offline brain ready" else "Offline brain load failed")
+                if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
         }
 
     }
@@ -1004,8 +999,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         voice = VoiceBank(prefs)
 
-        datasetStore = ScoutDatasetStore(filesDir)
-
         exportManager = ScoutExportManager(this, truthDb)
 
         ensureScoutIdentityDefaults()
@@ -1050,6 +1043,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (micOk) safeSetupSpeech("permissionCallback")
 
+            // If READ_EXTERNAL_STORAGE was just granted, retry the model copy now.
+            if (results[Manifest.permission.READ_EXTERNAL_STORAGE] == true) bootstrapModelFile()
+
+        }
+
+        // When ModelDownloadActivity finishes (download complete), bootstrap and start the brain.
+        modelDownloadLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                bootstrapModelFile()
+                startOfflineBrain()
+            }
         }
 
     }
@@ -1166,6 +1172,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             need.add(Manifest.permission.ACCESS_COARSE_LOCATION)
 
+        }
+
+        // READ_EXTERNAL_STORAGE is only grantable on Android 12 and below (maxSdkVersion="32").
+        // On Android 13+ the permission is not granted; bootstrapModelFile() will fall back
+        // to the app-specific external dir which needs no permission.
+        if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.S_V2 &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            need.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
 
         if (need.isNotEmpty()) {
@@ -1657,10 +1675,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         }
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
-                                                            // Use slightly lower threshold for secondary crop — smaller, lower quality
-                                                            val secName = peopleDb.findBestMatchName(emb2, threshold = 0.80f)
+                                                            var secName = peopleDb.findBestMatchName(emb2, threshold = 0.62f)
+                                                            if (secName == null) {
+                                                                val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
+                                                                if (h2 != null) secName = peopleDb.getName(h2)
+                                                            }
+                                                            if (secName == null && pendingFaceIntroName != null) {
+                                                                // Introduction was given while primary face was someone else —
+                                                                // this unknown secondary face is who was being introduced.
+                                                                secName = pendingFaceIntroName
+                                                                peopleDb.addNamedEmbedding(secName!!, emb2)
+                                                                pendingFaceIntroName = null
+                                                            } else if (secName != null) {
+                                                                peopleDb.addNamedEmbedding(secName, emb2)
+                                                            }
                                                             lastSecondaryFaceName = secName
-                                                            if (secName != null) peopleDb.addNamedEmbedding(secName, emb2)
                                                             Log.d("ScoutFace", "Secondary face: name=$secName")
                                                         } finally {
                                                             if (fb2 !== sc2) sc2.recycle()
@@ -1708,7 +1737,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                             }
                                     } else null
 
-                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
+                                    val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+                                    val greeting = if (greetName != null) "I see $greetName." else "Hello. I am $myName."
 
                                     respond(greeting)
 
@@ -2128,8 +2158,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (currentMode != Mode.PRESENCE) return
 
-        if (isDownloading) return
-
         if (isSpeaking) return
 
         if (isListening) return
@@ -2274,9 +2302,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                         currentMode == Mode.PRESENCE &&
 
-                        !isSpeaking &&
-
-                        !isDownloading
+                        !isSpeaking
 
             if (shouldBeListening) {
 
@@ -2365,6 +2391,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     faceView.setThinking(false)
 
+                    if (captionsEnabled) {
+                        handler.postDelayed(captionHideRunnable, 2500L)
+                    }
+
                     val now = System.currentTimeMillis()
 
                     lastSpeechDoneMs = now
@@ -2408,6 +2438,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             })
 
+            val sttOk = SpeechRecognizer.isRecognitionAvailable(this)
+
             val out = bootStatus.build()
 
             speak(out, true)
@@ -2416,8 +2448,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             journalDb.add("Booted. Spoke: $out")
 
-            handler.postDelayed({ maybeAskTier1OnBoot() }, 900L)
+            if (!sttOk) {
+                handler.postDelayed({
+                    val msg = "One thing — I can't hear on this device. Speech recognition may not be installed. Check your device's voice settings when you get a chance."
+                    speak(msg, false)
+                    journalDb.add("STT unavailable at boot.")
+                }, 4000L)
+            }
 
+        } else {
+            // TTS failed to initialize — Scout cannot speak. Show a visible alert.
+            runOnUiThread {
+                android.widget.Toast.makeText(
+                    this,
+                    "Scout's voice isn't working. Please restart the app. If this keeps happening, check Text-to-Speech in your device settings.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            journalDb.add("TTS init failed at boot.")
         }
 
     }
@@ -2431,6 +2479,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speakingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(false)
+
+        if (captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.text = text
+            captionsText.visibility = View.VISIBLE
+        }
 
         stopListeningSafe()
 
@@ -2527,12 +2581,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun handleDownloadIntent(which: String) {
-
-        requestOrStartDownload(which)
-
-    }
-
     private fun handleExportBrainIntent() {
 
         val path = exportManager.exportBrainToJson()
@@ -2589,11 +2637,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun tryTinyLlamaOrFallback(qNorm: String) {
 
         // When Gemini is in cooldown (quota or rate-limit), announce it once.
-        // speakUnavailableIfNeeded() has built-in suppression so it only speaks
-        // the first time in each cooldown window. If it spoke, return — the user
-        // needs to know before we silently answer from a different brain.
-        // On the next question the suppression kicks in and TinyLlama takes over.
-        if (scoutGeminiManager.isInCooldown()) {
+        // Only do this if Gemini is actually enabled — if the user deliberately
+        // turned off Online Features, a cooldown from earlier use is irrelevant.
+        if (isGeminiEnabled() && scoutGeminiManager.isInCooldown()) {
             if (scoutGeminiManager.speakUnavailableIfNeeded()) return
         }
 
@@ -2624,9 +2670,9 @@ Do not say you cannot see.
 
 If unsure, say you do not know yet.
 
-Give a direct, friendly answer in one or two short complete sentences.
+Give a warm, natural answer in two or three sentences. Be conversational but concise.
 
-Respond only with Scout's next short reply.
+Respond only with Scout's next reply.
 """.trimIndent()
 
             val sb = StringBuilder()
@@ -2652,7 +2698,7 @@ Respond only with Scout's next short reply.
 
             Thread {
 
-                val reply = LlamaEngine.generate(sb.toString(), nPredict = 64)
+                val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
 
                 runOnUiThread {
                     if (!reply.isNullOrBlank()) {
@@ -2688,8 +2734,14 @@ Respond only with Scout's next short reply.
 
         }
 
-        // Nothing available — speak the Gemini unavailable message or random fallback
-        scoutGeminiManager.speakUnavailableIfNeeded()
+        // Nothing available — only report a connectivity problem if online features were
+        // actually expected to work. When the user deliberately turned off online features,
+        // don't say "having trouble connecting" — they know, they turned it off.
+        if (isGeminiEnabled()) {
+            scoutGeminiManager.speakUnavailableIfNeeded()
+        } else {
+            respond("I'm working offline right now, so that one's a bit beyond me.")
+        }
 
     }
 
@@ -2737,7 +2789,7 @@ Respond only with Scout's next short reply.
 
     private fun cleanOfflineReply(reply: String): String {
 
-        val limited = limitToSentences(reply, maxSentences = 2)
+        val limited = limitToSentences(reply, maxSentences = 3)
 
         val lower = limited.lowercase()
 
@@ -2813,11 +2865,16 @@ Respond only with Scout's next short reply.
 
                     lower.contains("i do not have the ability to see") ||
 
-                    lower.contains("i don't have the ability to see")
+                    lower.contains("i don't have the ability to see") ||
+
+                    lower.contains("family friendly companion") ||
+
+                    lower.contains("family companion robot")
 
         if (badIdentity) {
 
-            return "I'm Scout. I hear you, and I'm here with you."
+            val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+            return "I'm $myName. I hear you, and I'm here with you."
 
         }
 
@@ -2879,6 +2936,8 @@ Respond only with Scout's next short reply.
 
     private fun handleIdentityIntent(qNorm: String) {
 
+        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+
         val response = when {
 
             qNorm.contains("my friend") || qNorm.contains("are you my friend") ->
@@ -2895,7 +2954,7 @@ Respond only with Scout's next short reply.
 
             qNorm.contains("do you have feelings") || qNorm.contains("have feelings") ->
 
-                "I have my own Scout way of feeling things. I feel calm when you're near."
+                "I have my own $myName way of feeling things. I feel calm when you're near."
 
             qNorm.contains("who created you") ->
 
@@ -2907,7 +2966,7 @@ Respond only with Scout's next short reply.
 
             else ->
 
-                "I'm Scout. I'm here with you."
+                "I'm $myName. I'm here with you."
 
         }
 
@@ -2973,41 +3032,11 @@ Respond only with Scout's next short reply.
 
     }
 
-    private fun handleResetDownloadDecisionsIntent() {
-
-        resetDownloadDecisions(deleteFiles = false)
-
-        val out = "Okay. I reset download decisions."
-
-        respond(out)
-
-    }
-
-    private fun handleDownloadStatusIntent() {
-
-        val out =
-
-            datasetStore.buildStatusString() + " Downloading: " + (if (isDownloading) "yes." else "no.")
-
-        respond(out)
-
-    }
-
     private fun handleGoOfflineIntent() {
 
         prefs.edit().putBoolean(PREF_GEMINI_ENABLED, false).apply()
 
         val out = "Okay. I’m offline now."
-
-        respond(out)
-
-    }
-
-    private fun handleRemoveDownloadsIntent() {
-
-        resetDownloadDecisions(deleteFiles = true)
-
-        val out = "Okay. I removed downloaded files and reset decisions."
 
         respond(out)
 
@@ -3033,7 +3062,10 @@ Respond only with Scout's next short reply.
 
             respond("Opening settings!")
 
-            handler.postDelayed({ startActivity(Intent(this, SettingsActivity::class.java)) }, 600L)
+            handler.postDelayed({
+                startActivity(Intent(this, SettingsActivity::class.java))
+                overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+            }, 600L)
 
             return
 
@@ -3055,8 +3087,6 @@ Respond only with Scout's next short reply.
         isThinking = true
 
         faceView.setThinking(true)
-
-        if (handleApproval(qNorm)) return
 
         if (handleTeaching(qNorm)) return
 
@@ -3086,24 +3116,6 @@ Respond only with Scout's next short reply.
 
             IntentType.GO_OFFLINE -> handleGoOfflineIntent()
 
-            IntentType.DOWNLOAD_STATUS -> handleDownloadStatusIntent()
-
-            IntentType.RESET_DOWNLOAD_DECISIONS -> handleResetDownloadDecisionsIntent()
-
-            IntentType.REMOVE_DOWNLOADS -> handleRemoveDownloadsIntent()
-
-            IntentType.DOWNLOAD_DICT -> handleDownloadIntent(PENDING_DICT)
-
-            IntentType.DOWNLOAD_IDIOMS -> handleDownloadIntent(PENDING_IDIOMS)
-
-            IntentType.DOWNLOAD_WORDNET -> handleDownloadIntent(PENDING_WORDNET)
-
-            IntentType.DOWNLOAD_SENTIMENT -> handleDownloadIntent(PENDING_SENTIMENT)
-
-            IntentType.DOWNLOAD_SLANG -> handleDownloadIntent(PENDING_SLANG)
-
-            IntentType.DOWNLOAD_ALL -> handleDownloadIntent(PENDING_ALL)
-
             IntentType.EXPORT_BRAIN -> handleExportBrainIntent()
 
             IntentType.VISION -> handleVisionIntent()
@@ -3112,7 +3124,7 @@ Respond only with Scout's next short reply.
 
             IntentType.HOW_ARE_YOU -> handleVoiceBankIntent("HOW_ARE_YOU")
 
-            IntentType.GOODBYE -> respond("Okay. I’ll see you later.")
+            IntentType.GOODBYE -> respond(Phrases.pick("goodbye", Phrases.GOODBYE))
 
             IntentType.PRAISE -> handleVoiceBankIntent("PRAISE")
 
@@ -3137,50 +3149,6 @@ Respond only with Scout's next short reply.
             else -> handleUnknownIntent(qNorm)
 
         }
-
-    }
-
-    private fun handleApproval(qNorm: String): Boolean {
-
-        val approve = ScoutIntentRouter.isApprove(qNorm)
-
-        val decline = ScoutIntentRouter.isDecline(qNorm)
-
-        if (approve || decline) {
-
-            val pending = prefs.getString(PREF_PENDING_APPROVAL, PENDING_NONE) ?: PENDING_NONE
-
-            if (pending != PENDING_NONE) {
-
-                if (decline) {
-
-                    markDeclinedForPending(pending)
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_NONE).apply()
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    journalDb.add("Download declined: $pending")
-
-                    return true
-
-                } else {
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_NONE).apply()
-
-                    startDownloadForPending(pending)
-
-                    return true
-
-                }
-
-            }
-
-        }
-
-        return false
 
     }
 
@@ -3212,6 +3180,16 @@ Respond only with Scout's next short reply.
         if (teach != null) {
 
             val (factKey, value) = teach
+
+            // Context-aware dog redirect: user said something like "that's Nicolas" (extracted
+            // as FactKey.NAME) but no face is visible and a dog IS visible — they are naming
+            // the dog, not a person. Re-route straight to DOG_NAME.
+            if (factKey == FactKey.NAME && lastFaceCount == 0 &&
+                lastSceneLabels.any { it.first.lowercase() in setOf("dog", "puppy") }) {
+                truthDb.upsertFact(ENTITY_USER_PRIMARY, FactKey.DOG_NAME, value, 1.0f, "spoken_teach")
+                respond(Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value))
+                return true
+            }
 
             if (factKey == FactKey.NAME) {
                 // Hard blocklist — words that can never be a person’s name.
@@ -3258,7 +3236,7 @@ Respond only with Scout's next short reply.
                     (lastFaceCount >= 2 || !isExplicitPhrase)) {
                     val registered = registerFamilyMemberFace(value)
                     if (registered) lastKnownFaceName = value
-                    respond("Okay. I’ll remember $value.")
+                    respond(Phrases.pickNamed("remember_name", Phrases.REMEMBER_NAME, value))
                     return true
                 }
                 truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
@@ -3274,7 +3252,7 @@ Respond only with Scout's next short reply.
                 }
                 if (embedding != null) peopleDb.addNamedEmbedding(value, embedding)
                 lastKnownFaceName = value
-                respond("Okay. I’ll remember your name is $value.")
+                respond(Phrases.pickNamed("remember_my_name", Phrases.REMEMBER_MY_NAME, value))
                 return true
             }
 
@@ -3290,13 +3268,13 @@ Respond only with Scout's next short reply.
 
             val out = when (factKey) {
 
-                FactKey.WIFE_NAME -> "Okay. I’ll remember your wife’s name is $value."
+                FactKey.WIFE_NAME -> Phrases.pickNamed("remember_wife", Phrases.REMEMBER_WIFE, value)
 
-                FactKey.SON_NAME -> "Okay. I’ll remember your son’s name is $value."
+                FactKey.SON_NAME -> Phrases.pickNamed("remember_son", Phrases.REMEMBER_SON, value)
 
-                FactKey.DOG_NAME -> "Okay. I’ll remember your dog’s name is $value."
+                FactKey.DOG_NAME -> Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value)
 
-                else -> "Okay. I’ll remember that."
+                else -> Phrases.pick("remember", Phrases.REMEMBER)
 
             }
 
@@ -3320,6 +3298,13 @@ Respond only with Scout's next short reply.
         if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
             // Largest face is a different known person — set pending.
             // Next time an unknown face is the primary face, it gets this name.
+            pendingFaceIntroName = name
+            return false
+        }
+        // Face hash already carries a different name (e.g. primary user recognized
+        // by position but below embedding threshold). Don't overwrite their name.
+        val hashName = peopleDb.getName(faceHash)
+        if (!hashName.isNullOrBlank() && !hashName.equals(name, ignoreCase = true)) {
             pendingFaceIntroName = name
             return false
         }
@@ -3370,1070 +3355,6 @@ Respond only with Scout's next short reply.
         }
 
         finishThinking()
-
-    }
-
-    // =======================
-
-    // DOWNLOADS: ONBOARDING (Tier 1 only)
-
-    // =======================
-
-    private fun maybeAskTier1OnBoot() {
-
-        try {
-
-            if (!datasetStore.dictInstalled()) {
-
-                if (prefs.getString(
-
-                        PREF_DL_DICT_DECISION,
-
-                        DECISION_UNKNOWN
-
-                    ) != DECISION_ACCEPTED
-
-                ) {
-
-                    prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED).apply()
-
-                }
-
-                return
-
-            }
-
-            val d = prefs.getString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-            if (d == DECISION_DECLINED) return
-
-            if (d == DECISION_ACCEPTED) return
-
-            val ask =
-
-                "I can download an offline dictionary to help me understand words without the internet. Do you want me to download it? Say approve or no."
-
-            prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-            speak(ask, false)
-
-            convoDb.logTurn("scout", ask)
-
-            journalDb.add("Asked permission for offline dictionary on boot.")
-
-        } catch (_: Exception) {
-
-        }
-
-    }
-
-    private fun requestOrStartDownload(which: String) {
-
-        when (which) {
-
-            PENDING_ALL -> {
-
-                val ask =
-
-                    "I can download my offline brain pack. It works best on Wi-Fi. Do you approve? Say approve or no."
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_ALL).apply()
-
-                respond(ask)
-
-                return
-
-            }
-
-            PENDING_DICT -> {
-
-                if (datasetStore.dictInstalled()) {
-
-                    val out = "The offline dictionary is already installed."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                val decision =
-
-                    prefs.getString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-                if (decision == DECISION_ACCEPTED) {
-
-                    startDownloadForPending(PENDING_DICT)
-
-                    return
-
-                }
-
-                if (decision == DECISION_DECLINED) {
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                if (!connectivityManager.isOnWifi()) {
-
-                    val ask =
-
-                        "I can download the offline dictionary, but I’m not on Wi-Fi. Do you still want me to download it? Say approve or no."
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-                    speak(ask, true)
-
-                    convoDb.logTurn("scout", ask)
-
-                    finishThinking()
-
-                    return
-
-                }
-
-                val ask =
-
-                    "Do you want me to download an offline dictionary so I can be smarter offline? Say approve or no."
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-                speak(ask, true)
-
-                convoDb.logTurn("scout", ask)
-
-                finishThinking()
-
-                return
-
-            }
-
-            else -> {
-
-                val (prefKey, alreadyInstalled, askText) = when (which) {
-
-                    PENDING_IDIOMS -> Triple(
-
-                        PREF_DL_IDIOMS_DECISION,
-
-                        datasetStore.idiomsInstalled(),
-
-                        "Can I install an idioms file so I understand figurative phrases offline? Say approve or no."
-
-                    )
-
-                    PENDING_WORDNET -> Triple(
-
-                        PREF_DL_WORDNET_DECISION,
-
-                        datasetStore.wordnetInstalled(),
-
-                        "Can I download WordNet to help make me smarter offline? Say approve or no."
-
-                    )
-
-                    PENDING_SENTIMENT -> Triple(
-
-                        PREF_DL_SENTIMENT_DECISION,
-
-                        datasetStore.sentimentInstalled(),
-
-                        "Can I download tiny sentiment word lists to help me understand tone offline? Say approve or no."
-
-                    )
-
-                    PENDING_SLANG -> Triple(
-
-                        PREF_DL_SLANG_DECISION,
-
-                        datasetStore.slangInstalled(),
-
-                        "Can I download a small slang list so I understand modern shortcuts offline? Say approve or no."
-
-                    )
-
-                    else -> Triple("", false, "")
-
-                }
-
-                if (alreadyInstalled) {
-
-                    val out = "That is already installed."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                val decision = prefs.getString(prefKey, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-                if (decision == DECISION_ACCEPTED) {
-
-                    startDownloadForPending(which)
-
-                    return
-
-                }
-
-                if (decision == DECISION_DECLINED) {
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, which).apply()
-
-                speak(askText, true)
-
-                convoDb.logTurn("scout", askText)
-
-                finishThinking()
-
-                return
-
-            }
-
-        }
-
-    }
-
-    private fun markDeclinedForPending(pending: String) {
-
-        when (pending) {
-
-            PENDING_DICT -> prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_IDIOMS -> prefs.edit().putString(PREF_DL_IDIOMS_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_WORDNET -> prefs.edit()
-
-                .putString(PREF_DL_WORDNET_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_SENTIMENT -> prefs.edit()
-
-                .putString(PREF_DL_SENTIMENT_DECISION, DECISION_DECLINED).apply()
-
-            PENDING_SLANG -> prefs.edit().putString(PREF_DL_SLANG_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_ALL -> {
-
-                prefs.edit()
-
-                    .putString(PREF_DL_DICT_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_IDIOMS_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_WORDNET_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_SENTIMENT_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_SLANG_DECISION, DECISION_DECLINED)
-
-                    .apply()
-
-            }
-
-        }
-
-    }
-
-    private fun startDownloadForPending(pending: String) {
-
-        if (!downloadLock.compareAndSet(false, true)) {
-
-            val out = "I’m already downloading."
-
-            respond(out)
-
-            return
-
-        }
-
-        if (isDownloading) {
-
-            downloadLock.set(false)
-
-            val out = "I’m already downloading."
-
-            respond(out)
-
-            return
-
-        }
-
-        when (pending) {
-
-            PENDING_DICT -> prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_IDIOMS -> prefs.edit().putString(PREF_DL_IDIOMS_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_WORDNET -> prefs.edit()
-
-                .putString(PREF_DL_WORDNET_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_SENTIMENT -> prefs.edit()
-
-                .putString(PREF_DL_SENTIMENT_DECISION, DECISION_ACCEPTED).apply()
-
-            PENDING_SLANG -> prefs.edit().putString(PREF_DL_SLANG_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_ALL -> {
-
-                prefs.edit()
-
-                    .putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_IDIOMS_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_WORDNET_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_SENTIMENT_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_SLANG_DECISION, DECISION_ACCEPTED)
-
-                    .apply()
-
-            }
-
-        }
-
-        val needsInternet = when (pending) {
-
-            PENDING_IDIOMS -> !datasetStore.assetExists(assets, "idioms.json")
-
-            else -> true
-
-        }
-
-        if (needsInternet && !connectivityManager.hasValidatedInternet()) {
-
-            isDownloading = false
-
-            faceView.setDownloading(false)
-
-            wantListening = true
-
-            downloadLock.set(false)
-
-            val out =
-
-                "I’m not connected to working internet yet. I opened internet settings. Turn on Wi-Fi, then say download all."
-
-            speak(out, true)
-
-            convoDb.logTurn("scout", out)
-
-            journalDb.add("Download blocked: not validated ($pending).")
-
-            connectivityManager.openInternetPanel()
-
-            finishThinking()
-
-            return
-
-        }
-
-        isDownloading = true
-
-        faceView.setDownloading(true)
-
-        finishThinking()
-
-        wantListening = false
-
-        stopListeningSafe()
-
-        val outStart = when (pending) {
-
-            PENDING_DICT -> "Okay. Downloading the offline dictionary now."
-
-            PENDING_IDIOMS -> "Okay. Installing idioms now."
-
-            PENDING_WORDNET -> "Okay. Downloading WordNet now."
-
-            PENDING_SENTIMENT -> "Okay. Downloading sentiment lists now."
-
-            PENDING_SLANG -> "Okay. Downloading slang now."
-
-            else -> "Okay. Downloading my offline brain pack now."
-
-        }
-
-        speak(outStart, true)
-
-        convoDb.logTurn("scout", outStart)
-
-        val downloadStartedAt = System.currentTimeMillis()
-
-        Thread {
-
-            val summary = StringBuilder()
-
-            fun appendSummary(msg: String) {
-
-                summary.append(msg).append(" ")
-
-            }
-
-            fun fail(msg: String, e: Exception) {
-
-                appendSummary(msg)
-
-                Log.e("ScoutDownloads", msg, e)
-
-                journalDb.add("$msg (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-            try {
-
-                when (pending) {
-
-                    PENDING_DICT -> {
-
-                        installDictionaryTier1()
-
-                        appendSummary("Dictionary installed.")
-
-                    }
-
-                    PENDING_IDIOMS -> {
-
-                        installIdiomsTier2PreferAssets()
-
-                        appendSummary("Idioms installed.")
-
-                    }
-
-                    PENDING_WORDNET -> {
-
-                        installWordNetTier3()
-
-                        appendSummary("WordNet installed.")
-
-                    }
-
-                    PENDING_SENTIMENT -> {
-
-                        installSentimentExtras()
-
-                        appendSummary("Sentiment installed.")
-
-                    }
-
-                    PENDING_SLANG -> {
-
-                        installSlangExtras()
-
-                        appendSummary("Slang installed.")
-
-                    }
-
-                    PENDING_ALL -> {
-
-                        if (!datasetStore.dictInstalled()) {
-
-                            try {
-
-                                installDictionaryTier1()
-
-                                appendSummary("Dictionary installed.")
-
-                            } catch (e: Exception) {
-
-                                fail("Dictionary failed.", e)
-
-                            }
-
-                        } else appendSummary("Dictionary already installed.")
-
-                        val freeBytes =
-
-                            connectivityManager.getAvailableBytes(filesDir.absolutePath)
-
-                        val storageOk = freeBytes >= (1024L * 1024L * 1024L)
-
-                        val wifi = connectivityManager.isOnWifi()
-
-                        if (!datasetStore.idiomsInstalled()) {
-
-                            try {
-
-                                installIdiomsTier2PreferAssets()
-
-                                appendSummary("Idioms installed.")
-
-                            } catch (e: Exception) {
-
-                                fail("Idioms failed.", e)
-
-                            }
-
-                        } else appendSummary("Idioms already installed.")
-
-                        if (wifi && storageOk) {
-
-                            if (!datasetStore.wordnetInstalled()) {
-
-                                try {
-
-                                    installWordNetTier3()
-
-                                    appendSummary("WordNet installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("WordNet failed.", e)
-
-                                }
-
-                            } else appendSummary("WordNet already installed.")
-
-                            if (!datasetStore.sentimentInstalled()) {
-
-                                try {
-
-                                    installSentimentExtras()
-
-                                    appendSummary("Sentiment installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("Sentiment failed.", e)
-
-                                }
-
-                            } else appendSummary("Sentiment already installed.")
-
-                            if (!datasetStore.slangInstalled()) {
-
-                                try {
-
-                                    installSlangExtras()
-
-                                    appendSummary("Slang installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("Slang failed.", e)
-
-                                }
-
-                            } else appendSummary("Slang already installed.")
-
-                        } else {
-
-                            journalDb.add("Brain pack skipped extra downloads (wifi=$wifi storageOk=$storageOk).")
-
-                            appendSummary("Skipped extra downloads.")
-
-                        }
-
-                    }
-
-                }
-
-                runOnUiThread {
-
-                    isDownloading = false
-
-                    faceView.setDownloading(false)
-
-                    wantListening = true
-
-                    downloadLock.set(false)
-
-                    val outDone = summary.toString().trim().ifBlank { "Download complete." }
-
-                    speak(outDone, true)
-
-                    convoDb.logTurn("scout", outDone)
-
-                    journalDb.add("Downloads result: $pending -> $outDone")
-
-                }
-
-            } catch (e: Exception) {
-
-                Log.e("ScoutDownloads", "download failed", e)
-
-                runOnUiThread {
-
-                    isDownloading = false
-
-                    faceView.setDownloading(false)
-
-                    wantListening = true
-
-                    downloadLock.set(false)
-
-                    val outFail = "I had trouble downloading that."
-
-                    speak(outFail, true)
-
-                    convoDb.logTurn("scout", outFail)
-
-                    journalDb.add("Download failed: $pending (${e.javaClass.simpleName}: ${e.message})")
-
-                }
-
-            } finally {
-
-                runOnUiThread {
-
-                    if (isDownloading) {
-
-                        isDownloading = false
-
-                        faceView.setDownloading(false)
-
-                        wantListening = true
-
-                        downloadLock.set(false)
-
-                        journalDb.add("Download safety reset triggered.")
-
-                        scheduleListenRestart(immediate = false)
-
-                    }
-
-                }
-
-            }
-
-        }.start()
-
-    }
-
-    // =======================
-
-    // INSTALLERS
-
-    // =======================
-
-    private fun installDictionaryTier1() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.dictDir())
-
-        val zipFile = File(datasetStore.dictDir(), "en.db.zip")
-
-        downloadToFile(URL_WIKDICT_ZIP, zipFile)
-
-        unzipSelect(zipFile, datasetStore.dictDir()) { entryName ->
-
-            entryName.replace("\\", "/").substringAfterLast("/") == "en.db"
-
-        }
-
-        if (!datasetStore.dictDbFile()
-
-                .exists()
-
-        ) throw RuntimeException("Dictionary db missing after unzip")
-
-        datasetStore.dictMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installIdiomsTier2PreferAssets() {
-
-        datasetStore.ensureDir(datasetStore.idiomsDir())
-
-        val assetName = "idioms.json"
-
-        if (datasetStore.assetExists(assets, assetName)) {
-
-            copyAssetToFile(assetName, datasetStore.idiomsFile())
-
-            if (!datasetStore.idiomsFile().exists() || datasetStore.idiomsFile()
-
-                    .length() < 50L
-
-            ) throw RuntimeException("Idioms asset copy failed")
-
-            datasetStore.idiomsMarker()
-
-                .writeText("installed_at=${System.currentTimeMillis()};source=assets")
-
-            return
-
-        }
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        var lastErr: Exception? = null
-
-        for (u in URL_IDIOMS_JSON_FALLBACKS) {
-
-            try {
-
-                downloadToFile(u, datasetStore.idiomsFile())
-
-                if (!datasetStore.idiomsFile().exists() || datasetStore.idiomsFile()
-
-                        .length() < 50L
-
-                ) throw RuntimeException("Idioms file too small")
-
-                datasetStore.idiomsMarker()
-
-                    .writeText("installed_at=${System.currentTimeMillis()};source=web")
-
-                return
-
-            } catch (e: Exception) {
-
-                lastErr = e
-
-                journalDb.add("Idioms URL failed: $u (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-        }
-
-        throw RuntimeException("Idioms download failed: ${lastErr?.message ?: "unknown"}")
-
-    }
-
-    private fun installWordNetTier3() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.wordnetDir())
-
-        val zipFile = File(datasetStore.wordnetDir(), "wordnet.zip")
-
-        downloadToFile(URL_WORDNET_ZIP, zipFile)
-
-        try {
-
-            datasetStore.wordnetDir().listFiles()
-
-                ?.forEach { f -> if (f.isFile && f.name.endsWith(".json")) f.delete() }
-
-        } catch (_: Exception) {
-
-        }
-
-        unzipSelect(zipFile, datasetStore.wordnetDir()) { entryName ->
-
-            val safe = entryName.replace("\\", "/").substringAfterLast("/")
-
-            safe.endsWith(".json", ignoreCase = true)
-
-        }
-
-        val hasJson = datasetStore.wordnetDir().listFiles()
-
-            ?.any { it.isFile && it.name.endsWith(".json") } == true
-
-        if (!hasJson) throw RuntimeException("WordNet json missing after unzip")
-
-        datasetStore.wordnetMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installSentimentExtras() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.sentimentDir())
-
-        downloadToFile(URL_POS_WORDS, datasetStore.posWordsFile())
-
-        downloadToFile(URL_NEG_WORDS, datasetStore.negWordsFile())
-
-        if (!datasetStore.posWordsFile().exists() || !datasetStore.negWordsFile()
-
-                .exists()
-
-        ) throw RuntimeException("Sentiment files missing")
-
-        datasetStore.sentimentMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installSlangExtras() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.slangDir())
-
-        var lastErr: Exception? = null
-
-        for (u in URL_SLANG_JSON_FALLBACKS) {
-
-            try {
-
-                downloadToFile(u, datasetStore.slangFile())
-
-                if (!datasetStore.slangFile().exists() || datasetStore.slangFile()
-
-                        .length() < 50L
-
-                ) throw RuntimeException("Slang file too small")
-
-                datasetStore.slangMarker()
-
-                    .writeText("installed_at=${System.currentTimeMillis()}")
-
-                return
-
-            } catch (e: Exception) {
-
-                lastErr = e
-
-                journalDb.add("Slang URL failed: $u (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-        }
-
-        throw RuntimeException("Slang download failed: ${lastErr?.message ?: "unknown"}")
-
-    }
-
-    private fun copyAssetToFile(assetName: String, outFile: File) {
-
-        try {
-
-            if (outFile.exists()) outFile.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        assets.open(assetName).use { input ->
-
-            FileOutputStream(outFile).use { output ->
-
-                input.copyTo(output)
-
-                output.flush()
-
-            }
-
-        }
-
-    }
-
-    // =======================
-
-    // DOWNLOADER
-
-    // =======================
-
-    private fun downloadToFile(urlStr: String, outFile: File) {
-
-        val tmp = File(outFile.parentFile, outFile.name + ".tmp")
-
-        if (tmp.exists()) try {
-
-            tmp.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        val url = URL(urlStr)
-
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-
-            requestMethod = "GET"
-
-            instanceFollowRedirects = true
-
-            connectTimeout = 25_000
-
-            readTimeout = 300_000
-
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Android) ScoutFace")
-
-            setRequestProperty("Accept", "*/*")
-
-            setRequestProperty("Connection", "close")
-
-        }
-
-        conn.connect()
-
-        val code = conn.responseCode
-
-        if (code !in 200..299) {
-
-            conn.disconnect()
-
-            throw RuntimeException("HTTP $code")
-
-        }
-
-        BufferedInputStream(conn.inputStream).use { input ->
-
-            FileOutputStream(tmp).use { output ->
-
-                val buf = ByteArray(64 * 1024)
-
-                while (true) {
-
-                    val n = input.read(buf)
-
-                    if (n <= 0) break
-
-                    output.write(buf, 0, n)
-
-                }
-
-                output.flush()
-
-            }
-
-        }
-
-        conn.disconnect()
-
-        if (outFile.exists()) try {
-
-            outFile.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        if (!tmp.renameTo(outFile)) {
-
-            FileOutputStream(outFile).use { out ->
-
-                tmp.inputStream().use { inp -> inp.copyTo(out) }
-
-            }
-
-            try {
-
-                tmp.delete()
-
-            } catch (_: Exception) {
-
-            }
-
-        }
-
-    }
-
-    private fun unzipSelect(zipFile: File, outDir: File, keep: (String) -> Boolean) {
-
-        ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zis ->
-
-            while (true) {
-
-                val entry = zis.nextEntry ?: break
-
-                val name = entry.name ?: run { zis.closeEntry(); continue }
-
-                if (entry.isDirectory) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                val safeName = name.replace("\\", "/").substringAfterLast("/")
-
-                if (safeName.isBlank()) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                if (!keep(name)) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                val out = File(outDir, safeName)
-
-                FileOutputStream(out).use { fos ->
-
-                    val buf = ByteArray(64 * 1024)
-
-                    while (true) {
-
-                        val n = zis.read(buf)
-
-                        if (n <= 0) break
-
-                        fos.write(buf, 0, n)
-
-                    }
-
-                    fos.flush()
-
-                }
-
-                zis.closeEntry()
-
-            }
-
-        }
-
-    }
-
-    private fun resetDownloadDecisions(deleteFiles: Boolean) {
-
-        prefs.edit()
-
-            .putString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_IDIOMS_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_WORDNET_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_SENTIMENT_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_SLANG_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_PENDING_APPROVAL, PENDING_NONE)
-
-            .apply()
-
-        if (deleteFiles) {
-
-            try {
-
-                datasetStore.deleteAllDatasets()
-
-            } catch (_: Exception) {
-
-            }
-
-        }
 
     }
 

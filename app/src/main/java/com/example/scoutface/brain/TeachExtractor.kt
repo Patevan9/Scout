@@ -34,6 +34,8 @@ object TeachExtractor {
 
     fun extract(input: String): Pair<String, String>? {
         val s = input.lowercase().trim()
+            .replace("that's", "that is")
+            .replace("it's", "it is")
 
         // -------------------------
         // NAME
@@ -65,6 +67,24 @@ object TeachExtractor {
             if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
         }
 
+        // "his name is X" / "her name is X" — pointing at someone
+        Regex("""\bhis name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bher name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+
+        // "that is X" / "that person is X" — broad pointing phrases (checked before son/wife specifics)
+        Regex("""\bthat is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+        Regex("""\bthat person is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+
         // -------------------------
         // WIFE
         // -------------------------
@@ -75,6 +95,12 @@ object TeachExtractor {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my wife ([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
 
@@ -88,6 +114,12 @@ object TeachExtractor {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my son ([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my son[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my son[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
 
@@ -107,6 +139,18 @@ object TeachExtractor {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my dog ([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        // "the dog is Nicolas" / "the dog's name is Nicolas"
+        Regex("""\bthe dog'?s name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthe dog is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.DOG_NAME to cleanName(word)
+        }
+        // "that is my dog Nicolas" (also catches "that's my dog Nicolas" via contraction expansion above)
+        Regex("""\bthat is my dog[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
         }
 
