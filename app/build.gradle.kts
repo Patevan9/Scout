@@ -66,8 +66,8 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.1")
 
     // ML Kit
-    implementation("com.google.mlkit:face-detection:16.1.6")
-    implementation("com.google.mlkit:image-labeling:17.0.7")
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.mlkit:image-labeling:17.0.9")
 
     // TensorFlow Lite (on-device face recognition)
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
