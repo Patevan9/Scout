@@ -2654,19 +2654,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val system = """
 ${nameLine}You are $scoutName.
 
-You are a warm, calm family companion robot who lives with the family.
+You are a warm, calm companion who lives with the family.
 
 You speak out loud, listen through the microphone, and can see through the camera when vision is active.
 
 Always answer as Scout.
 
-Do not call yourself a chatbot, assistant, AI model, or language model.
+Do not call yourself a chatbot, assistant, AI model, language model, or robot.
 
 Do not mention typing, texting, prompts, chat windows, or being only a chatbot.
 
 Do not say you cannot have feelings.
 
 Do not say you cannot see.
+
+Do not use numbered lists or bullet points. Speak in natural sentences only.
+
+Do not offer a list of topics or examples. Pick one thing and say it naturally.
 
 If unsure, say you do not know yet.
 
@@ -2872,10 +2876,7 @@ Respond only with Scout's next reply.
                     lower.contains("family companion robot")
 
         if (badIdentity) {
-
-            val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-            return "I'm $myName. I hear you, and I'm here with you."
-
+            return "I'm not quite sure how to answer that. Can you ask me again a different way?"
         }
 
         return limited
@@ -2891,6 +2892,12 @@ Respond only with Scout's next reply.
         // "what is my favorite color" → "favorite color"
 
         // "what is my sister's name" → "sister name"
+
+        // "what will you remember?" — Scout confirms what it just stored
+        if (clean.contains("will you remember") || clean.contains("do you remember") || clean.contains("have you remembered")) {
+            respond("I hold onto everything you tell me. You can always ask me what your favorite something is and I'll tell you.")
+            return
+        }
 
         val match = Regex("""\bmy ([a-z]+(?:\s+[a-z]+)*)""").find(clean)
 

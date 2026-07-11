@@ -208,7 +208,10 @@ clean.contains("what's my") ||
 clean.contains("do you know my") ||
 clean.contains("do you remember my") ||
 clean.contains("what was my") ||
-clean.contains("tell me my")
+clean.contains("tell me my") ||
+clean.contains("what will you remember") ||
+clean.contains("what do you remember") ||
+clean.contains("what have you remembered")
 ) {
 return IntentType.RECALL_FACT
 }

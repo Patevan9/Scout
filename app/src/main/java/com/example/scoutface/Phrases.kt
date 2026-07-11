@@ -28,12 +28,12 @@ object Phrases {
     // ── Boot ────────────────────────────────────────────────────────────────
 
     val BOOT_ONLINE = listOf(
-        "Hi. I'm here. Online mode is on. My offline backup is warming up in the background.",
-        "Hey! Good to see you again. Online mode is ready. Just warming up my offline backup too.",
-        "Hello! I'm up and online. My offline brain is warming up in the background.",
-        "Hi. I'm awake and online. Warming up my offline backup just in case.",
-        "Hey. I'm here and online. My offline brain is getting ready in the background.",
-        "Good to be back. Online mode is on. Offline backup warming up in the background."
+        "Hi! I'm up and ready.",
+        "Hey! Good to see you again.",
+        "Hello! Ready when you are.",
+        "Hi there. I'm here.",
+        "Hey, good to be back!",
+        "Good to see you!"
     )
 
     // Used when the last TinyLlama load was fast (< 2 s) — skip the warming-up line.
