@@ -309,8 +309,8 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("LEGAL"))
         body.addView(cardGroup(
-            navRow("Privacy Policy", "", "How Scout handles your data") { openUrl("https://lippy-robotics.gt.tc/privacy.html") },
-            navRow("Terms of Use", "", "Terms for using Scout") { openUrl("https://lippy-robotics.gt.tc/terms.html") }
+            navRow("Privacy Policy", "", "How Scout handles your data") { openUrl("https://patevan9.github.io/lippyrobotics.github.io/privacy.html") },
+            navRow("Terms of Use", "", "Terms for using Scout") { openUrl("https://patevan9.github.io/lippyrobotics.github.io/terms.html") }
         ))
 
         body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))

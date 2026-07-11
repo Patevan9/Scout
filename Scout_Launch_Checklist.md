@@ -139,7 +139,7 @@ These are the real blockers. Scout cannot ship without these.
 - A simple page with links and acknowledgements is enough for launch.
 ■ Add to website + About Scout → Open Source Licenses in app.
 
-### 9. Website — lippy-robotics.gt.tc
+### 9. Website — https://patevan9.github.io/lippyrobotics.github.io
 
 - Add website link to: Google Play listing, Facebook page, About Scout screen.
 - Add a 'What's New' or 'Scout Development Updates' page — shows Scout is actively growing.

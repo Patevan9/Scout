@@ -101,7 +101,7 @@ Scout is a calm family companion robot running on a Samsung Galaxy phone in land
 - Secondary device: Samsung Galaxy Fold 7 (12GB RAM) — listed as primary, needs dedicated stability testing
 - App: 7-day free trial, then $9.99 one-time. No automatic charges. No subscriptions. Ever.
 - Brains: TinyLlama 1.1B (offline, default — re-enabled June 28 with delayed load) + user's own free Gemini key (online, opt-in, ON by default when key is saved)
-- Website: lippy-robotics.gt.tc | Company: Lippy Robotics
+- Website: https://patevan9.github.io/lippyrobotics.github.io | Company: Lippy Robotics
 
 ---
 

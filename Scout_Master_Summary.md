@@ -200,7 +200,7 @@ Scout is a calm family companion robot running on a Samsung Galaxy phone mounted
 | Listed primary device | Samsung Galaxy Fold 7 (12GB RAM) — needs dedicated stability testing session |
 | Future hardware | KEYESTUDIO Mini Tank Kit V2 chassis via Bluetooth (opt-in) |
 | Ship target | Google Play Store — 7-day free trial, then $9.99 one-time purchase. No subscriptions. Ever. |
-| Website | lippy-robotics.gt.tc |
+| Website | https://patevan9.github.io/lippyrobotics.github.io |
 | Company name | Lippy Robotics |
 | Build method | Android Studio only: Build → Clean Project → Build → Assemble Project. gradlew fails (JAVA_HOME). |
 
@@ -813,7 +813,7 @@ Screen 1 'See & Recognize' description reads: 'I see faces, scenes, and more.' �
 ## 21. Legal & Website
 
 **Website:**
-- Current address: lippy-robotics.gt.tc
+- Current address: https://patevan9.github.io/lippyrobotics.github.io
 - Future domain options: lippyrobotics.com, scoutcompanion.com, meetscout.ai
 - List website on: Facebook page, Google Play listing, About Scout screen, website footer.
 - Add a 'What's New' or 'Scout Development Updates' page.
@@ -825,14 +825,14 @@ Screen 1 'See & Recognize' description reads: 'I see faces, scenes, and more.' �
 | Privacy Policy | 1 — Before launch | What data Scout collects. What stays on device. Gemini is optional. Contact info. |
 | Terms of Use | 2 — Near launch | Scout is as-is. No guarantees. Not medical/legal/financial advice. Keep it simple. |
 | Open Source Credits | 3 — At launch | llama.cpp, TinyLlama, MobileFaceNet (MIT, done in THIRD_PARTY_NOTICES.md), Android libraries. |
-| Website link | 1 — Before launch | lippy-robotics.gt.tc in About Scout, Google Play listing, Facebook page. |
+| Website link | 1 — Before launch | https://patevan9.github.io/lippyrobotics.github.io in About Scout, Google Play listing, Facebook page. |
 
 **Inside the App — About Scout must contain:**
 - Version number
 - Privacy Policy link
 - Terms of Use link
 - Open Source Licenses link
-- Website: lippy-robotics.gt.tc
+- Website: https://patevan9.github.io/lippyrobotics.github.io
 - Update History — every major version and what changed
 - Contact / Get in Touch — opens email to lippyroboticslabs@gmail.com
 
