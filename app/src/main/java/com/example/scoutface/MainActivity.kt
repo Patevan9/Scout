@@ -267,6 +267,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // say "warming up" once per session — the user doesn't need a reminder every question.
     private var warmingUpSaidThisSession = false
 
+    // Incremented at the start of every new question. TinyLlama threads capture this
+    // value when they launch and discard their reply if it no longer matches — prevents
+    // a slow generation from firing after a newer question has already been answered.
+    private var llamaQueryGeneration = 0L
+
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
 
     private val TRY_MUTE_BEEP = true
@@ -2717,11 +2722,15 @@ Respond only with Scout's next reply.
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
+            val myGeneration = llamaQueryGeneration
+
             Thread {
 
                 val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
 
                 runOnUiThread {
+                    // Discard if a newer question arrived while we were generating.
+                    if (llamaQueryGeneration != myGeneration) return@runOnUiThread
                     if (!reply.isNullOrBlank()) {
                         pendingBrainSource = "TinyLlama (offline)"
                         respond(cleanOfflineReply(reply.trim()))
@@ -3166,6 +3175,7 @@ Respond only with Scout's next reply.
 
         if (!presenceDecider.shouldRespondToInput(qNorm)) return
 
+        llamaQueryGeneration++
         isThinking = true
 
         faceView.setThinking(true)
