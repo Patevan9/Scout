@@ -367,13 +367,17 @@ class ScoutWeatherManager(
                 val precipPct = p.optJSONObject("probabilityOfPrecipitation")
                     ?.let { if (it.isNull("value")) null else it.optInt("value", -1) }
                     ?.takeIf { it >= 0 }
+                val humidity = p.optJSONObject("relativeHumidity")
+                    ?.let { if (it.isNull("value")) null else it.optInt("value", -1) }
+                    ?.takeIf { it >= 0 }
                 list.add(NwsPeriod(
                     name          = p.optString("name", ""),
                     temperature   = p.optInt("temperature", Int.MIN_VALUE),
                     isDaytime     = p.optBoolean("isDaytime", true),
                     shortForecast = p.optString("shortForecast", ""),
                     windSpeed     = p.optString("windSpeed", ""),
-                    precipPct     = precipPct
+                    precipPct     = precipPct,
+                    humidity      = humidity
                 ))
             }
             list.ifEmpty { null }
@@ -389,8 +393,58 @@ class ScoutWeatherManager(
         val isDaytime: Boolean,
         val shortForecast: String,
         val windSpeed: String,
-        val precipPct: Int?
+        val precipPct: Int?,
+        val humidity: Int?
     )
+
+    // =======================
+    // FEELS-LIKE CALCULATIONS
+    // =======================
+
+    // NWS Rothfusz regression — only valid at T ≥ 80°F and RH ≥ 40%
+    private fun heatIndex(tempF: Int, humidity: Int): Int? {
+        if (tempF < 80 || humidity < 40) return null
+        val t = tempF.toDouble()
+        val r = humidity.toDouble()
+        val hi = -42.379 + 2.04901523 * t + 10.14333127 * r - 0.22475541 * t * r -
+                 0.00683783 * t * t - 0.05481717 * r * r + 0.00122874 * t * t * r +
+                 0.00085282 * t * r * r - 0.00000199 * t * t * r * r
+        return hi.toInt()
+    }
+
+    // NWS 2001 wind chill formula — only valid at T ≤ 50°F and V ≥ 3 mph
+    private fun windChill(tempF: Int, windMph: Int): Int? {
+        if (tempF > 50 || windMph < 3) return null
+        val t = tempF.toDouble()
+        val v = windMph.toDouble()
+        val wc = 35.74 + 0.6215 * t - 35.75 * Math.pow(v, 0.16) + 0.4275 * t * Math.pow(v, 0.16)
+        return wc.toInt()
+    }
+
+    // Handles "6 mph", "6 to 10 mph", "Calm" — returns average of the range
+    private fun parseWindMph(windSpeed: String): Int? {
+        val nums = Regex("""\d+""").findAll(windSpeed).mapNotNull { it.value.toIntOrNull() }.toList()
+        if (nums.isEmpty()) return null
+        return nums.sum() / nums.size
+    }
+
+    // Returns a natural spoken "feels like" clause, or empty string if not meaningful.
+    private fun feelsLikePart(p: NwsPeriod): String {
+        val windMph = parseWindMph(p.windSpeed)
+        if (windMph != null) {
+            val wc = windChill(p.temperature, windMph)
+            if (wc != null && (p.temperature - wc) >= 3) {
+                return " With the wind chill it feels like $wc degrees."
+            }
+        }
+        if (p.humidity != null) {
+            val hi = heatIndex(p.temperature, p.humidity)
+            if (hi != null && (hi - p.temperature) >= 3) {
+                return " The heat index makes it feel like $hi degrees."
+            }
+        }
+        return ""
+    }
 
     // =======================
     // PARSERS
@@ -399,16 +453,18 @@ class ScoutWeatherManager(
     private fun parseCurrentPeriods(periods: List<NwsPeriod>): String? {
         val p = periods.firstOrNull() ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
-        val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        val windPart   = if (p.windSpeed.isNotBlank() && p.windSpeed != "0 mph") " Winds at ${p.windSpeed}." else ""
-        return "Right now it is ${p.temperature} degrees and ${p.shortForecast.lowercase(Locale.US)}.$precipPart$windPart"
+        val precipPart   = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
+        val windPart     = if (p.windSpeed.isNotBlank() && p.windSpeed != "0 mph") " Winds at ${p.windSpeed}." else ""
+        val feelsLike    = feelsLikePart(p)
+        return "Right now it is ${p.temperature} degrees and ${p.shortForecast.lowercase(Locale.US)}.$precipPart$windPart$feelsLike"
     }
 
     private fun parseTonightPeriods(periods: List<NwsPeriod>): String? {
         val p = periods.firstOrNull { !it.isDaytime } ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "Tonight should be around ${p.temperature} degrees. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "Tonight should be around ${p.temperature} degrees. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun parseTomorrowPeriods(periods: List<NwsPeriod>): String? {
@@ -419,7 +475,8 @@ class ScoutWeatherManager(
             ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "Tomorrow: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "Tomorrow: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun parseWeekPeriods(periods: List<NwsPeriod>): String? {
@@ -445,7 +502,8 @@ class ScoutWeatherManager(
             ?: return "I can only see about a week ahead for weather. I'm sorry, I can't tell you about $dayName from here."
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun formatCacheTime(timeMs: Long): String {
