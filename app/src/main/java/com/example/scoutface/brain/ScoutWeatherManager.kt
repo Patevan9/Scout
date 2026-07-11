@@ -370,6 +370,10 @@ class ScoutWeatherManager(
                 val humidity = p.optJSONObject("relativeHumidity")
                     ?.let { if (it.isNull("value")) null else it.optInt("value", -1) }
                     ?.takeIf { it >= 0 }
+                // dewpoint in °C — used to calculate RH when relativeHumidity is absent
+                val dewpointC = p.optJSONObject("dewpoint")
+                    ?.let { if (it.isNull("value")) null else it.optDouble("value", Double.NaN) }
+                    ?.takeIf { !it.isNaN() }
                 list.add(NwsPeriod(
                     name          = p.optString("name", ""),
                     temperature   = p.optInt("temperature", Int.MIN_VALUE),
@@ -377,7 +381,8 @@ class ScoutWeatherManager(
                     shortForecast = p.optString("shortForecast", ""),
                     windSpeed     = p.optString("windSpeed", ""),
                     precipPct     = precipPct,
-                    humidity      = humidity
+                    humidity      = humidity,
+                    dewpointC     = dewpointC
                 ))
             }
             list.ifEmpty { null }
@@ -394,7 +399,8 @@ class ScoutWeatherManager(
         val shortForecast: String,
         val windSpeed: String,
         val precipPct: Int?,
-        val humidity: Int?
+        val humidity: Int?,
+        val dewpointC: Double?
     )
 
     // =======================
@@ -428,6 +434,14 @@ class ScoutWeatherManager(
         return nums.sum() / nums.size
     }
 
+    // Magnus formula: relative humidity (%) from temperature (°F) and dewpoint (°C).
+    private fun rhFromDewpoint(tempF: Int, dewpointC: Double): Int {
+        val tempC = (tempF - 32.0) * 5.0 / 9.0
+        val rh = 100.0 * Math.exp(17.625 * dewpointC / (243.04 + dewpointC)) /
+                         Math.exp(17.625 * tempC    / (243.04 + tempC))
+        return rh.toInt().coerceIn(0, 100)
+    }
+
     // Returns a natural spoken "feels like" clause, or empty string if not meaningful.
     private fun feelsLikePart(p: NwsPeriod): String {
         val windMph = parseWindMph(p.windSpeed)
@@ -437,8 +451,10 @@ class ScoutWeatherManager(
                 return " With the wind chill it feels like $wc degrees."
             }
         }
-        if (p.humidity != null) {
-            val hi = heatIndex(p.temperature, p.humidity)
+        // Use reported humidity, or derive it from dewpoint if humidity is absent.
+        val rh = p.humidity ?: p.dewpointC?.let { rhFromDewpoint(p.temperature, it) }
+        if (rh != null) {
+            val hi = heatIndex(p.temperature, rh)
             if (hi != null && (hi - p.temperature) >= 3) {
                 return " The heat index makes it feel like $hi degrees."
             }

@@ -770,26 +770,80 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun showLicenses() {
         AlertDialog.Builder(this)
-            .setTitle("Open Source Licenses")
+            .setTitle("Open Source Software & Credits")
             .setMessage(
-                "llama.cpp\n" +
-                "MIT License — github.com/ggerganov/llama.cpp\n\n" +
+                "OFFLINE AI\n\n" +
+
                 "TinyLlama 1.1B Chat v1.0\n" +
-                "Apache 2.0 — huggingface.co/TinyLlama\n\n" +
-                "ArcFace MobileFaceNet (InsightFace)\n" +
-                "MIT License — github.com/deepinsight/insightface\n\n" +
+                "Apache 2.0 · Copyright © Zhang Peiyuan et al., Singapore University of Technology and Design\n" +
+                "github.com/jzhang38/TinyLlama\n\n" +
+
+                "llama.cpp\n" +
+                "MIT License · Copyright © Georgi Gerganov and contributors\n" +
+                "github.com/ggerganov/llama.cpp\n\n" +
+
+                "──────────────────────────\n" +
+                "FACE RECOGNITION\n\n" +
+
+                "MobileFaceNet\n" +
+                "MIT License · Copyright © 2019 syaringan357\n" +
+                "Lightweight on-device face recognition model\n" +
+                "github.com/syaringan357/Android-MobileFaceNet-MTCNN-FaceAntiSpoofing\n\n" +
+
+                "ArcFace (InsightFace)\n" +
+                "License: Under review — see insightface.ai\n" +
+                "Face recognition training framework\n" +
+                "github.com/deepinsight/insightface\n\n" +
+
                 "TensorFlow Lite\n" +
-                "Apache 2.0 — tensorflow.org\n\n" +
-                "ML Kit (Face Detection, Image Labeling)\n" +
-                "Google APIs Terms of Service\n\n" +
-                "CameraX\n" +
-                "Apache 2.0 — developer.android.com/jetpack/camerax\n\n" +
+                "Apache 2.0 · Copyright © Google LLC\n" +
+                "tensorflow.org\n\n" +
+
+                "──────────────────────────\n" +
+                "CAMERA & VISION\n\n" +
+
+                "Google ML Kit (Face Detection, Image Labeling)\n" +
+                "Google APIs Terms of Service apply\n" +
+                "developers.google.com/ml-kit\n\n" +
+
+                "CameraX (AndroidX)\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project\n" +
+                "developer.android.com/training/camerax\n\n" +
+
+                "──────────────────────────\n" +
+                "NETWORKING & STORAGE\n\n" +
+
                 "OkHttp\n" +
-                "Apache 2.0 — github.com/square/okhttp\n\n" +
-                "Room\n" +
-                "Apache 2.0 — developer.android.com/jetpack/room\n\n" +
-                "NWS Weather API (weather.gov)\n" +
-                "Public Domain — U.S. Government"
+                "Apache 2.0 · Copyright © Square, Inc.\n" +
+                "square.github.io/okhttp\n\n" +
+
+                "Room (AndroidX)\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project\n" +
+                "developer.android.com/training/data-storage/room\n\n" +
+
+                "──────────────────────────\n" +
+                "UI FRAMEWORK\n\n" +
+
+                "AndroidX & Material Components\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project / Google\n" +
+                "developer.android.com/jetpack\n\n" +
+
+                "Kotlin\n" +
+                "Apache 2.0 · Copyright © JetBrains s.r.o.\n" +
+                "kotlinlang.org\n\n" +
+
+                "──────────────────────────\n" +
+                "EXTERNAL SERVICES\n\n" +
+
+                "National Weather Service API (weather.gov)\n" +
+                "Public Domain · Published by the U.S. Government\n" +
+                "U.S. locations only · No tracking\n" +
+                "weather.gov\n\n" +
+
+                "Google Gemini API (optional)\n" +
+                "Google AI Terms of Service apply\n" +
+                "Used only when you provide your own API key\n" +
+                "ai.google.dev/gemini-api/terms"
             )
             .setPositiveButton("Close", null)
             .show()
