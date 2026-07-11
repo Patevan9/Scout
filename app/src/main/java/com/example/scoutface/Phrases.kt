@@ -27,7 +27,18 @@ object Phrases {
 
     // ── Boot ────────────────────────────────────────────────────────────────
 
+    // Online + Gemini ready, but TinyLlama still loading in the background.
     val BOOT_ONLINE = listOf(
+        "Hi! I'm up. Just warming up my offline brain in the background.",
+        "Hey! Good to see you. My offline brain is still waking up.",
+        "Hello! I'm here. Give my offline brain just a moment to warm up.",
+        "Hi there! Gemini is ready, and my offline brain is warming up.",
+        "Hey, good to be back! My offline brain is still getting started.",
+        "Good to see you! I'm just warming up my offline brain."
+    )
+
+    // Online + Gemini ready + TinyLlama loaded fast last time — no warming-up needed.
+    val BOOT_ONLINE_FAST = listOf(
         "Hi! I'm up and ready.",
         "Hey! Good to see you again.",
         "Hello! Ready when you are.",

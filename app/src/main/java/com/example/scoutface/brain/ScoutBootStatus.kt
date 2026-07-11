@@ -18,6 +18,10 @@ class ScoutBootStatus(
         }
         !hasApiKey()           -> Phrases.pick("boot", Phrases.BOOT_NO_KEY)
         !hasValidatedInternet() -> Phrases.pick("boot", Phrases.BOOT_NO_INTERNET)
-        else                   -> Phrases.pick("boot", Phrases.BOOT_ONLINE)
+        else                   -> {
+            val fast = lastLlamaLoadMs().let { it in 1L..2000L }
+            val pool = if (fast) Phrases.BOOT_ONLINE_FAST else Phrases.BOOT_ONLINE
+            Phrases.pick("boot", pool)
+        }
     }
 }
