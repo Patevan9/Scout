@@ -53,4 +53,32 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
         }
         return null
     }
+
+    fun getAllFacts(entity: String): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        readableDatabase.rawQuery(
+            "SELECT fact_key, value FROM entity_memory WHERE entity=? ORDER BY updated_at ASC;",
+            arrayOf(entity.lowercase())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getString(1))
+        }
+        return out
+    }
+
+    fun getFactsUpdatedToday(entity: String): List<Pair<String, String>> {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = cal.timeInMillis
+        val out = mutableListOf<Pair<String, String>>()
+        readableDatabase.rawQuery(
+            "SELECT fact_key, value FROM entity_memory WHERE entity=? AND updated_at >= ? ORDER BY updated_at ASC;",
+            arrayOf(entity.lowercase(), startOfDay.toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getString(1))
+        }
+        return out
+    }
 }

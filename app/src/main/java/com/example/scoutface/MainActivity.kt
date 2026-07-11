@@ -2909,6 +2909,14 @@ Respond only with Scout's next reply.
             return
         }
 
+        // "what did you learn today?" / "what do you know about me?" — report stored facts
+        if (clean.contains("what did you learn") || clean.contains("what have you learned") ||
+            clean.contains("what do you know about me") ||
+            (clean.contains("what do you know") && !clean.contains("what do you know about"))) {
+            handleWhatYouLearnedQuery()
+            return
+        }
+
         val match = Regex("""\bmy ([a-z]+(?:\s+[a-z]+)*)""").find(clean)
 
         if (match == null) {
@@ -2948,6 +2956,50 @@ Respond only with Scout's next reply.
             respond("I don't think I know your $rawLabel yet. You can tell me and I'll remember.")
 
         }
+
+    }
+
+    private fun handleWhatYouLearnedQuery() {
+
+        val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY)
+        val todayFacts = truthDb.getFactsUpdatedToday(ENTITY_USER_PRIMARY)
+
+        if (allFacts.isEmpty()) {
+            respond("I haven't learned anything about you yet. Tell me something — like your name or a favorite thing — and I'll hold on to it.")
+            return
+        }
+
+        val olderFacts = allFacts.filter { it !in todayFacts }
+
+        fun keyToHuman(key: String): String = when (key) {
+            "name" -> "name"
+            "wife_name" -> "wife's name"
+            "son_name" -> "son's name"
+            "dog_name" -> "dog's name"
+            else -> {
+                val s = if (key.endsWith("_name"))
+                    key.removeSuffix("_name").replace("_", " ") + "'s name"
+                else
+                    key.replace("_", " ")
+                s
+            }
+        }
+
+        fun formatList(facts: List<Pair<String, String>>): String =
+            facts.take(5).joinToString(" ") { (k, v) -> "Your ${keyToHuman(k)} is $v." }
+
+        val response = when {
+            todayFacts.isNotEmpty() && olderFacts.isEmpty() ->
+                "Today I learned ${if (todayFacts.size == 1) "one thing" else "a few things"}. ${formatList(todayFacts)}"
+
+            todayFacts.isNotEmpty() ->
+                "Today I picked up ${if (todayFacts.size == 1) "something new" else "a few things"}. ${formatList(todayFacts)} I also already knew: ${formatList(olderFacts)}"
+
+            else ->
+                "I haven't picked up anything new today, but here's what I already know about you. ${formatList(olderFacts)}"
+        }
+
+        respond(response)
 
     }
 
