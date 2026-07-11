@@ -4,7 +4,6 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -309,8 +308,8 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("LEGAL"))
         body.addView(cardGroup(
-            navRow("Privacy Policy", "", "How Scout handles your data") { openUrl("https://patevan9.github.io/lippyrobotics.github.io/privacy.html") },
-            navRow("Terms of Use", "", "Terms for using Scout") { openUrl("https://patevan9.github.io/lippyrobotics.github.io/terms.html") }
+            navRow("Privacy Policy", "", "How Scout handles your data") { showPrivacyPolicy() },
+            navRow("Terms of Use", "", "Terms for using Scout") { showTermsOfUse() }
         ))
 
         body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
@@ -761,10 +760,6 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun openUrl(url: String) {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }
-
     private fun showSupport() {
         AlertDialog.Builder(this)
             .setTitle("Support")
@@ -795,6 +790,128 @@ class SettingsActivity : AppCompatActivity() {
                 "Apache 2.0 — developer.android.com/jetpack/room\n\n" +
                 "NWS Weather API (weather.gov)\n" +
                 "Public Domain — U.S. Government"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showPrivacyPolicy() {
+        AlertDialog.Builder(this)
+            .setTitle("Privacy Policy")
+            .setMessage(
+                "Lippy Robotics · Effective Date: July 8, 2026\n\n" +
+
+                "YOUR DATA STAYS ON YOUR DEVICE\n" +
+                "All of Scout's memory stays on your device. Your name, family members' names, " +
+                "favorites, face recognition data, and conversation history are stored in local " +
+                "files and databases only. Nothing is uploaded to our servers.\n\n" +
+
+                "CAMERA & FACE RECOGNITION\n" +
+                "Scout uses your device camera to recognize faces and see the room. Face " +
+                "recognition data (mathematical embeddings) is stored locally and never " +
+                "transmitted. The camera is only active while the Scout app is open.\n\n" +
+
+                "MICROPHONE\n" +
+                "Scout listens for your voice through your device microphone. Voice input is " +
+                "processed on-device unless you choose to enable Online Features (see below).\n\n" +
+
+                "OPTIONAL ONLINE FEATURES\n" +
+                "If you enable Online Features and provide a Google Gemini API key, your voice " +
+                "queries will be sent to Google's Gemini API using your own key. This is governed " +
+                "by Google's Privacy Policy and Terms of Service. Lippy Robotics never receives " +
+                "your queries — the connection goes directly from your device to Google.\n\n" +
+
+                "WEATHER\n" +
+                "If you ask Scout about the weather, your approximate device location is sent to " +
+                "the U.S. National Weather Service (api.weather.gov) to retrieve a local " +
+                "forecast. No personal data is included in this request.\n\n" +
+
+                "NO ACCOUNTS REQUIRED\n" +
+                "Scout does not require you to create an account. We do not collect your name, " +
+                "email address, or any personal information.\n\n" +
+
+                "NO ANALYTICS OR TRACKING\n" +
+                "Scout does not include analytics, crash reporting, or ad tracking. No usage " +
+                "data is collected or transmitted to Lippy Robotics.\n\n" +
+
+                "DATA EXPORT\n" +
+                "You can export Scout's memory at any time using the voice command " +
+                "\"export brain.\" The exported file stays on your device until you choose to " +
+                "share or delete it.\n\n" +
+
+                "CHILDREN\n" +
+                "Scout is not directed at children under 13. If you are under 13, please ask " +
+                "a parent or guardian before using Scout.\n\n" +
+
+                "CHANGES TO THIS POLICY\n" +
+                "We may update this Privacy Policy from time to time. Changes will be reflected " +
+                "in the app with an updated effective date.\n\n" +
+
+                "CONTACT\n" +
+                "Questions? Email us at lippyroboticslabs@gmail.com"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showTermsOfUse() {
+        AlertDialog.Builder(this)
+            .setTitle("Terms of Use")
+            .setMessage(
+                "Lippy Robotics · Effective Date: July 8, 2026\n\n" +
+
+                "AGREEMENT\n" +
+                "By downloading or using Scout, you agree to these Terms of Use. If you do not " +
+                "agree, please do not use the app.\n\n" +
+
+                "ABOUT THIS APP\n" +
+                "Scout is a personal AI companion app for Android, created and maintained by " +
+                "Lippy Robotics. Scout is provided \"as is,\" without warranties of any kind. " +
+                "While we work to keep Scout reliable, we cannot guarantee uninterrupted " +
+                "operation or compatibility with every Android device.\n\n" +
+
+                "SCOUT IS A COMPANION, NOT AN ADVISOR\n" +
+                "Scout is not a substitute for professional medical, legal, financial, mental " +
+                "health, safety, or emergency advice. Nothing Scout says should be treated as " +
+                "such. If you or someone you know is in an emergency, contact the appropriate " +
+                "services immediately.\n\n" +
+
+                "HOW YOU USE SCOUT\n" +
+                "You are responsible for how you use Scout and for any content you choose to " +
+                "teach or share with him. Scout is designed to be family-friendly, but no " +
+                "software is perfect and unexpected responses may occasionally occur.\n\n" +
+
+                "THIRD-PARTY CONNECTIONS\n" +
+                "If you choose to connect Scout to third-party services such as Google Gemini " +
+                "using your own API key, those services are governed by their own terms and " +
+                "privacy policies. Lippy Robotics has no control over those services.\n\n" +
+
+                "HOW SCOUT IS SOLD\n" +
+                "Scout is sold as a one-time purchase. After purchase, you receive a license to " +
+                "use your copy of Scout. We do not offer refunds except where required by law " +
+                "or Google Play policy.\n\n" +
+
+                "UPDATES\n" +
+                "Scout may receive updates through Google Play. We may add, change, or remove " +
+                "features over time. We intend to continue maintaining Scout's core companion " +
+                "features and improving the app over time.\n\n" +
+
+                "CHANGES TO TERMS\n" +
+                "We may update these Terms of Use from time to time. When we do, we will update " +
+                "the Effective Date above. Continued use of Scout after changes are posted means " +
+                "you accept the updated terms.\n\n" +
+
+                "LIMITATION OF LIABILITY\n" +
+                "To the fullest extent permitted by law, Lippy Robotics is not responsible for " +
+                "any indirect, incidental, or consequential damages arising from the use or " +
+                "inability to use Scout.\n\n" +
+
+                "YOUR DATA\n" +
+                "How Scout handles your data is described in the Privacy Policy, available in " +
+                "this app under Settings > Privacy & Data.\n\n" +
+
+                "CONTACT\n" +
+                "Questions? Email us at lippyroboticslabs@gmail.com"
             )
             .setPositiveButton("Close", null)
             .show()
