@@ -236,6 +236,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
+    // Reminder fires when speech is heard outside the conversation window while a face is visible.
+    // Throttled to once every 2 minutes so it never becomes annoying.
+    private var lastListeningReminderMs = 0L
+    private val LISTENING_REMINDER_COOLDOWN_MS = 120_000L
+
     private var lastMeaningfulResponse: String? = null
     private var lastMeaningfulResponseMs = 0L
     private val REPEAT_CACHE_TTL_MS = 4L * 60L * 1_000L
@@ -2069,7 +2074,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
                 if (!hearsHisName && !inConvoWindow) {
-                    scheduleListenRestart()
+                    val now = System.currentTimeMillis()
+                    val faceVisible = (now - lastGoodFaceSeenMs) < 3_000L
+                    val reminderDue = (now - lastListeningReminderMs) > LISTENING_REMINDER_COOLDOWN_MS
+                    if (faceVisible && reminderDue && !isSpeaking && !isThinking) {
+                        lastListeningReminderMs = now
+                        respond("I'm sorry. If you're talking to me, just say $scoutName first.")
+                    } else {
+                        scheduleListenRestart()
+                    }
                     return
                 }
                 handleQuery(normalized)
