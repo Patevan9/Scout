@@ -72,12 +72,10 @@ dependencies {
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.google.mlkit:image-labeling:17.0.9")
 
-    // TensorFlow Lite — ⚠️ VERIFY 16KB ALIGNMENT AFTER BUILDING.
-    // org.tensorflow:tensorflow-lite 2.17.0 has been reported as still 4KB-aligned on
-    // libtensorflowlite_jni.so. If APK Analyzer flags this library after your build, migrate
-    // to com.google.ai.edge.litert:litert (LiteRT — TF Lite's successor, 16KB-aligned as of
-    // its Oct 2025 release). The LiteRT Java API is drop-in compatible with TF Lite.
-    implementation("org.tensorflow:tensorflow-lite:2.17.0")
+    // LiteRT (formerly TensorFlow Lite) — 16KB page-aligned.
+    // Drop-in replacement: same API, only the Maven coords and import package differ.
+    // FaceEmbedder.kt imports com.google.ai.edge.litert.Interpreter.
+    implementation("com.google.ai.edge.litert:litert:1.4.0")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
