@@ -58,12 +58,16 @@ class ScoutWeatherManager(
 
         private const val KEY_CURRENT_TEXT     = "current_text"
         private const val KEY_CURRENT_AGE_MS   = "current_age_ms"
+        private const val KEY_CURRENT_DATE     = "current_date"
         private const val KEY_TONIGHT_TEXT     = "tonight_text"
         private const val KEY_TONIGHT_AGE_MS   = "tonight_age_ms"
+        private const val KEY_TONIGHT_DATE     = "tonight_date"
         private const val KEY_TOMORROW_TEXT    = "tomorrow_text"
         private const val KEY_TOMORROW_AGE_MS  = "tomorrow_age_ms"
+        private const val KEY_TOMORROW_DATE    = "tomorrow_date"
         private const val KEY_WEEK_TEXT        = "week_text"
         private const val KEY_WEEK_AGE_MS      = "week_age_ms"
+        private const val KEY_WEEK_DATE        = "week_date"
 
         // Gridpoint URL cache — avoids a /points call on every weather request
         private const val KEY_FORECAST_URL     = "nws_forecast_url"
@@ -127,23 +131,32 @@ class ScoutWeatherManager(
     // DISPATCH
     // =======================
 
+    private fun todayDateString(): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date())
+
     private fun dispatch(type: QueryType, specificDay: String?) {
 
-        val (textKey, ageKey, cacheDuration) = when (type) {
-            QueryType.CURRENT      -> Triple(KEY_CURRENT_TEXT,  KEY_CURRENT_AGE_MS,  CURRENT_CACHE_MS)
-            QueryType.TONIGHT      -> Triple(KEY_TONIGHT_TEXT,  KEY_TONIGHT_AGE_MS,  FORECAST_CACHE_MS)
-            QueryType.TOMORROW     -> Triple(KEY_TOMORROW_TEXT, KEY_TOMORROW_AGE_MS, FORECAST_CACHE_MS)
-            QueryType.SPECIFIC_DAY -> Triple(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     FORECAST_CACHE_MS)
-            QueryType.WEEK         -> Triple(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     FORECAST_CACHE_MS)
+        data class CacheKeys(val text: String, val age: String, val date: String, val duration: Long)
+
+        val keys = when (type) {
+            QueryType.CURRENT      -> CacheKeys(KEY_CURRENT_TEXT,  KEY_CURRENT_AGE_MS,  KEY_CURRENT_DATE,  CURRENT_CACHE_MS)
+            QueryType.TONIGHT      -> CacheKeys(KEY_TONIGHT_TEXT,  KEY_TONIGHT_AGE_MS,  KEY_TONIGHT_DATE,  FORECAST_CACHE_MS)
+            QueryType.TOMORROW     -> CacheKeys(KEY_TOMORROW_TEXT, KEY_TOMORROW_AGE_MS, KEY_TOMORROW_DATE, FORECAST_CACHE_MS)
+            QueryType.SPECIFIC_DAY -> CacheKeys(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     KEY_WEEK_DATE,     FORECAST_CACHE_MS)
+            QueryType.WEEK         -> CacheKeys(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     KEY_WEEK_DATE,     FORECAST_CACHE_MS)
         }
+
+        val today = todayDateString()
 
         if (!hasValidatedInternet()) {
             requestInFlight.set(false)
-            val cached = prefs.getString(textKey, null)
-            val cachedTimeMs = prefs.getLong(ageKey, 0L)
+            val cached = prefs.getString(keys.text, null)
+            val cachedTimeMs = prefs.getLong(keys.age, 0L)
+            val cachedDate = prefs.getString(keys.date, null)
             runOnMain {
                 if (cached != null) {
-                    respond("I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: $cached")
+                    val prefix = if (cachedDate != today) "The last weather I have is from an earlier day. " else "I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: "
+                    respond("$prefix$cached")
                 } else {
                     respond("I can't check the weather right now — I'm not connected to the internet.")
                 }
@@ -151,9 +164,11 @@ class ScoutWeatherManager(
             return
         }
 
-        val cacheAge = System.currentTimeMillis() - prefs.getLong(ageKey, 0L)
-        if (cacheAge < cacheDuration && type != QueryType.SPECIFIC_DAY) {
-            val cached = prefs.getString(textKey, null)
+        val cacheAge = System.currentTimeMillis() - prefs.getLong(keys.age, 0L)
+        val cachedDate = prefs.getString(keys.date, null)
+        val cacheIsToday = cachedDate == today
+        if (cacheIsToday && cacheAge < keys.duration && type != QueryType.SPECIFIC_DAY) {
+            val cached = prefs.getString(keys.text, null)
             if (cached != null) {
                 requestInFlight.set(false)
                 runOnMain { respond(cached) }
@@ -184,10 +199,13 @@ class ScoutWeatherManager(
                 val periods = fetchForecastPeriods(forecastUrl) ?: run {
                     runOnMain {
                         requestInFlight.set(false)
-                        val cached = prefs.getString(textKey, null)
-                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
-                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
-                        else respond("I wasn't able to reach the weather service right now.")
+                        val cached = prefs.getString(keys.text, null)
+                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
+                        val cDate = prefs.getString(keys.date, null)
+                        if (cached != null) {
+                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
+                            respond("$prefix$cached")
+                        } else respond("I wasn't able to reach the weather service right now.")
                     }
                     return@Thread
                 }
@@ -203,6 +221,7 @@ class ScoutWeatherManager(
                             prefs.edit()
                                 .putString(KEY_WEEK_TEXT, weekText)
                                 .putLong(KEY_WEEK_AGE_MS, System.currentTimeMillis())
+                                .putString(KEY_WEEK_DATE, today)
                                 .apply()
                         }
                         parseSpecificDayPeriods(periods, specificDay ?: "")
@@ -214,16 +233,20 @@ class ScoutWeatherManager(
                     if (result != null) {
                         if (type != QueryType.SPECIFIC_DAY) {
                             prefs.edit()
-                                .putString(textKey, result)
-                                .putLong(ageKey, System.currentTimeMillis())
+                                .putString(keys.text, result)
+                                .putLong(keys.age, System.currentTimeMillis())
+                                .putString(keys.date, today)
                                 .apply()
                         }
                         respond(result)
                     } else {
-                        val cached = prefs.getString(textKey, null)
-                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
-                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
-                        else respond("I wasn't able to reach the weather service right now.")
+                        val cached = prefs.getString(keys.text, null)
+                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
+                        val cDate = prefs.getString(keys.date, null)
+                        if (cached != null) {
+                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
+                            respond("$prefix$cached")
+                        } else respond("I wasn't able to reach the weather service right now.")
                     }
                 }
 

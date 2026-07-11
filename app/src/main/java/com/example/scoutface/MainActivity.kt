@@ -258,6 +258,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var bootFinishedSpeaking = false
 
+    // True after Scout has already told the user his offline brain is loading. We only
+    // say "warming up" once per session — the user doesn't need a reminder every question.
+    private var warmingUpSaidThisSession = false
+
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
 
     private val TRY_MUTE_BEEP = true
@@ -2721,7 +2725,10 @@ Respond only with Scout's next reply.
 
         if (LlamaEngine.isLoading) {
 
-            respond("My offline brain is still warming up. Give me just a moment.")
+            if (!warmingUpSaidThisSession) {
+                warmingUpSaidThisSession = true
+                respond("My offline brain is still warming up. Give me just a moment.")
+            }
 
             return
 
@@ -2732,7 +2739,10 @@ Respond only with Scout's next reply.
 
         if (LlamaEngine.isLoading) {
 
-            respond("My offline brain is warming up. Ask me again in just a moment.")
+            if (!warmingUpSaidThisSession) {
+                warmingUpSaidThisSession = true
+                respond("My offline brain is warming up. Ask me again in just a moment.")
+            }
 
             return
 
