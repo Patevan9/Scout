@@ -60,15 +60,19 @@ class DiagnosticDb(context: Context) :
     }
 
     /**
-     * Returns all events newest-first for report generation.
+     * Returns events from the last seven days, newest-first, for report generation.
+     * The cutoff is applied here independently of whether add() has run this session,
+     * so stale records are never visible in a report even if purgeOld() has not yet fired.
      * Each entry is (timestamp_ms, tag, detail).
      */
     fun getAll(): List<Triple<Long, String, String>> {
+        val cutoff = System.currentTimeMillis() - RETENTION_MS
         val out = mutableListOf<Triple<Long, String, String>>()
         readableDatabase.rawQuery(
             "SELECT created_at, tag, detail FROM diagnostic_events " +
+            "WHERE created_at >= ? " +
             "ORDER BY created_at DESC;",
-            null
+            arrayOf(cutoff.toString())
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 out.add(Triple(cursor.getLong(0), cursor.getString(1), cursor.getString(2)))
