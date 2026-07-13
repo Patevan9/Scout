@@ -774,9 +774,7 @@ class SettingsActivity : AppCompatActivity() {
             )
             .setPositiveButton("Delete") { _, _ ->
                 try {
-                    val db = DiagnosticDb(this)
-                    db.deleteAll()
-                    db.close()
+                    DiagnosticDb(this).use { db -> db.deleteAll() }
                     toast("Diagnostic logs deleted.")
                 } catch (_: Exception) {
                     toast("Could not delete diagnostic logs.")
