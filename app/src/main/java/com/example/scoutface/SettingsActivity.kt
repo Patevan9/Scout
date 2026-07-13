@@ -798,7 +798,8 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://lippy-robotics.gt.tc/support.html")))
         } catch (_: Exception) {
             AlertDialog.Builder(this)
-                .setMessage("Unable to open the Support Center. Please check your internet connection and try again.")
+                .setTitle("Unable to open the Scout Support Center")
+                .setMessage("Scout couldn't open the Support Center. Please make sure Internet access is enabled in Scout, confirm that your device is connected to the Internet, and try again.")
                 .setPositiveButton("Close", null)
                 .show()
         }
