@@ -342,8 +342,8 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("DIAGNOSTICS"))
         body.addView(cardGroup(
-            navRow("View Diagnostic Report",  "", "See the technical data Scout has collected")       { startActivity(Intent(this, DiagReportActivity::class.java)) },
-            navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it") { startActivity(Intent(this, DiagReportActivity::class.java)) },
+            navRow("View Diagnostic Report",  "", "Review the technical information in Scout's diagnostic report.") { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, false)) },
+            navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it")                  { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true)) },
             navRow("Delete Diagnostic Logs",  "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
         ))
 

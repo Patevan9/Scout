@@ -3,6 +3,7 @@ package com.example.scoutface
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
@@ -43,6 +44,10 @@ class DiagReportActivity : AppCompatActivity() {
         tvReport = findViewById(R.id.tvReport)
         etNotes  = findViewById(R.id.etNotes)
 
+        val showShare = intent.getBooleanExtra(EXTRA_SHOW_SHARE, false)
+        findViewById<View>(R.id.llShareControls).visibility =
+            if (showShare) View.VISIBLE else View.GONE
+
         try {
             diagDb = DiagnosticDb(this)
         } catch (_: Exception) {
@@ -66,11 +71,11 @@ class DiagReportActivity : AppCompatActivity() {
             appendLine("=== Privacy Notice ===")
             appendLine(PRIVACY_NOTICE)
             appendLine()
-            appendLine("=== Scout Diagnostic Report ===")
-            appendLine("Generated:     ${fmt.format(Date())}")
-            appendLine("Scout version: $appVersion")
-            appendLine("Android API:   ${android.os.Build.VERSION.SDK_INT}")
-            appendLine("Device:        ${android.os.Build.MODEL}")
+            appendLine("=== System Information ===")
+            appendLine("Generated:       ${fmt.format(Date())}")
+            appendLine("Scout Version:   $appVersion")
+            appendLine("Android Version: ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
+            appendLine("Device:          ${android.os.Build.MODEL}")
             appendLine()
 
             appendLine("=== Event Log (last 7 days, newest first) ===")
@@ -186,6 +191,7 @@ class DiagReportActivity : AppCompatActivity() {
     // ── Constants ─────────────────────────────────────────────────────────────
 
     companion object {
+        const val EXTRA_SHOW_SHARE = "show_share"
         private const val SUPPORT_EMAIL = "lippyroboticslabs@gmail.com"
 
         // Verbatim Privacy Policy disclosure wording — do not edit without updating
