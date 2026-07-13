@@ -167,10 +167,23 @@ class DiagLog(private val db: DiagnosticDb) {
     /**
      * Recorded when an incoming utterance is dispatched to a handler.
      * intent — DiagIntent enum value; compiler-enforced; no arbitrary string accepted.
-     * brain  — which subsystem will produce the response.
+     * Brain source is NOT recorded here — it is recorded by logBrainStarted() only
+     * when a brain path is actually entered, not when it is merely eligible.
      */
-    fun logRoute(intent: DiagIntent, brain: BrainSource) = safe("ROUTE") {
-        "intent=${intent.name.lowercase()} brain=${brain.name.lowercase()}"
+    fun logRoute(intent: DiagIntent) = safe("ROUTE") {
+        "intent=${intent.name.lowercase()}"
+    }
+
+    /**
+     * Recorded only when a brain path is actually entered — not when it is
+     * eligible, planned, or blocked by a guard.
+     *   DIRECT    — a hardcoded intent handler ran synchronously
+     *   GEMINI    — a Gemini network thread was actually launched
+     *   TINYLLAMA — a TinyLlama generation thread was actually launched
+     *   NONE      — no brain path was entered (should not appear in normal use)
+     */
+    fun logBrainStarted(source: BrainSource) = safe("BRAIN") {
+        "started=${source.name.lowercase()}"
     }
 
     /**

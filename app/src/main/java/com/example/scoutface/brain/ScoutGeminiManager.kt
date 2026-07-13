@@ -86,6 +86,7 @@ class ScoutGeminiManager(
     fun tryGemini(
         qNorm: String,
         conversation: List<Pair<String, String>>,
+        onStarted: (() -> Unit)? = null,
         onAnswered: (() -> Unit)? = null,
         onFailed: (() -> Unit)? = null
     ): Boolean {
@@ -145,6 +146,8 @@ class ScoutGeminiManager(
             truthDb    = truthDb,
             habitLayer = habitLayer
         )
+
+        onStarted?.invoke()
 
         Thread {
             try {

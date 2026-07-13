@@ -2700,8 +2700,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val usedGemini = scoutGeminiManager.tryGemini(
             qNorm, convo,
-            onAnswered = { pendingBrainSource = "Gemini (online)" },
-            onFailed   = { tryTinyLlamaOrFallback(qNorm) }
+            onStarted = { diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI) },
+            onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
+            onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) }
         )
 
         if (usedGemini) return
@@ -2778,6 +2779,7 @@ Respond only with Scout's next reply.
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
             val myGeneration = llamaQueryGeneration
+            diagLog.logBrainStarted(DiagLog.BrainSource.TINYLLAMA)
             diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
             val llamaGenStart = System.currentTimeMillis()
 
@@ -3247,16 +3249,20 @@ Respond only with Scout's next reply.
 
         val intent = ScoutIntentRouter.route(qNorm)
 
-        val routeBrain = when (intent) {
-            IntentType.UNKNOWN -> when {
-                isGeminiEnabled() && apiKey.trim().isNotBlank() &&
-                    connectivityManager.hasValidatedInternet() -> DiagLog.BrainSource.GEMINI
-                LlamaEngine.isReady -> DiagLog.BrainSource.TINYLLAMA
-                else -> DiagLog.BrainSource.NONE
-            }
-            else -> DiagLog.BrainSource.DIRECT
+        diagLog.logRoute(intent.toDiagIntent())
+
+        val isDirect = when (intent) {
+            IntentType.TIME, IntentType.DATE, IntentType.CONNECTIVITY,
+            IntentType.GO_ONLINE, IntentType.GO_OFFLINE, IntentType.EXPORT_BRAIN,
+            IntentType.VISION, IntentType.GREET, IntentType.HOW_ARE_YOU,
+            IntentType.GOODBYE, IntentType.PRAISE, IntentType.AFFECTION,
+            IntentType.IDENTITY, IntentType.RECALL_FACT,
+            IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
+            IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
+            IntentType.WEATHER -> true
+            else -> false
         }
-        diagLog.logRoute(intent.toDiagIntent(), routeBrain)
+        if (isDirect) diagLog.logBrainStarted(DiagLog.BrainSource.DIRECT)
 
         // Long absence greeting — fires on GREET after 30+ minutes away, silent otherwise
 
