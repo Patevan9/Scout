@@ -339,6 +339,14 @@ class SettingsActivity : AppCompatActivity() {
             navRow("Licenses", "", "Open source licenses") { showLicenses() }
         ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("DIAGNOSTICS"))
+        body.addView(cardGroup(
+            navRow("View Diagnostic Report",  "", "See the technical data Scout has collected")       { startActivity(Intent(this, DiagReportActivity::class.java)) },
+            navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it") { startActivity(Intent(this, DiagReportActivity::class.java)) },
+            navRow("Delete Diagnostic Logs",  "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
+        ))
+
         body.addView(footerNote("Thank you for supporting Scout!"))
         scroll.addView(body)
         root.addView(scroll)
@@ -746,6 +754,32 @@ class SettingsActivity : AppCompatActivity() {
                     toast("Memory layers reset.")
                 } catch (e: Exception) {
                     toast("Error: ${e.message}")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmDeleteDiagLogs() {
+        AlertDialog.Builder(this)
+            .setTitle("Delete Diagnostic Logs")
+            .setMessage(
+                "This will permanently delete:\n" +
+                "  · All diagnostic events\n" +
+                "  · The crash log\n" +
+                "  · Any generated diagnostic report\n\n" +
+                "It will not affect Scout's memories, personal facts, habits, " +
+                "settings, conversations, model files, or any other data.\n\n" +
+                "Continue?"
+            )
+            .setPositiveButton("Delete") { _, _ ->
+                try {
+                    val db = DiagnosticDb(this)
+                    db.deleteAll()
+                    db.close()
+                    toast("Diagnostic logs deleted.")
+                } catch (_: Exception) {
+                    toast("Could not delete diagnostic logs.")
                 }
             }
             .setNegativeButton("Cancel", null)
