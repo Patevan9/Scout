@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -793,11 +794,14 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showSupport() {
-        AlertDialog.Builder(this)
-            .setTitle("Support")
-            .setMessage("Need help with Scout? Visit our support page or reach out for assistance.")
-            .setPositiveButton("Close", null)
-            .show()
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://lippy-robotics.gt.tc/support.html")))
+        } catch (_: Exception) {
+            AlertDialog.Builder(this)
+                .setMessage("Unable to open the Support Center. Please check your internet connection and try again.")
+                .setPositiveButton("Close", null)
+                .show()
+        }
     }
 
     private fun showLicenses() {
