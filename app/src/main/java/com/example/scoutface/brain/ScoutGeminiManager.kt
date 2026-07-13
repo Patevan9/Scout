@@ -1,6 +1,7 @@
 package com.example.scoutface.brain
 
 import android.util.Log
+import com.example.scoutface.DiagLog
 import com.example.scoutface.GeminiClient
 import com.example.scoutface.HabitLayer
 import com.example.scoutface.TruthDb
@@ -86,7 +87,7 @@ class ScoutGeminiManager(
     fun tryGemini(
         qNorm: String,
         conversation: List<Pair<String, String>>,
-        onStarted: (() -> Unit)? = null,
+        onDecision: ((DiagLog.GeminiDecision) -> Unit)? = null,
         onAnswered: (() -> Unit)? = null,
         onFailed: (() -> Unit)? = null
     ): Boolean {
@@ -114,6 +115,7 @@ class ScoutGeminiManager(
 
         if (!requestInFlight.compareAndSet(false, true)) {
             Log.e("ScoutGemini", "Blocked: request already in flight")
+            onDecision?.invoke(DiagLog.GeminiDecision.BLOCKED_IN_FLIGHT)
             finishThinking()
             return true
         }
@@ -123,6 +125,7 @@ class ScoutGeminiManager(
             if (cached != null && now - lastGeminiReplyMs < REPLY_CACHE_TTL_MS) {
                 requestInFlight.set(false)
                 Log.e("ScoutGemini", "Duplicate prompt — replaying cached answer")
+                onDecision?.invoke(DiagLog.GeminiDecision.CACHE_HIT)
                 respond(cached)
                 return true
             }
@@ -134,6 +137,7 @@ class ScoutGeminiManager(
         if (now - lastRequestStartedMs < minRequestGapMs) {
             requestInFlight.set(false)
             Log.e("ScoutGemini", "Blocked: cooldown active")
+            onDecision?.invoke(DiagLog.GeminiDecision.BLOCKED_COOLDOWN)
             finishThinking()
             return true
         }
@@ -147,7 +151,7 @@ class ScoutGeminiManager(
             habitLayer = habitLayer
         )
 
-        onStarted?.invoke()
+        onDecision?.invoke(DiagLog.GeminiDecision.REQUEST_STARTED)
 
         Thread {
             try {

@@ -54,6 +54,18 @@ class DiagLog(private val db: DiagnosticDb) {
     /** Why a weather cache entry was not used. */
     enum class WeatherCacheMiss { STALE, EMPTY, CROSS_DAY }
 
+    /**
+     * The routing decision made inside ScoutGeminiManager.tryGemini().
+     * Only REQUEST_STARTED means a network thread actually launched.
+     * BLOCKED_* values are controlled routing decisions, not errors.
+     */
+    enum class GeminiDecision {
+        REQUEST_STARTED,
+        CACHE_HIT,
+        BLOCKED_IN_FLIGHT,
+        BLOCKED_COOLDOWN
+    }
+
     /** Which Scout subsystem produced a logged error. */
     enum class ErrorArea {
         MICROPHONE, CAMERA, DATABASE, PERMISSION,
@@ -184,6 +196,16 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logBrainStarted(source: BrainSource) = safe("BRAIN") {
         "started=${source.name.lowercase()}"
+    }
+
+    /**
+     * Recorded for every internal Gemini routing decision.
+     * Only REQUEST_STARTED indicates a real network launch.
+     * BLOCKED_* values record controlled routing decisions.
+     * No prompt text, response text, or error message is ever included.
+     */
+    fun logGeminiDecision(decision: GeminiDecision) = safe("GEMINI") {
+        "decision=${decision.name.lowercase()}"
     }
 
     /**

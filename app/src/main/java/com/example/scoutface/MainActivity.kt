@@ -2700,7 +2700,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val usedGemini = scoutGeminiManager.tryGemini(
             qNorm, convo,
-            onStarted = { diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI) },
+            onDecision = { decision ->
+                diagLog.logGeminiDecision(decision)
+                if (decision == DiagLog.GeminiDecision.REQUEST_STARTED) {
+                    diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI)
+                }
+            },
             onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
             onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) }
         )
