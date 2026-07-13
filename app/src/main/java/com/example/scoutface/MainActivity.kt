@@ -452,6 +452,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var journalDb: JournalDb
 
+    private lateinit var diagDb: DiagnosticDb
+    private lateinit var diagLog: DiagLog
+
     private lateinit var habitLayer: HabitLayer
 
     private lateinit var voice: VoiceBank
@@ -1009,6 +1012,36 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         journalDb = JournalDb(this)
 
+        diagDb = DiagnosticDb(this)
+        diagLog = DiagLog(diagDb)
+        diagDb.trimCrashFileIfNeeded()
+
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val versionName = try {
+                    packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+                } catch (_: Exception) { "?" }
+                val exClass = throwable.javaClass.simpleName
+                    .replace(Regex("[^A-Za-z0-9_$]"), "").take(60)
+                diagDb.crashFile.appendText(
+                    "CRASH thread=${thread.name.take(40)} exception=$exClass version=$versionName\n"
+                )
+            } catch (_: Exception) {}
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+
+        val appVersion = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (_: Exception) { "?" }
+        diagLog.logBoot(
+            appVersion = appVersion,
+            androidApi = android.os.Build.VERSION.SDK_INT,
+            deviceModel = android.os.Build.MODEL,
+            geminiEnabled = prefs.getBoolean(PREF_GEMINI_ENABLED, false),
+            llamaReady = LlamaEngine.isReady
+        )
+
         habitLayer = HabitLayer(this)
 
         voice = VoiceBank(prefs)
@@ -1233,6 +1266,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             Log.e("ScoutCamera", "startCamera failed ($from)", e)
 
             journalDb.add("startCamera failed ($from): ${e.javaClass.simpleName}: ${e.message}")
+
+            diagLog.logError(DiagLog.ErrorArea.CAMERA, e)
 
         }
 
@@ -1910,6 +1945,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 faceView.setMicLevel(0f)
 
+                val listenMode = if ((System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS)
+                    DiagLog.ListenMode.FOLLOW_UP else DiagLog.ListenMode.WAKE_WORD
+                diagLog.logListenStart(listenMode)
+
             }
 
             override fun onRmsChanged(rmsdB: Float) {
@@ -1971,6 +2010,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 faceView.setListening(false)
 
                 faceView.setMicLevel(0f)
+
+                diagLog.logSpeechError(error)
+                diagLog.logListenStop(DiagLog.StopReason.ERROR)
 
                 // ERROR_RECOGNIZER_BUSY (8) means two sessions overlapped.
                 // Give the engine 600ms to fully close before restarting.
@@ -2078,6 +2120,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     ))
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
+                val speechListenMode = if (inConvoWindow) DiagLog.ListenMode.FOLLOW_UP
+                    else DiagLog.ListenMode.WAKE_WORD
+                diagLog.logSpeechResult(
+                    mode = speechListenMode,
+                    wakeWordDetected = hearsHisName,
+                    charCount = normalized.length,
+                    gapAfterResponseMs = System.currentTimeMillis() - lastScoutResponseMs,
+                    discarded = !hearsHisName && !inConvoWindow
+                )
                 if (!hearsHisName && !inConvoWindow) {
                     val now = System.currentTimeMillis()
                     val faceVisible = (now - lastGoodFaceSeenMs) < 3_000L
@@ -2405,6 +2456,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
 
                     isSpeaking = false
+                    val ttsDurationMs = if (speakingStartedMs > 0L)
+                        System.currentTimeMillis() - speakingStartedMs else 0L
+                    diagLog.logResponseDone(ttsDurationMs)
                     speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
@@ -2488,6 +2542,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 ).show()
             }
             journalDb.add("TTS init failed at boot.")
+            diagLog.logError(DiagLog.ErrorArea.TTS)
         }
 
     }
@@ -2723,18 +2778,26 @@ Respond only with Scout's next reply.
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
             val myGeneration = llamaQueryGeneration
+            diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
+            val llamaGenStart = System.currentTimeMillis()
 
             Thread {
 
                 val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
 
                 runOnUiThread {
+                    val genMs = System.currentTimeMillis() - llamaGenStart
                     // Discard if a newer question arrived while we were generating.
-                    if (llamaQueryGeneration != myGeneration) return@runOnUiThread
+                    if (llamaQueryGeneration != myGeneration) {
+                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED)
+                        return@runOnUiThread
+                    }
                     if (!reply.isNullOrBlank()) {
+                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
                         pendingBrainSource = "TinyLlama (offline)"
                         respond(cleanOfflineReply(reply.trim()))
                     } else {
+                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
                         respond("I'm not sure about that one.")
                     }
                 }
@@ -3184,6 +3247,17 @@ Respond only with Scout's next reply.
 
         val intent = ScoutIntentRouter.route(qNorm)
 
+        val routeBrain = when (intent) {
+            IntentType.UNKNOWN -> when {
+                isGeminiEnabled() && apiKey.trim().isNotBlank() &&
+                    connectivityManager.hasValidatedInternet() -> DiagLog.BrainSource.GEMINI
+                LlamaEngine.isReady -> DiagLog.BrainSource.TINYLLAMA
+                else -> DiagLog.BrainSource.NONE
+            }
+            else -> DiagLog.BrainSource.DIRECT
+        }
+        diagLog.logRoute(intent.toDiagIntent(), routeBrain)
+
         // Long absence greeting — fires on GREET after 30+ minutes away, silent otherwise
 
         val absenceGreeting = presenceDecider.consumeLongAbsenceGreeting()
@@ -3462,6 +3536,34 @@ Respond only with Scout's next reply.
 
         super.onDestroy()
 
+    }
+
+    private fun IntentType.toDiagIntent(): DiagLog.DiagIntent = when (this) {
+        IntentType.TIME            -> DiagLog.DiagIntent.TIME
+        IntentType.DATE            -> DiagLog.DiagIntent.DATE
+        IntentType.CONNECTIVITY    -> DiagLog.DiagIntent.CONNECTIVITY
+        IntentType.GO_ONLINE       -> DiagLog.DiagIntent.GO_ONLINE
+        IntentType.GO_OFFLINE      -> DiagLog.DiagIntent.GO_OFFLINE
+        IntentType.EXPORT_BRAIN    -> DiagLog.DiagIntent.EXPORT_BRAIN
+        IntentType.VISION          -> DiagLog.DiagIntent.VISION
+        IntentType.GREET           -> DiagLog.DiagIntent.GREET
+        IntentType.HOW_ARE_YOU     -> DiagLog.DiagIntent.HOW_ARE_YOU
+        IntentType.GOODBYE         -> DiagLog.DiagIntent.GOODBYE
+        IntentType.PRAISE          -> DiagLog.DiagIntent.PRAISE
+        IntentType.AFFECTION       -> DiagLog.DiagIntent.AFFECTION
+        IntentType.IDENTITY        -> DiagLog.DiagIntent.IDENTITY
+        IntentType.RECALL_FACT     -> DiagLog.DiagIntent.RECALL_FACT
+        IntentType.ASK_MY_NAME     -> DiagLog.DiagIntent.ASK_MY_NAME
+        IntentType.ASK_SCOUT_NAME  -> DiagLog.DiagIntent.ASK_SCOUT_NAME
+        IntentType.ASK_WIFE_NAME   -> DiagLog.DiagIntent.ASK_WIFE_NAME
+        IntentType.ASK_SON_NAME    -> DiagLog.DiagIntent.ASK_SON_NAME
+        IntentType.ASK_DOG_NAME    -> DiagLog.DiagIntent.ASK_DOG_NAME
+        IntentType.TEACH_WIFE_NAME -> DiagLog.DiagIntent.TEACH_WIFE_NAME
+        IntentType.TEACH_SON_NAME  -> DiagLog.DiagIntent.TEACH_SON_NAME
+        IntentType.TEACH_DOG_NAME  -> DiagLog.DiagIntent.TEACH_DOG_NAME
+        IntentType.TEACH_MY_NAME   -> DiagLog.DiagIntent.TEACH_MY_NAME
+        IntentType.WEATHER         -> DiagLog.DiagIntent.WEATHER
+        IntentType.UNKNOWN         -> DiagLog.DiagIntent.UNKNOWN
     }
 
 }
