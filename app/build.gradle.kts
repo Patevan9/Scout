@@ -51,6 +51,16 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
         }
     }
+
+    packaging {
+        jniLibs {
+            // NDK 28.2 llvm-strip crashes on Windows (STATUS_ILLEGAL_INSTRUCTION) when
+            // processing x86_64 ELF binaries from ML Kit AARs. Scout is arm64-only so
+            // these files are never loaded. Skipping the strip step avoids the crash.
+            // The x86_64 .so files remain in debug APKs but are harmless on arm64 devices.
+            keepDebugSymbols += "*/x86_64/*.so"
+        }
+    }
 }
 
 dependencies {
