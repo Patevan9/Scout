@@ -66,6 +66,12 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
 
+        <activity
+            android:name=".DiagReportActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
         <!-- REQUIRED for "export brain" sharing -->
         <provider
             android:name="androidx.core.content.FileProvider"
