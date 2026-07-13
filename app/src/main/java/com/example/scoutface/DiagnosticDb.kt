@@ -26,6 +26,10 @@ class DiagnosticDb(context: Context) :
     // without going back through Android context during an active crash.
     val crashFile: File = File(context.filesDir, CRASH_FILE_NAME)
 
+    // Generated report written by DiagReportActivity when the user taps Share.
+    // Tracked here so deleteAll() can remove it alongside the DB entries.
+    val reportFile: File = File(File(context.filesDir, "diag"), "diag_report.txt")
+
     private var purgedThisSession = false
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -94,12 +98,13 @@ class DiagnosticDb(context: Context) :
     }
 
     /**
-     * Deletes all diagnostic events AND the crash file.
+     * Deletes all diagnostic events, the crash file, and the generated report file.
      * Called by "Delete Diagnostic Logs" in Settings.
      */
     fun deleteAll() {
         writableDatabase.execSQL("DELETE FROM diagnostic_events;")
-        try { crashFile.delete() } catch (_: Exception) {}
+        try { crashFile.delete()  } catch (_: Exception) {}
+        try { reportFile.delete() } catch (_: Exception) {}
     }
 
     private fun purgeOld() {

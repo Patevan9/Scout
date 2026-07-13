@@ -160,11 +160,15 @@ class DiagReportActivity : AppCompatActivity() {
 
         // ACTION_SEND with EXTRA_STREAM attaches the file.
         // EXTRA_EMAIL pre-fills the recipient in compatible email apps only.
+        // ClipData carries the URI so Android 10+ receiving apps get read permission
+        // regardless of how they access the URI — required alongside FLAG_GRANT_READ_URI_PERMISSION.
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_EMAIL,   arrayOf(SUPPORT_EMAIL))
             putExtra(Intent.EXTRA_SUBJECT, "Scout Diagnostic Report")
+            putExtra(Intent.EXTRA_TEXT,    "Scout diagnostic report — see attached file.")
             putExtra(Intent.EXTRA_STREAM,  uri)
+            clipData = android.content.ClipData.newRawUri("Scout Diagnostic Report", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
