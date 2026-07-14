@@ -305,6 +305,7 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 ## ■ After Launch — Scout 1.1 Growing Up and Beyond
 
+- **Support Scout in-app donation screen** — Google Play Billing integration. Four one-time tiers: Buy Scout a Coffee ($3), Support Scout More ($5), Help Scout Grow ($10), Scout Supporter ($25). Scrollable screen with Scout face image, "Keep Scout by your side" copy, and the four tappable cards. Requires app to be live on Play Store first so products can be registered in Play Console. Design mockup approved July 13, 2026.
 - Permanent vs temporary memory — birthday vs appointment sorting
 - Caring follow-up loop — 'How was your appointment?' then forget
 - Full mood system — CALM / CURIOUS / HAPPY / THINKING / CONCERNED
