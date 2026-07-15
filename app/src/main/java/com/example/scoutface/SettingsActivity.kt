@@ -345,7 +345,7 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardGroup(
             navRow("View Diagnostic Report",  "", "Review the technical information in Scout's diagnostic report.") { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, false)) },
             navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it")                  { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true)) },
-            navRow("Delete Diagnostic Logs",  "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
+            navRow("Clear Diagnostic History", "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
         ))
 
         body.addView(footerNote("Thank you for supporting Scout!"))
@@ -763,22 +763,23 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun confirmDeleteDiagLogs() {
         AlertDialog.Builder(this)
-            .setTitle("Delete Diagnostic Logs")
+            .setTitle("Clear Diagnostic History")
             .setMessage(
-                "This will permanently delete:\n" +
+                "This will immediately remove:\n" +
                 "  · All diagnostic events\n" +
                 "  · The crash log\n" +
                 "  · Any generated diagnostic report\n\n" +
-                "It will not affect Scout's memories, personal facts, habits, " +
+                "Diagnostic information is normally removed automatically after 7 days.\n\n" +
+                "This will not affect Scout's memories, personal facts, habits, " +
                 "settings, conversations, model files, or any other data.\n\n" +
                 "Continue?"
             )
-            .setPositiveButton("Delete") { _, _ ->
+            .setPositiveButton("Clear") { _, _ ->
                 try {
                     DiagnosticDb(this).use { db -> db.deleteAll() }
-                    toast("Diagnostic logs deleted.")
+                    toast("Diagnostic history cleared.")
                 } catch (_: Exception) {
-                    toast("Could not delete diagnostic logs.")
+                    toast("Could not clear diagnostic history.")
                 }
             }
             .setNegativeButton("Cancel", null)
