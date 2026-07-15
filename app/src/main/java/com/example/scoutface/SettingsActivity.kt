@@ -43,6 +43,7 @@ class SettingsActivity : AppCompatActivity() {
     private val TXT          = Color.WHITE
     private val TXT_SEC      = Color.parseColor("#8AAFC8")
     private val TXT_MUTE     = Color.parseColor("#4A6280")
+    private val DESTRUCTIVE  = Color.parseColor("#FF4D4D")
     private val DIV          = Color.parseColor("#1A2D45")
 
     // Subtle icon badge colors per section
@@ -294,7 +295,7 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardGroup(
             navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
             navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
-            navRow("Reset Memory Layers", "", "Clear Scout's memory") { confirmReset() }
+            navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
         ))
 
         body.addView(cardSpacer())
@@ -551,7 +552,7 @@ class SettingsActivity : AppCompatActivity() {
 
     // ─── ROW BUILDERS ───────────────────────────────────────────
 
-    private fun navRow(title: String, value: String, sub: String, onClick: () -> Unit): View {
+    private fun navRow(title: String, value: String, sub: String, titleColor: Int = TXT, onClick: () -> Unit): View {
         val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(16), dp(16), dp(16))
@@ -561,7 +562,7 @@ class SettingsActivity : AppCompatActivity() {
         val col = vCol(Color.TRANSPARENT).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        col.addView(lbl(title, 15f, TXT))
+        col.addView(lbl(title, 15f, titleColor))
         if (sub.isNotEmpty()) col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
         row.addView(col)
         if (value.isNotEmpty()) row.addView(lbl(value, 13f, ACCENT).padded(dp(8), 0, dp(4), 0))
@@ -744,9 +745,9 @@ class SettingsActivity : AppCompatActivity() {
     // ─── DIALOGS ────────────────────────────────────────────────
 
     private fun confirmReset() {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Reset Memory Layers")
-            .setMessage("This will clear Scout's learned face and memory data. Scout's built-in knowledge stays intact.\n\nContinue?")
+            .setMessage("This will permanently erase Scout's learned memories and learned face data. Scout's built-in knowledge will not be affected.\n\nContinue?")
             .setPositiveButton("Reset") { _, _ ->
                 try {
                     val db = PeopleDb(this)
@@ -759,6 +760,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(DESTRUCTIVE)
     }
 
     private fun confirmDeleteDiagLogs() {
