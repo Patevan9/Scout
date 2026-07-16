@@ -346,6 +346,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val EMBED_INTERVAL_MS = 2_000L
 
+    // Minimum score to add an embedding to a person's stored profile. Higher than the
+    // recognition threshold (0.65) so borderline matches don't pollute other people's profiles.
+    private val CONFIDENT_EMBED_THRESHOLD = 0.72f
+
     private val embedRunning = AtomicBoolean(false)
 
     @Volatile
@@ -1657,15 +1661,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     // findBestMatchName (multi-embedding table) first for best accuracy,
                                                     // then fall back to the single-embedding hash table.
-                                                    val resolvedNameFromMulti = peopleDb.findBestMatchName(embedding)
+                                                    val multiMatch = peopleDb.findBestMatchNameWithScore(embedding)
+                                                    val resolvedNameFromMulti = multiMatch?.first
                                                     val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
                                                     val resolvedName = resolvedNameFromMulti
                                                         ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
 
                                                     if (!resolvedName.isNullOrBlank()) {
-                                                        // Known person — accumulate embedding and cache name.
+                                                        // Only add to profile when confidently matched — prevents cross-person pollution
+                                                        // when a borderline match fires near the recognition threshold.
                                                         lastKnownFaceName = resolvedName
-                                                        peopleDb.addNamedEmbedding(resolvedName, embedding)
+                                                        if ((multiMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
+                                                            peopleDb.addNamedEmbedding(resolvedName, embedding)
+                                                        }
                                                         if (nameMatchHash != null) peopleDb.storeEmbedding(nameMatchHash, embedding)
                                                         pendingFaceIntroName = null
                                                     } else {
@@ -1724,7 +1732,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         }
                                                         try {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
-                                                            var secName = peopleDb.findBestMatchName(emb2, threshold = 0.62f)
+                                                            val secMatch = peopleDb.findBestMatchNameWithScore(emb2, threshold = 0.62f)
+                                                            var secName = secMatch?.first
                                                             if (secName == null) {
                                                                 val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
                                                                 if (h2 != null) secName = peopleDb.getName(h2)
@@ -1735,7 +1744,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                                 secName = pendingFaceIntroName
                                                                 peopleDb.addNamedEmbedding(secName!!, emb2)
                                                                 pendingFaceIntroName = null
-                                                            } else if (secName != null) {
+                                                            } else if (secName != null && (secMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
                                                                 peopleDb.addNamedEmbedding(secName, emb2)
                                                             }
                                                             lastSecondaryFaceName = secName
@@ -3346,6 +3355,7 @@ Respond only with Scout's next reply.
                 peopleDb.forgetPerson(name)
                 if (lastKnownFaceName?.equals(name, ignoreCase = true) == true) {
                     lastKnownFaceName = null
+                    lastFaceEmbedding = null
                 }
                 respond("Okay. I've forgotten $name. Introduce them again whenever you're ready.")
                 return true

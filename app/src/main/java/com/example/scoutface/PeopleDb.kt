@@ -114,11 +114,31 @@ class PeopleDb(context: Context) :
     fun addNamedEmbedding(name: String, embedding: FloatArray) {
         try {
             val db = writableDatabase
-            val countCursor = db.rawQuery(
-                "SELECT COUNT(*) FROM person_embeddings WHERE name=?;", arrayOf(name)
+            val cursor = db.rawQuery(
+                "SELECT id, embedding FROM person_embeddings WHERE name=?;", arrayOf(name)
             )
-            val count = countCursor.use { if (it.moveToFirst()) it.getInt(0) else 0 }
-            if (count >= MAX_EMBEDDINGS_PER_PERSON) return
+            val existing = mutableListOf<Pair<Long, FloatArray>>()
+            cursor.use {
+                while (it.moveToNext()) {
+                    val id = it.getLong(0)
+                    val blob = it.getBlob(1) ?: continue
+                    val stored = bytesToFloatArray(blob)
+                    if (stored.size == embedding.size) existing.add(id to stored)
+                }
+            }
+            if (existing.size >= MAX_EMBEDDINGS_PER_PERSON) {
+                // Replace the most redundant embedding (most similar to the incoming one)
+                // so the stored set stays diverse as conditions change over time.
+                val mostRedundant = existing.maxByOrNull { (_, stored) ->
+                    cosineSimilarity(embedding, stored)
+                }
+                if (mostRedundant != null) {
+                    val cv = ContentValues()
+                    cv.put("embedding", floatArrayToBytes(embedding))
+                    db.update("person_embeddings", cv, "id=?", arrayOf(mostRedundant.first.toString()))
+                }
+                return
+            }
             val cv = ContentValues()
             cv.put("name", name)
             cv.put("embedding", floatArrayToBytes(embedding))
@@ -127,28 +147,49 @@ class PeopleDb(context: Context) :
         }
     }
 
-    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.65f): String? {
-        return try {
-            val cursor = readableDatabase.rawQuery(
-                "SELECT name, embedding FROM person_embeddings;",
-                null
-            )
-            var bestName: String? = null
-            var bestScore = threshold
-            cursor.use {
-                while (it.moveToNext()) {
-                    val name = it.getString(0)
-                    val blob = it.getBlob(1) ?: continue
-                    val stored = bytesToFloatArray(blob)
-                    if (stored.size != embedding.size) continue
-                    val score = cosineSimilarity(embedding, stored)
-                    if (score > bestScore) {
-                        bestScore = score
-                        bestName = name
-                    }
-                }
+    // Computes the best cosine similarity score per distinct person against the given embedding.
+    private fun scoreByPerson(embedding: FloatArray): Map<String, Float> {
+        val cursor = readableDatabase.rawQuery("SELECT name, embedding FROM person_embeddings;", null)
+        val best = mutableMapOf<String, Float>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val name = it.getString(0)
+                val blob = it.getBlob(1) ?: continue
+                val stored = bytesToFloatArray(blob)
+                if (stored.size != embedding.size) continue
+                val score = cosineSimilarity(embedding, stored)
+                val prev = best[name]
+                if (prev == null || score > prev) best[name] = score
             }
-            bestName
+        }
+        return best
+    }
+
+    // Returns the matched name, or null when no candidate passes the threshold OR when the
+    // top two candidates are too close to call (margin < minMargin). The margin check prevents
+    // Scout from guessing when two people score similarly — it says nothing rather than picking wrong.
+    fun findBestMatchName(embedding: FloatArray, threshold: Float = 0.65f, minMargin: Float = 0.08f): String? {
+        return try {
+            val sorted = scoreByPerson(embedding).entries.sortedByDescending { it.value }
+            val best = sorted.firstOrNull() ?: return null
+            if (best.value < threshold) return null
+            val second = sorted.getOrNull(1)
+            if (second != null && best.value - second.value < minMargin) return null
+            best.key
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // Same as findBestMatchName but also returns the winning score so callers can gate on confidence.
+    fun findBestMatchNameWithScore(embedding: FloatArray, threshold: Float = 0.65f, minMargin: Float = 0.08f): Pair<String, Float>? {
+        return try {
+            val sorted = scoreByPerson(embedding).entries.sortedByDescending { it.value }
+            val best = sorted.firstOrNull() ?: return null
+            if (best.value < threshold) return null
+            val second = sorted.getOrNull(1)
+            if (second != null && best.value - second.value < minMargin) return null
+            best.key to best.value
         } catch (_: Exception) {
             null
         }
