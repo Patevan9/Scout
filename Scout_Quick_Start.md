@@ -27,7 +27,7 @@ For full technical details, use the Scout Master Summary (v44).
 ✓ **Terms of Use — in-app dialog** — `showTermsOfUse()` in SettingsActivity. Scrollable dialog with acceptance clause, service-as-is, third-party (Gemini), changes-to-terms. Settings → About Scout → Terms of Use. DONE July 11.
 ✓ **terms.html added to repo root** — Website Terms of Use for lippy-robotics.gt.tc. Play Store compliance clauses: acceptance block + changes-to-terms block. Commit b5735f5. DONE July 10.
 ✓ **ML Kit 16KB alignment — DONE** — face-detection 16.1.6 → 16.1.7 (arm64 confirmed aligned, ML Kit issue #986 Dec 2025). image-labeling 17.0.7 → 17.0.9 (fixed vision-common). Commit 60443f3. DONE July 10.
-⚠ **LiteRT migration — PENDING** — TFLite 2.17.0 `libtensorflowlite_jni.so` is 4KB-aligned, NOT compliant. LiteRT attempted (litert:1.4.0 — doesn't exist in Maven), reverted. Use `litert:1.0.1`. Core `libLiteRt.so` IS 16KB aligned. One import change: FaceEmbedder.kt. Required before Play Store submission.
+⚠ **LiteRT migration — PENDING** — TFLite 2.17.0 has strong on-device evidence of non-compliance (debug popup on Fold 7/Android 15) — binary not yet readelf-verified. LiteRT attempted (litert:1.4.0 — doesn't exist in Maven), reverted. Alignment confirmed in LiteRT 2.1.x line (GitHub issue #6299). Use `litert:2.1.5`. One import change in FaceEmbedder.kt. Verify with readelf after build. Required before Play Store submission.
 
 *(Previous session July 7: 16KB scout_llama.so fix, bootstrapModelFile, head-turn amplitude, thinking expression — all DONE)*
 
@@ -216,7 +216,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **16KB page size — ML Kit ✓ done, LiteRT migration pending** — ML Kit done July 10. TFLite 2.17.0 NOT compliant. Migrate to `litert:1.0.1` + FaceEmbedder.kt import change before submission.
+7. **16KB page size — ML Kit ✓ done, LiteRT migration pending** — ML Kit done July 10. TFLite 2.17.0 shows strong evidence of non-compliance (not binary-verified). Migrate to `litert:2.1.5` + FaceEmbedder.kt import. Verify with readelf after build.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:

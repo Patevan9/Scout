@@ -16,7 +16,7 @@ This is the single source of truth.
 
 ✓ **ML Kit updated for 16KB page alignment** — `face-detection` 16.1.6 → 16.1.7: arm64-v8a confirmed 16KB aligned (ML Kit issue #986, resolved Dec 2025; Scout is arm64-only so 32-bit ABI gap does not apply). `image-labeling` 17.0.7 → 17.0.9: pulls in fixed `vision-common`, resolving `libimage_processing_util_jni.so` alignment on arm64. Commit `60443f3`. DONE July 10.
 
-⚠ **LiteRT migration attempted and reverted — pending** — `org.tensorflow:tensorflow-lite:2.17.0`'s `libtensorflowlite_jni.so` is 4KB-aligned (0x1000), NOT 16KB-compliant — confirmed by multiple Google issue tracker reports; TF Lite is maintenance-only and the 16KB fix went into LiteRT. Migration attempted with `com.google.ai.edge.litert:litert:1.4.0` — build failed (version does not exist in Maven). Reverted to TF Lite 2.17.0 (commit `eb8223e`). **Investigation July 16:** confirmed Maven versions include `1.0.1`, `2.1.0`, `2.1.5`. Core `libLiteRt.so` IS 16KB aligned; `libLiteRtOpenClAccelerator.so` in 2.1.0/2.1.1 is NOT aligned but Scout does not use GPU/OpenCL delegates so this does not affect Scout. **Required before Play Store submission:** migrate `build.gradle.kts` to `com.google.ai.edge.litert:litert:1.0.1` and change FaceEmbedder.kt import from `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Binary verification (optional): `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` — look for `p_align 0x4000` (16KB) vs `0x1000` (4KB fail). NOT YET DONE.
+⚠ **LiteRT migration attempted and reverted — pending** — Strong circumstantial evidence that `org.tensorflow:tensorflow-lite:2.17.0`'s `libtensorflowlite_jni.so` is NOT 16KB-compliant: (1) multiple Google issue tracker threads report TF Lite JNI lib has not received the 16KB fix; (2) revert commit `eb8223e` notes "shows debug popup on Fold 7 / Android 15" — on-device evidence of non-compliance; (3) TF Lite is maintenance-only, Google directed the 16KB fix to LiteRT instead. **Not yet binary-verified** — run `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` on the extracted AAR to confirm (`p_align 0x4000` = 16KB pass; `p_align 0x1000` = 4KB fail). Migration attempted with `com.google.ai.edge.litert:litert:1.4.0` — build failed (version does not exist in Maven). Reverted (commit `eb8223e`). **Investigation July 16:** confirmed Maven versions include `1.0.1`, `2.1.0`, `2.1.5`. GitHub issue #6299 confirms `libLiteRt.so` core IS 16KB aligned specifically in the 2.1.x release line; `libLiteRtOpenClAccelerator.so` in 2.1.0/2.1.1 is NOT aligned but Scout does not use GPU/OpenCL delegates. **Required before Play Store submission:** migrate to `com.google.ai.edge.litert:litert:2.1.5` (latest known 2.x; alignment confirmed in 2.1.x line per issue #6299) and change FaceEmbedder.kt import from `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. **Verify alignment of both .so files after build before submitting.** NOT YET DONE.
 
 ✓ **DiagReportActivity.kt built (diagnostic reporting Step 4–6)** — New activity reads from `DiagnosticDb` and displays a formatted plain-text report in a monospace ScrollView. Four sections: Privacy Notice (verbatim policy disclosure wording), System Information (generated timestamp, Scout version, Android version + API level, device model), Event Log (last 7 days newest-first from `db.getAll()`), Crash Log (`db.crashFile` contents). Report is privacy-safe: no speech text, user names, family names, memories, photos, face data, location, API keys, exception messages, stack traces, URLs, or file paths. `EXTRA_SHOW_SHARE` boolean Intent extra determines launch mode. Registered in AndroidManifest. DONE July 13.
 
@@ -354,7 +354,7 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ **Startup diagnostics** — DONE July 4. TTS failure Toast + STT unavailability spoken warning at boot.
 ✓ **Onboarding flow** — DONE July 4. OnboardingActivity.kt, 5 screens, first-boot redirect in MainActivity.
 ■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
-⚠ **16KB page size — LiteRT migration required** — ML Kit is done (face-detection 16.1.7 ✓, image-labeling 17.0.9 ✓). `org.tensorflow:tensorflow-lite:2.17.0` is NOT 16KB-compliant. Migrate to `com.google.ai.edge.litert:litert:1.0.1`. FaceEmbedder.kt import change only. Required before Play Store submission.
+⚠ **16KB page size — LiteRT migration required** — ML Kit is done (face-detection 16.1.7 ✓, image-labeling 17.0.9 ✓). TFLite 2.17.0 shows strong evidence of non-compliance (device popup on Fold 7 + Google issue tracker). Binary check NOT yet run — verify with readelf after build. Migrate to `com.google.ai.edge.litert:litert:2.1.5` (alignment confirmed in 2.1.x line). FaceEmbedder.kt import change only. Required before Play Store submission.
 ■ **Play Asset Delivery (PAD) wiring** — ModelDownloadActivity is built and ready. Wiring PAD to trigger the download screen and call updateProgress() is a future session.
 
 ✓ **Privacy Policy** — DONE July 11. In-app scrollable dialog (Settings → About Scout).
@@ -424,7 +424,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 | STT name recognition | 'Scout' misheard as 'Gal', 'Scott', 'Out'. Partially handled by wake word filter. |
 | Live news | Neither brain reads live news. Future news feed needed. |
 | ScoutFaceView dead code | Line 1023: doubled condition. Line 709: unused browAsym. Harmless but messy. |
-| 16KB page size | ML Kit ✓ done (face-detection 16.1.7, image-labeling 17.0.9 — both 16KB aligned on arm64). TFLite 2.17.0 libtensorflowlite_jni.so is 4KB-aligned — NOT compliant. LiteRT migration required before submission: litert:1.0.1, FaceEmbedder.kt import change only. |
+| 16KB page size | ML Kit ✓ done (face-detection 16.1.7, image-labeling 17.0.9). TFLite 2.17.0 shows strong evidence of non-compliance (Fold 7 popup + Google issue tracker) — binary not yet verified with readelf. Migrate to litert:2.1.5 (alignment confirmed in 2.1.x line). FaceEmbedder.kt import change only. |
 
 ---
 
@@ -803,7 +803,7 @@ Two kinds of autonomy — both approved:
 | 19 | Open Source Credits — THIRD_PARTY_NOTICES.md started | In progress |
 | 20 | Weather API licensing | ✓ RESOLVED June 16 — switched to NWS, free for commercial use |
 | 21 | Play Store listing — description, screenshots, rating | Not started |
-| 22 | 16KB page size — ML Kit ✓ done; TFLite → LiteRT migration pending | ML Kit 16.1.7 + 17.0.9 done July 10. TFLite 2.17.0 NOT aligned. Use litert:1.0.1 — one import change. Required before submission. |
+| 22 | 16KB page size — ML Kit ✓ done; TFLite → LiteRT migration pending | ML Kit 16.1.7 + 17.0.9 done July 10. TFLite 2.17.0 strongly evidenced as non-compliant (not binary-verified). Use litert:2.1.5 (alignment confirmed in 2.1.x line). One import change in FaceEmbedder.kt. Verify with readelf after build. |
 
 ---
 

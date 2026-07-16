@@ -172,8 +172,8 @@ Required to submit to Google Play.
 
 - `mlkit:face-detection:16.1.7` ✓ — arm64-v8a confirmed 16KB aligned (ML Kit issue #986, Dec 2025). DONE July 10.
 - `mlkit:image-labeling:17.0.9` ✓ — arm64 aligned. DONE July 10.
-- `org.tensorflow:tensorflow-lite:2.17.0` ✗ — `libtensorflowlite_jni.so` is 4KB-aligned (0x1000). NOT compliant. TF Lite is maintenance-only; the 16KB fix went into LiteRT. Google Play will reject.
-- **Required before submission:** Migrate to `com.google.ai.edge.litert:litert:1.0.1`. Core `libLiteRt.so` IS 16KB aligned. Scout does not use GPU/OpenCL delegates, so the `libLiteRtOpenClAccelerator.so` alignment issue in 2.1.x does not apply. Prior attempt used `litert:1.4.0` (doesn't exist in Maven). Use `1.0.1`. Only change needed: `FaceEmbedder.kt` import `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Optional binary verify: `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` (look for 0x4000 = pass, 0x1000 = fail).
+- `org.tensorflow:tensorflow-lite:2.17.0` ✗ — strong evidence of non-compliance: device shows debug popup on Fold 7 / Android 15 (revert commit eb8223e), consistent with Google issue tracker reports that TF Lite JNI lib did not receive the 16KB fix. TF Lite is maintenance-only; the fix went to LiteRT. **Binary NOT yet verified** — run `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` on the AAR to confirm (`p_align 0x4000` = pass, `p_align 0x1000` = fail) before treating as settled.
+- **Required before submission:** Migrate to `com.google.ai.edge.litert:litert:2.1.5` (latest known 2.x; alignment confirmed in 2.1.x line per GitHub issue #6299 — "libLiteRt.so in the same release is correctly aligned"). Scout does not use GPU/OpenCL delegates, so the unrelated `libLiteRtOpenClAccelerator.so` alignment issue in 2.1.0/2.1.1 does not apply. Prior attempt used `litert:1.4.0` (does not exist in Maven). Only change needed: `FaceEmbedder.kt` import `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Run readelf on both .so files after the build to verify before submitting.
 
 ---
 
