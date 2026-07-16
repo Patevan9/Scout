@@ -199,7 +199,7 @@ Payment: Google Play In-App Billing. All four products are consumable (so users 
 - Trial end message — 'Thank you for spending time with Scout. Scout is still growing. You can unlock the full version at any time.'
 - Roadmap in Settings → About Scout → Features & Future Plans.
 - Welcome Back screen after every update — what changed, what was fixed, what was added.
-- Scout optionally speaks after update: 'I've learned a few new things since my last update.'
+- Scout optionally speaks after update: 'I’ve learned a few new things since my last update.'
 - About Scout → Update History — shows every major version and improvements.
 
 ---
@@ -216,7 +216,7 @@ Scout notices patterns and suggests simple behavior adjustments in plain, friend
 
 **Settings → "Scout's Suggestions"** — Scout speaks warmly in first person:
 
-> *"I'd like to answer a little faster."*
+> *"I’d like to answer a little faster."*
 > *"I noticed you prefer shorter replies."*
 > *"Would you like me to stop announcing battery percentage?"*
 > *"I should be quieter at night."*
@@ -343,7 +343,7 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: LiteRT migration (litert:1.0.1 — one import change in FaceEmbedder.kt), Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
+**Next session: LiteRT migration (litert:2.1.5 — one import change in FaceEmbedder.kt), Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
