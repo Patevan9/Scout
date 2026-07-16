@@ -1,8 +1,28 @@
 # Project Scout — Master Project Summary
-**Last updated: July 7, 2026 | Version 43**
+**Last updated: July 13, 2026 | Version 44**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 13, 2026 — What Changed Since Version 43
+
+✓ **DiagReportActivity.kt built (diagnostic reporting Step 4–6)** — New activity reads from `DiagnosticDb` and displays a formatted plain-text report in a monospace ScrollView. Four sections: Privacy Notice (verbatim policy disclosure wording), System Information (generated timestamp, Scout version, Android version + API level, device model), Event Log (last 7 days newest-first from `db.getAll()`), Crash Log (`db.crashFile` contents). Report is privacy-safe: no speech text, user names, family names, memories, photos, face data, location, API keys, exception messages, stack traces, URLs, or file paths. `EXTRA_SHOW_SHARE` boolean Intent extra determines launch mode. Registered in AndroidManifest. DONE July 13.
+
+✓ **View/Share mode differentiation** — `activity_diag_report.xml` wraps all sharing controls (notes-field label, `EditText etNotes`, two guidance TextViews, Share button) inside a single `LinearLayout android:id="@+id/llShareControls"`. `DiagReportActivity.onCreate()` reads `EXTRA_SHOW_SHARE` (default false) and sets `llShareControls.visibility = VISIBLE / GONE`. View mode: clean read-only display. Share mode: full UI visible. Share flow: writes user notes + report to `filesDir/diag/diag_report.txt`, obtains URI via `FileProvider.getUriForFile()`, fires `ACTION_SEND` intent with `EXTRA_STREAM`, `EXTRA_EMAIL`, `EXTRA_SUBJECT`, `EXTRA_TEXT`, `ClipData` (Android 10+ read permission), and `FLAG_GRANT_READ_URI_PERMISSION`. DONE July 13.
+
+✓ **Settings DIAGNOSTICS section wired** — Three `navRow()` entries in `SettingsActivity.kt`: (1) "View Diagnostic Report" → `DiagReportActivity` with `EXTRA_SHOW_SHARE=false`; (2) "Share Diagnostic Report" → with `EXTRA_SHOW_SHARE=true`; (3) "Clear Diagnostic History" → `confirmDeleteDiagLogs()`. Confirmation dialog lists what is removed (events, crash log, generated report file) and explicitly states memories, settings, and model files are unaffected. Delete call: `DiagnosticDb(this).use { db -> db.deleteAll() }` — `.use {}` guarantees DB close even if `deleteAll()` throws. DONE July 13.
+
+✓ **Support button opens browser** — `showSupport()` in `SettingsActivity` replaced the old dead-end "Contact Us" AlertDialog. Now fires `Intent(Intent.ACTION_VIEW, Uri.parse("https://lippy-robotics.gt.tc/support.html"))`. Fallback AlertDialog with title "Unable to open the Scout Support Center" shown if no browser app handles the intent. Import `android.net.Uri` added. DONE July 13.
+
+✓ **Reset Memory Layers destructive styling** — `private val DESTRUCTIVE = Color.parseColor("#FF4D4D")` added after `TXT_MUTE`. `navRow()` gains optional `titleColor: Int = TXT` parameter — label rendered in that color; all other callsites unaffected (default value). "Reset Memory Layers" passes `DESTRUCTIVE`. Confirmation dialog's positive "Reset" button colored red via `dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(DESTRUCTIVE)` — called after `.show()` so the button view already exists. Standard Android pattern for irreversible data-deletion actions. DONE July 13.
+
+✓ **NDK 28.2 llvm-strip build fix** — `packaging { jniLibs { keepDebugSymbols += "*/x86_64/*.so" } }` added to `app/build.gradle.kts`. NDK 28.2's `llvm-strip` crashes with `STATUS_ILLEGAL_INSTRUCTION` when stripping x86_64 ELF binaries from the ML Kit bundle. AGP `keepDebugSymbols` tells the build system to skip stripping those ABIs entirely. Does not affect ARM64 (the production ABI for all Scout test devices). DONE July 13.
+
+✓ **Gradle daemon OOM fix (Windows page file exhaustion)** — `org.gradle.jvmargs=-Xmx1024m -XX:+UseSerialGC -Dfile.encoding=UTF-8` in `gradle.properties`. Root cause: G1GC (JVM default) reserves very large virtual address space upfront (~4× heap), exhausting the Windows page file on Patrick's machine. SerialGC reserves only what it immediately needs. `1024m` is sufficient for Scout's build. Secondary cause: antivirus background RAM consumption (uninstalled). Git pack memory limits also added (`pack.windowMemory 64m`, etc.) to prevent OOM during `git pull`. DONE July 13.
+
+✓ **Google Play Data Safety analysis** — Full source code review completed. Conclusions: (1) Scout sends no data to Lippy Robotics servers → "No data collected" is correct, no collection box needed. (2) Gemini API call sends user query text to Google → declare "App interactions → User-generated content" as Shared / Optional. (3) Weather API (`api.weather.gov/points`) sends device coordinates to NWS → declare "Location → Approximate location" as Shared / Optional. Data Safety Step 2 answer: "Yes, my app shares user data with third parties." DONE July 13.
 
 ---
 

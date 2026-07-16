@@ -1,8 +1,23 @@
 # Project Scout — Quick Start
-**Last updated: July 7, 2026 | Version 19**
+**Last updated: July 13, 2026 | Version 20**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v42).
+For full technical details, use the Scout Master Summary (v44).
+
+---
+
+## July 13, 2026 — What Is New:
+
+✓ **Diagnostic reporting system complete (Steps 4–6)** — `DiagReportActivity.kt` built. Reads from DiagnosticDb and displays: Privacy Notice (verbatim policy wording), System Information (4 fields), Event Log (last 7 days, newest first), Crash Log. Report never contains speech text, names, memories, face data, location, API keys, stack traces, or file paths. Activity registered in AndroidManifest.
+✓ **View/Share mode differentiation** — All sharing controls (notes field, warnings, Share button) grouped in `llShareControls` LinearLayout. `EXTRA_SHOW_SHARE` boolean extra controls visibility — hidden in View mode, shown in Share mode. Share flow writes `filesDir/diag/diag_report.txt` and opens the system share sheet via FileProvider.
+✓ **Settings DIAGNOSTICS section** — Three navRows: "View Diagnostic Report" (read-only), "Share Diagnostic Report" (full sharing UI), "Clear Diagnostic History" (removes events, crash log, report file — does not touch memories or model files).
+✓ **Support button now opens browser** — `showSupport()` fires an ACTION_VIEW intent to `lippy-robotics.gt.tc/support.html`. Fallback dialog "Unable to open the Scout Support Center" shown if no browser is available. Previously showed a dead-end dialog with no action.
+✓ **Reset Memory Layers destructive red styling** — navRow title rendered in `#FF4D4D`. Confirmation dialog "Reset" button colored red via `getButton(BUTTON_POSITIVE).setTextColor()` after `.show()`. Standard Android UX for irreversible data deletion.
+✓ **NDK 28.2 build fix** — `keepDebugSymbols += "*/x86_64/*.so"` in `app/build.gradle.kts` packaging block. Prevents NDK llvm-strip STATUS_ILLEGAL_INSTRUCTION crash on x86_64 ML Kit ELFs. Does not affect ARM64.
+✓ **Gradle daemon OOM fix** — `org.gradle.jvmargs=-Xmx1024m -XX:+UseSerialGC` in `gradle.properties`. SerialGC avoids G1's large virtual address reservation that was exhausting the Windows page file on Patrick's machine.
+✓ **Google Play Data Safety analysis complete** — Scout sends no data to Lippy Robotics servers (no collection). Must declare: Gemini query text as "App interactions → User-generated content" Shared/Optional; weather coordinates as "Location → Approximate location" Shared/Optional.
+
+*(Previous session July 7: 16KB fix, bootstrapModelFile, head-turn amplitude, thinking expression redesign — all DONE)*
 
 ---
 
@@ -166,6 +181,8 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
+✓ **Diagnostic reporting system** — DiagReportActivity with View and Share modes, Privacy Notice, System Info, Event Log, Crash Log. July 13.
+✓ **Settings DIAGNOSTICS section** — View Report, Share Report, Clear Diagnostic History. Support button opens browser. Reset Memory Layers red styling. July 13.
 ✓ **TinyLlama confirmed working on A32 and Fold 7** — Confirmed July 7. bootstrapModelFile() auto-copies model from external storage. Both devices tested with Online Features OFF.
 ⚠ **Gemini daily quota** — 1-hour cooldown after daily limit hit. Scout now announces it instead of going silent. Test Gemini the next day by watching for "Gemini (online)" Toast.
 ⚠ **Secondary face bootstrap** — The first time Patrick and Elijah are in frame together after a pull, Elijah may still show as "someone else." Once Elijah faces Scout alone once (so his embedding is added to person_embeddings), subsequent two-person scenes should name him correctly.
@@ -227,4 +244,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 5, 2026 | Version 18 | Upload every session | For full details use Master Summary v41*
+*Project Scout Quick Start | Last updated: July 13, 2026 | Version 20 | Upload every session | For full details use Master Summary v44*
