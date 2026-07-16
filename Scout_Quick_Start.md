@@ -1,5 +1,5 @@
 # Project Scout — Quick Start
-**Last updated: July 13, 2026 | Version 20**
+**Last updated: July 16, 2026 | Version 21**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
 For full technical details, use the Scout Master Summary (v44).
@@ -18,6 +18,18 @@ For full technical details, use the Scout Master Summary (v44).
 ✓ **Google Play Data Safety analysis complete** — Scout sends no data to Lippy Robotics servers (no collection). Must declare: Gemini query text as "App interactions → User-generated content" Shared/Optional; weather coordinates as "Location → Approximate location" Shared/Optional.
 
 *(Previous session July 7: 16KB fix, bootstrapModelFile, head-turn amplitude, thinking expression redesign — all DONE)*
+
+---
+
+## July 10–11, 2026 — What Is New:
+
+✓ **Privacy Policy — in-app dialog** — `showPrivacyPolicy()` in SettingsActivity. Scrollable AlertDialog with full policy text. Covers: offline-first design, Gemini optional/user-key-only, NWS weather, no data collected by Lippy Robotics. Settings → About Scout → Privacy Policy. Fully offline. DONE July 11.
+✓ **Terms of Use — in-app dialog** — `showTermsOfUse()` in SettingsActivity. Scrollable dialog with acceptance clause, service-as-is, third-party (Gemini), changes-to-terms. Settings → About Scout → Terms of Use. DONE July 11.
+✓ **terms.html added to repo root** — Website Terms of Use for lippy-robotics.gt.tc. Play Store compliance clauses: acceptance block + changes-to-terms block. Commit b5735f5. DONE July 10.
+✓ **ML Kit 16KB alignment — DONE** — face-detection 16.1.6 → 16.1.7 (arm64 confirmed aligned, ML Kit issue #986 Dec 2025). image-labeling 17.0.7 → 17.0.9 (fixed vision-common). Commit 60443f3. DONE July 10.
+⚠ **LiteRT migration — PENDING** — TFLite 2.17.0 `libtensorflowlite_jni.so` is 4KB-aligned, NOT compliant. LiteRT attempted (litert:1.4.0 — doesn't exist in Maven), reverted. Use `litert:1.0.1`. Core `libLiteRt.so` IS 16KB aligned. One import change: FaceEmbedder.kt. Required before Play Store submission.
+
+*(Previous session July 7: 16KB scout_llama.so fix, bootstrapModelFile, head-turn amplitude, thinking expression — all DONE)*
 
 ---
 
@@ -200,9 +212,11 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 2. **✓ Startup diagnostics DONE July 4** — TTS Toast + STT spoken warning at boot.
 3. **✓ Onboarding flow DONE July 4** — 5-screen OnboardingActivity.kt + first-boot redirect + offline default.
 4. **Fold 7 stability testing** — dedicated session needed on Fold 7.
-5. **Privacy Policy, Terms of Use, Open Source Credits** — write and add to app and website.
+5. **✓ Privacy Policy** — DONE July 11. In-app dialog (Settings → About Scout). Offline, no website needed.
+   **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
+   **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **16KB page size warning** — ML Kit + TensorFlow Lite version updates required before Play Store submission.
+7. **16KB page size — ML Kit ✓ done, LiteRT migration pending** — ML Kit done July 10. TFLite 2.17.0 NOT compliant. Migrate to `litert:1.0.1` + FaceEmbedder.kt import change before submission.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -244,4 +258,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 13, 2026 | Version 20 | Upload every session | For full details use Master Summary v44*
+*Project Scout Quick Start | Last updated: July 16, 2026 | Version 21 | Upload every session | For full details use Master Summary v45*

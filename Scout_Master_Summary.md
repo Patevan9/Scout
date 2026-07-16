@@ -1,12 +1,22 @@
 # Project Scout — Master Project Summary
-**Last updated: July 13, 2026 | Version 44**
+**Last updated: July 16, 2026 | Version 45**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
 
 ---
 
-## July 13, 2026 — What Changed Since Version 43
+## July 10–13, 2026 — What Changed Since Version 43
+
+✓ **Privacy Policy — in-app dialog** — `SettingsActivity.kt`: `showPrivacyPolicy()` builds a scrollable `AlertDialog` with full policy text. Covers: Scout's offline-first design, Gemini as optional user-key-only service (governed by Google's own policies), NWS `api.weather.gov` receives device coordinates for weather (no Lippy Robotics involvement), no personal data collected or retained by Lippy Robotics. Accessible: Settings → About Scout → Privacy Policy. Fully offline — no browser required. DONE July 11.
+
+✓ **Terms of Use — in-app dialog** — `SettingsActivity.kt`: `showTermsOfUse()` builds scrollable dialog with: acceptance clause ("By downloading or using Scout, you agree to these Terms"), service-as-is limitation, third-party services clause (Gemini governed by Google's own policies), changes-to-terms clause (continued use = acceptance of updates). Accessible: Settings → About Scout → Terms of Use. DONE July 11.
+
+✓ **terms.html added to repo root** — Full Terms of Use HTML page for `lippy-robotics.gt.tc` website. Two Google Play compliance clauses added beyond the original design: (1) acceptance block at top; (2) changes-to-terms block before Limitation of Liability. Commit `b5735f5`. DONE July 10.
+
+✓ **ML Kit updated for 16KB page alignment** — `face-detection` 16.1.6 → 16.1.7: arm64-v8a confirmed 16KB aligned (ML Kit issue #986, resolved Dec 2025; Scout is arm64-only so 32-bit ABI gap does not apply). `image-labeling` 17.0.7 → 17.0.9: pulls in fixed `vision-common`, resolving `libimage_processing_util_jni.so` alignment on arm64. Commit `60443f3`. DONE July 10.
+
+⚠ **LiteRT migration attempted and reverted — pending** — `org.tensorflow:tensorflow-lite:2.17.0`'s `libtensorflowlite_jni.so` is 4KB-aligned (0x1000), NOT 16KB-compliant — confirmed by multiple Google issue tracker reports; TF Lite is maintenance-only and the 16KB fix went into LiteRT. Migration attempted with `com.google.ai.edge.litert:litert:1.4.0` — build failed (version does not exist in Maven). Reverted to TF Lite 2.17.0 (commit `eb8223e`). **Investigation July 16:** confirmed Maven versions include `1.0.1`, `2.1.0`, `2.1.5`. Core `libLiteRt.so` IS 16KB aligned; `libLiteRtOpenClAccelerator.so` in 2.1.0/2.1.1 is NOT aligned but Scout does not use GPU/OpenCL delegates so this does not affect Scout. **Required before Play Store submission:** migrate `build.gradle.kts` to `com.google.ai.edge.litert:litert:1.0.1` and change FaceEmbedder.kt import from `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Binary verification (optional): `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` — look for `p_align 0x4000` (16KB) vs `0x1000` (4KB fail). NOT YET DONE.
 
 ✓ **DiagReportActivity.kt built (diagnostic reporting Step 4–6)** — New activity reads from `DiagnosticDb` and displays a formatted plain-text report in a monospace ScrollView. Four sections: Privacy Notice (verbatim policy disclosure wording), System Information (generated timestamp, Scout version, Android version + API level, device model), Event Log (last 7 days newest-first from `db.getAll()`), Crash Log (`db.crashFile` contents). Report is privacy-safe: no speech text, user names, family names, memories, photos, face data, location, API keys, exception messages, stack traces, URLs, or file paths. `EXTRA_SHOW_SHARE` boolean Intent extra determines launch mode. Registered in AndroidManifest. DONE July 13.
 
@@ -344,10 +354,12 @@ Support Scout screen designed and ready. Message: 'You're not just supporting an
 ✓ **Startup diagnostics** — DONE July 4. TTS failure Toast + STT unavailability spoken warning at boot.
 ✓ **Onboarding flow** — DONE July 4. OnboardingActivity.kt, 5 screens, first-boot redirect in MainActivity.
 ■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
-■ **16KB page size warning** — ML Kit + TensorFlow Lite native libraries need version updates before Play Store submission (`mlkit:face-detection:16.1.6`, `mlkit:image-labeling:17.0.7`, `tensorflow-lite:2.14.0`). Address before submission.
+⚠ **16KB page size — LiteRT migration required** — ML Kit is done (face-detection 16.1.7 ✓, image-labeling 17.0.9 ✓). `org.tensorflow:tensorflow-lite:2.17.0` is NOT 16KB-compliant. Migrate to `com.google.ai.edge.litert:litert:1.0.1`. FaceEmbedder.kt import change only. Required before Play Store submission.
 ■ **Play Asset Delivery (PAD) wiring** — ModelDownloadActivity is built and ready. Wiring PAD to trigger the download screen and call updateProgress() is a future session.
 
-- Privacy Policy, Terms of Use, Open Source Credits — write and add to app + website.
+✓ **Privacy Policy** — DONE July 11. In-app scrollable dialog (Settings → About Scout).
+✓ **Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
+- Open Source Credits — THIRD_PARTY_NOTICES.md started (MobileFaceNet MIT done). Full screen still needed at launch.
 - Play Store listing — description, screenshots, content rating, privacy policy link.
 - Proposal Sandbox — 'Want me to remember that?' confirm step.
 - Permanent vs temporary memory sorting.
@@ -412,7 +424,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 | STT name recognition | 'Scout' misheard as 'Gal', 'Scott', 'Out'. Partially handled by wake word filter. |
 | Live news | Neither brain reads live news. Future news feed needed. |
 | ScoutFaceView dead code | Line 1023: doubled condition. Line 709: unused browAsym. Harmless but messy. |
-| 16KB page size | ML Kit + TensorFlow Lite native libraries require version updates before Play Store submission. Address before submission. |
+| 16KB page size | ML Kit ✓ done (face-detection 16.1.7, image-labeling 17.0.9 — both 16KB aligned on arm64). TFLite 2.17.0 libtensorflowlite_jni.so is 4KB-aligned — NOT compliant. LiteRT migration required before submission: litert:1.0.1, FaceEmbedder.kt import change only. |
 
 ---
 
@@ -438,6 +450,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 - June 30: Dynamic robot name — boot greeting, identity feelings reply, identity fallback, offline brain fallback all read from TruthDb. No hardcoded "Scout" in any spoken response. TeachExtractor.kt: 8 new patterns for "that is my son/wife", "that person is my son/wife", "that is [name]", "that person is [name]", "his name is", "her name is". VisionAnswerBuilder freshness 1800ms→3500ms (camera blocked during TTS). registerFamilyMemberFace() guard prevents overwriting a known face hash with a wrong name. TinyLlama filter: "family friendly companion" + "family companion robot" added. Pet Mode design locked: any animal → soft greeting using stored name or "Well... hello there little one. I hope someone will tell me your name soon." Scout continues normally after greeting. Nicolas Protocol renamed Pet Mode (covers all animals). Settings Architecture and Visual Elements specs restored to summary. Summary updated to version 38.
 - July 3: ArcFace upgrade — InsightFace MobileFaceNet (512-dim, 4.8MB) replaces 192-dim model. FaceEmbedder.kt: EMBEDDING_SIZE 192→512, single-batch output. PeopleDb v4: migration clears 192-dim embeddings, preserves names/hashes, threshold 0.60f. "I see X" phrasing replaces "I can see you, X" throughout VisionAnswerBuilder and MainActivity. Diana fix — secondary face block now consumes pendingFaceIntroName. Phrases.kt new file: anti-repeat phrase pools for boot, goodbye, and all remember responses. ScoutBootStatus.kt rewritten: uses Phrases pools, adaptive BOOT_OFFLINE_FAST (< 2s load) vs BOOT_OFFLINE. BOOT_ONLINE phrases all mention offline backup warming up. TinyLlama load time measured and stored in SharedPreferences. Goodbye and remember responses now varied via Phrases pools. Summary updated to version 39.
 - July 7 S1: 16KB page alignment fix confirmed working on A32 and Fold 7 (scout_llama.so, CMakeLists.txt). bootstrapModelFile() added — auto-copies TinyLlama model from external storage to filesDir on startup (no permission needed via app-specific external dir; READ_EXTERNAL_STORAGE with maxSdkVersion="32" for root /sdcard/ on Android ≤12). Offline fallback message fixed — "I'm working offline" when Gemini disabled (not "having trouble connecting"). TinyLlama confirmed working on both A32 and Fold 7. Head-turn faceGazeDrift multipliers 0.07/0.06 → 0.32/0.26 (was ±5px virtual = invisible; now ±24px X / ±14px Y, clearly readable). Summary updated to version 42.
+- July 10–11: terms.html created (commit b5735f5) — website Terms of Use with acceptance and changes-to-terms clauses for Play Store compliance. ML Kit bumped: face-detection 16.1.6→16.1.7, image-labeling 17.0.7→17.0.9 (both confirmed 16KB aligned on arm64, commit 60443f3). LiteRT migration attempted (litert:1.4.0) — failed, version not in Maven, reverted to tensorflow-lite:2.17.0 (commit eb8223e). Privacy Policy and Terms of Use added as in-app scrollable dialogs in SettingsActivity.kt (commit a330b93). openUrl() removed — both dialogs work fully offline. Note: TFLite 2.17.0 libtensorflowlite_jni.so remains 4KB-aligned; LiteRT migration to litert:1.0.1 is still required before Play Store submission.
 - July 7 S2: Thinking expression completely redesigned based on Patrick's direction and reference images. Goal: curious/engaged ("Hmm, let me think") not sleepy/tired. thinkGlanceSideX 8–20px → 35–65px (drives visible face drift). Brow: one brow raises 22px + sine with questioning arch; other barely moves (5px); thinkInnerLift reduced 20px → 6px on quiet brow only (was making it look worried). Lid: right eye +0.08f droop during thinking (subtle asymmetry — concentration not sleep). Mouth: corYR 3px higher than corYL (tiny thoughtful side-smile). Summary updated to version 43.
 - July 4: PeopleDb threshold raised back to 0.65f (0.60f caused Diana/Elijah cross-contamination at ArcFace scale). cursor.use{} in findBestMatch + findBestMatchName (leak fix). forgetPerson made atomic with transactions. addNamedEmbedding COUNT(*) guard. VisionAnswerBuilder: freshness 3500ms→1800ms, 3+ faces branch gets dogLine, 2-face branch secondaryFaceName arm precedes pendingIntroName arm, new else arm for unknown primary + known secondary. Secondary face path adds findBestMatch fallback after findBestMatchName. Caption persistence fix — onResume() hides caption immediately when captions disabled. Startup diagnostics: TTS failure Toast + STT unavailability spoken warning at boot + JournalDb log. First-boot onboarding redirect at top of MainActivity.onCreate(). OnboardingActivity.kt built — full 5-screen flow, currentPage single source of truth for dots + counter, finishOnboarding() sets offline default. BOOT_NO_KEY phrases replaced with settings slide-right tip. CLAUDE.md created with git commands and critical rules for all future Claude sessions. ModelDownloadActivity.kt built — 39 messages, ObjectAnimator animation, updateProgress() API, portrait-only, AndroidManifest registered. Summary updated to version 40.
 
@@ -785,12 +798,12 @@ Two kinds of autonomy — both approved:
 | 14 | Onboarding flow — OnboardingActivity.kt | ✓ DONE July 4 — 5-screen flow, first-boot redirect, offline default |
 | 15 | Fold 7 stability testing | Not started — A32 is current test device |
 | 16 | A32 stability testing | Ongoing — no crashes as of June 21. TinyLlama re-enabled June 28, monitoring. |
-| 17 | Privacy Policy | Not started |
-| 18 | Terms of Use | Not started |
+| 17 | Privacy Policy | ✓ DONE July 11 — in-app scrollable dialog (Settings → About Scout). Website version available at lippy-robotics.gt.tc. |
+| 18 | Terms of Use | ✓ DONE July 10–11 — in-app scrollable dialog + terms.html in repo root (commit b5735f5). |
 | 19 | Open Source Credits — THIRD_PARTY_NOTICES.md started | In progress |
 | 20 | Weather API licensing | ✓ RESOLVED June 16 — switched to NWS, free for commercial use |
 | 21 | Play Store listing — description, screenshots, rating | Not started |
-| 22 | 16KB page size — ML Kit + TF Lite library updates | Not started — required before submission |
+| 22 | 16KB page size — ML Kit ✓ done; TFLite → LiteRT migration pending | ML Kit 16.1.7 + 17.0.9 done July 10. TFLite 2.17.0 NOT aligned. Use litert:1.0.1 — one import change. Required before submission. |
 
 ---
 
@@ -842,8 +855,8 @@ Screen 1 'See & Recognize' description reads: 'I see faces, scenes, and more.' �
 
 | Document | Priority | Notes |
 |----------|----------|-------|
-| Privacy Policy | 1 — Before launch | What data Scout collects. What stays on device. Gemini is optional. Contact info. |
-| Terms of Use | 2 — Near launch | Scout is as-is. No guarantees. Not medical/legal/financial advice. Keep it simple. |
+| Privacy Policy | 1 — ✓ DONE July 11 | In-app scrollable dialog (Settings → About Scout). Covers offline-first design, Gemini optional/user-key-only, NWS weather, no data collected by Lippy Robotics. Website version available. |
+| Terms of Use | 2 — ✓ DONE July 10–11 | In-app scrollable dialog + terms.html in repo root. Acceptance clause, service-as-is, third-party services, changes-to-terms. |
 | Open Source Credits | 3 — At launch | llama.cpp, TinyLlama, MobileFaceNet (MIT, done in THIRD_PARTY_NOTICES.md), Android libraries. |
 | Website link | 1 — Before launch | https://patevan9.github.io/lippyrobotics.github.io in About Scout, Google Play listing, Facebook page. |
 
@@ -863,4 +876,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 7, 2026 | Version 43 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 16, 2026 | Version 45 | Single source of truth — upload every session*

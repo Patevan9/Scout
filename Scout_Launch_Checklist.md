@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 7, 2026 | Version 13**
+**What Scout needs to be worth $9.99 | Updated July 16, 2026 | Version 14**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -128,17 +128,19 @@ These are the real blockers. Scout cannot ship without these.
 
 ## ■ Legal & Website — Required for Launch
 
-### 6. Privacy Policy — Priority 1
+### 6. Privacy Policy — ✓ DONE July 11
 
-- What data Scout collects. What stays on the device. Gemini is optional. Contact information.
-- Google Play may require this depending on features — have it ready before submitting.
-■ Write once. Add to website footer + About Scout screen in app.
+- In-app scrollable dialog: Settings → About Scout → Privacy Policy. Fully offline, no browser required.
+- Covers: offline-first design, Gemini as optional user-key-only service (governed by Google's policies), NWS weather coordinates, no data collected or retained by Lippy Robotics.
+- Website version available at lippy-robotics.gt.tc.
+✓ In-app implementation complete. Website version available. DONE July 11.
 
-### 7. Terms of Use — Priority 2
+### 7. Terms of Use — ✓ DONE July 10–11
 
-- Scout is provided as-is. No guarantees. Not medical, legal, or financial advice.
-- Keep it simple. One clear page is enough.
-■ Write once. Add to website footer + About Scout screen in app.
+- In-app scrollable dialog: Settings → About Scout → Terms of Use. Fully offline.
+- terms.html added to repo root (commit b5735f5) — ready for lippy-robotics.gt.tc website.
+- Includes acceptance clause, service-as-is limitation, third-party clause (Gemini), changes-to-terms clause.
+✓ In-app implementation complete. Website HTML ready (terms.html). DONE July 10–11.
 
 ### 8. Open Source Credits — Priority 3
 
@@ -166,7 +168,12 @@ Required to submit to Google Play.
 - Content rating questionnaire — Scout is family-safe. Straightforward.
 - Short description — 60 characters max: 'A calm AI companion for your whole family. Private. Local. Yours.'
 
-**⚠ 16KB page size warning** — ML Kit and TensorFlow Lite native libraries will need version updates before Play Store submission. Required versions: `mlkit:face-detection:16.1.6`, `mlkit:image-labeling:17.0.7`, `tensorflow-lite:2.14.0`. Google Play enforces 16KB page alignment starting 2025. Address in a dedicated session before submission.
+**⚠ 16KB page size — ML Kit ✓ DONE, TFLite → LiteRT migration required**
+
+- `mlkit:face-detection:16.1.7` ✓ — arm64-v8a confirmed 16KB aligned (ML Kit issue #986, Dec 2025). DONE July 10.
+- `mlkit:image-labeling:17.0.9` ✓ — arm64 aligned. DONE July 10.
+- `org.tensorflow:tensorflow-lite:2.17.0` ✗ — `libtensorflowlite_jni.so` is 4KB-aligned (0x1000). NOT compliant. TF Lite is maintenance-only; the 16KB fix went into LiteRT. Google Play will reject.
+- **Required before submission:** Migrate to `com.google.ai.edge.litert:litert:1.0.1`. Core `libLiteRt.so` IS 16KB aligned. Scout does not use GPU/OpenCL delegates, so the `libLiteRtOpenClAccelerator.so` alignment issue in 2.1.x does not apply. Prior attempt used `litert:1.4.0` (doesn't exist in Maven). Use `1.0.1`. Only change needed: `FaceEmbedder.kt` import `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Optional binary verify: `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` (look for 0x4000 = pass, 0x1000 = fail).
 
 ---
 
@@ -336,10 +343,10 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: Privacy Policy + Terms of Use, Play Store listing, and 16KB page size ML Kit library updates.**
+**Next session: LiteRT migration (litert:1.0.1 — one import change in FaceEmbedder.kt), Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 7, 2026 | Version 13 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 16, 2026 | Version 14 | For Patrick, Diana, Elijah, and Scout*
