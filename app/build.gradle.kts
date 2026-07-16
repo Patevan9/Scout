@@ -82,10 +82,7 @@ dependencies {
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.google.mlkit:image-labeling:17.0.9")
 
-    // TensorFlow Lite — ⚠️ not 16KB page-aligned (shows debug popup on Fold 7 / Android 15).
-    // Migrate to com.google.ai.edge.litert:litert before Play Store submission.
-    // Verify the latest available version at maven.google.com before switching.
-    implementation("org.tensorflow:tensorflow-lite:2.17.0")
+    implementation("com.google.ai.edge.litert:litert:2.1.5")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

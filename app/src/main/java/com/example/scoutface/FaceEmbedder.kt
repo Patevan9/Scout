@@ -2,7 +2,7 @@ package com.example.scoutface
 
 import android.content.Context
 import android.graphics.Bitmap
-import org.tensorflow.lite.Interpreter
+import com.google.ai.edge.litert.Interpreter
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
