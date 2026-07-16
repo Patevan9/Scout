@@ -2,7 +2,7 @@
 **Last updated: July 16, 2026 | Version 21**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v44).
+For full technical details, use the Scout Master Summary (v45).
 
 ---
 
