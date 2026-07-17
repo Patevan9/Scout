@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 16, 2026 | Version 14**
+**What Scout needs to be worth $9.99 | Updated July 16, 2026 | Version 15**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -87,6 +87,8 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ **NDK 28.2 / llvm-strip build fix** — keepDebugSymbols += "*/x86_64/*.so" added to build.gradle.kts packaging block. Prevents STATUS_ILLEGAL_INSTRUCTION crash when Windows NDK 28.2 processes x86_64 ML Kit AARs. Scout is arm64-only; x86_64 files are never loaded. DONE July 13.
 ✓ **Gradle daemon OOM fix** — org.gradle.jvmargs changed to -Xmx1024m -XX:+UseSerialGC. G1 GC was reserving too much virtual address space upfront, exhausting Windows page file. SerialGC avoids the large reservation. DONE July 13.
 ✓ **Google Play Data Safety analysis complete** — Scout shares (not collects) two data types: (1) Approximate location → api.weather.gov for weather; (2) User query text → Google Gemini API (optional, user's own key). Lippy Robotics collects nothing. "No data collection declared" in Play Console is correct and accurate. DONE July 13.
+✓ **LiteRT migration — code done (readelf pending)** — `app/build.gradle.kts`: replaced `org.tensorflow:tensorflow-lite:2.17.0` with `com.google.ai.edge.litert:litert:2.1.5`. `FaceEmbedder.kt`: import changed `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Drop-in replacement — same API, no logic changes. Alignment confirmed in 2.1.x line per GitHub issue #6299. ⚠ Readelf verification still required (Patrick's task) — run `readelf -l liblitert_jni.so | grep -A1 LOAD` after next Android Studio build; `p_align: 0x4000` = pass. DONE July 16 (code); readelf pending.
+✓ **Face recognition accuracy — 3 root-cause bugs fixed** — Root cause of the repeated Diana/Elijah confusion found and fixed in `PeopleDb.kt` and `MainActivity.kt`. (1) Margin check: `findBestMatchName` now requires the top candidate to lead the second by ≥ 0.08f — Scout says nothing rather than guessing when two people score similarly. (2) Profile pollution gate: `CONFIDENT_EMBED_THRESHOLD = 0.72f` in `MainActivity` — embeddings added to a person's profile only when match score is ≥ 0.72f (well above the 0.65f floor), preventing borderline matches from corrupting profiles. (3) Rolling window at cap: when a person has 12 stored embeddings, the most-redundant one (highest cosine similarity to the incoming) is replaced — profiles stay diverse as lighting and angles change. `forgetPerson` now also clears `lastFaceEmbedding` for a clean re-introduction. New functions: `findBestMatchNameWithScore()`, `scoreByPerson()`. DONE July 16.
 
 ---
 
@@ -168,12 +170,12 @@ Required to submit to Google Play.
 - Content rating questionnaire — Scout is family-safe. Straightforward.
 - Short description — 60 characters max: 'A calm AI companion for your whole family. Private. Local. Yours.'
 
-**⚠ 16KB page size — ML Kit ✓ DONE, TFLite → LiteRT migration required**
+**⚠ 16KB page size — ML Kit ✓ DONE, LiteRT ✓ code done — readelf verification pending**
 
 - `mlkit:face-detection:16.1.7` ✓ — arm64-v8a confirmed 16KB aligned (ML Kit issue #986, Dec 2025). DONE July 10.
 - `mlkit:image-labeling:17.0.9` ✓ — arm64 aligned. DONE July 10.
-- `org.tensorflow:tensorflow-lite:2.17.0` ✗ — strong evidence of non-compliance: device shows debug popup on Fold 7 / Android 15 (revert commit eb8223e), consistent with Google issue tracker reports that TF Lite JNI lib did not receive the 16KB fix. TF Lite is maintenance-only; the fix went to LiteRT. **Binary NOT yet verified** — run `readelf -l libtensorflowlite_jni.so | grep -A1 LOAD` on the AAR to confirm (`p_align 0x4000` = pass, `p_align 0x1000` = fail) before treating as settled.
-- **Required before submission:** Migrate to `com.google.ai.edge.litert:litert:2.1.5` (latest known 2.x; alignment confirmed in 2.1.x line per GitHub issue #6299 — "libLiteRt.so in the same release is correctly aligned"). Scout does not use GPU/OpenCL delegates, so the unrelated `libLiteRtOpenClAccelerator.so` alignment issue in 2.1.0/2.1.1 does not apply. Prior attempt used `litert:1.4.0` (does not exist in Maven). Only change needed: `FaceEmbedder.kt` import `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Run readelf on both .so files after the build to verify before submitting.
+- `com.google.ai.edge.litert:litert:2.1.5` ✓ (code) — migrated from `tensorflow-lite:2.17.0`. Alignment confirmed in 2.1.x line per GitHub issue #6299. Import changed in `FaceEmbedder.kt`. Commits 9676192. DONE July 16.
+- **⚠ Readelf verification still required before Play Store submission** — After next Android Studio build, run `readelf -l liblitert_jni.so | grep -A1 LOAD` on the extracted `.so` from `~/.gradle/caches/modules-2/files-2.1/com.google.ai.edge.litert/litert/2.1.5/`. `p_align: 0x4000` = pass; `p_align: 0x1000` = fail. Patrick's task.
 
 ---
 
@@ -343,10 +345,10 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. The gap between today and the Play Store is focused sessions — not months.
 
-**Next session: LiteRT migration (litert:2.1.5 — one import change in FaceEmbedder.kt), Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
+**Next session: Readelf verification of litert:2.1.5 (Patrick runs after Android Studio build), Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 16, 2026 | Version 14 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 16, 2026 | Version 15 | For Patrick, Diana, Elijah, and Scout*

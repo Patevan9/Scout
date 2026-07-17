@@ -1,8 +1,22 @@
 # Project Scout — Quick Start
-**Last updated: July 16, 2026 | Version 21**
+**Last updated: July 16, 2026 | Version 22**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v45).
+For full technical details, use the Scout Master Summary (v46).
+
+---
+
+## July 16, 2026 — What Is New:
+
+✓ **LiteRT migration — code done, readelf pending** — `app/build.gradle.kts` + `FaceEmbedder.kt`. `tensorflow-lite:2.17.0` replaced with `litert:2.1.5` (drop-in replacement, same Interpreter API, no logic changes). FaceEmbedder.kt import changed `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Commits 9676192. **Readelf step still required** — after next Android Studio build, run `readelf -l liblitert_jni.so | grep -A1 LOAD` on the `.so` inside the unpacked AAR from `~/.gradle/caches/modules-2/files-2.1/com.google.ai.edge.litert/litert/2.1.5/`. Look for `p_align: 0x4000` (pass) vs `p_align: 0x1000` (fail).
+✓ **Face recognition accuracy — 3 root-cause bugs fixed** — Root cause of the repeated Diana/Elijah confusion found and fixed in PeopleDb.kt and MainActivity.kt. Commit b6c5579.
+  - **Margin check** — `findBestMatchName` now requires the top candidate to lead by ≥ 0.08f. If two people score too close, Scout says nothing rather than guessing wrong.
+  - **Profile pollution gate** — `CONFIDENT_EMBED_THRESHOLD = 0.72f` in MainActivity. A match must score ≥ 0.72f (well above the 0.65f floor) before its embedding is added to a person's profile. Borderline matches no longer corrupt profiles.
+  - **Rolling window at cap** — When a person's 12 embeddings are full, the most-redundant one (highest cosine similarity to the new one) is replaced rather than hard-stopping. Profiles stay diverse as conditions change.
+  - `forgetPerson` now also clears `lastFaceEmbedding` for a clean slate on re-introduction.
+  **Action required:** Run "Scout, forget [name]" for Diana and Elijah before re-introducing them — existing profiles may already be polluted.
+
+*(Previous session July 13: Diagnostic reporting, Settings DIAGNOSTICS section, support button, reset red styling, NDK fix, Gradle OOM fix — all DONE)*
 
 ---
 
@@ -27,7 +41,7 @@ For full technical details, use the Scout Master Summary (v45).
 ✓ **Terms of Use — in-app dialog** — `showTermsOfUse()` in SettingsActivity. Scrollable dialog with acceptance clause, service-as-is, third-party (Gemini), changes-to-terms. Settings → About Scout → Terms of Use. DONE July 11.
 ✓ **terms.html added to repo root** — Website Terms of Use for lippy-robotics.gt.tc. Play Store compliance clauses: acceptance block + changes-to-terms block. Commit b5735f5. DONE July 10.
 ✓ **ML Kit 16KB alignment — DONE** — face-detection 16.1.6 → 16.1.7 (arm64 confirmed aligned, ML Kit issue #986 Dec 2025). image-labeling 17.0.7 → 17.0.9 (fixed vision-common). Commit 60443f3. DONE July 10.
-⚠ **LiteRT migration — PENDING** — TFLite 2.17.0 has strong on-device evidence of non-compliance (debug popup on Fold 7/Android 15) — binary not yet readelf-verified. LiteRT attempted (litert:1.4.0 — doesn't exist in Maven), reverted. Alignment confirmed in LiteRT 2.1.x line (GitHub issue #6299). Use `litert:2.1.5`. One import change in FaceEmbedder.kt. Verify with readelf after build. Required before Play Store submission.
+✓ **LiteRT migration — code done (readelf pending)** — `build.gradle.kts` + `FaceEmbedder.kt` updated July 16. `litert:2.1.5` (alignment confirmed in 2.1.x line per GitHub issue #6299). Drop-in replacement — same Interpreter API. Readelf verification required before Play Store submission (Patrick's task after next Android Studio build).
 
 *(Previous session July 7: 16KB scout_llama.so fix, bootstrapModelFile, head-turn amplitude, thinking expression — all DONE)*
 
@@ -155,6 +169,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 ✓ Camera — face detection, scene labeling (ML Kit) — throttled to ~7fps for A32 stability
 ✓ Face recognition COMPLETE and RELIABLE — ArcFace upgrade July 3: InsightFace MobileFaceNet (512-dim, 4.8MB). PeopleDb v4, threshold 0.60f (ArcFace scale). findBestMatch scans named rows only. Self-match bug fixed. lastKnownFaceName updated every 2 seconds.
 ✓ Secondary face recognition — both faces in a two-person frame embedded and matched. person_embeddings table (PeopleDb v4). Threshold 0.55f for secondary crops. Diana fix July 3 — pendingFaceIntroName now checked in secondary block.
+✓ Face recognition accuracy — 3 root-cause bugs fixed July 16: margin check (0.08f gap required between top two candidates), profile pollution gate (CONFIDENT_EMBED_THRESHOLD = 0.72f), rolling window at cap (replaces most-redundant). forgetPerson clears lastFaceEmbedding. New: findBestMatchNameWithScore(), scoreByPerson(). See July 16 section above for action steps.
 ✓ Family face introduction — "this is my son Elijah" / "this is my wife Diana" registers face. Pending mechanism for two-people-in-frame now works correctly for secondary face.
 ✓ "Scout, forget [name]" command — clears face embedding and name from both tables. June 29.
 ✓ Two-person response — "I see Patrick and Elijah" when both faces are known (July 3: "I see X" not "I see you, X").
@@ -216,7 +231,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **16KB page size — ML Kit ✓ done, LiteRT migration pending** — ML Kit done July 10. TFLite 2.17.0 shows strong evidence of non-compliance (not binary-verified). Migrate to `litert:2.1.5` + FaceEmbedder.kt import. Verify with readelf after build.
+7. **16KB page size — ML Kit ✓ done, LiteRT ✓ code done** — ML Kit done July 10. LiteRT code done July 16 — `litert:2.1.5` in build.gradle.kts, FaceEmbedder.kt import updated. **Readelf verification pending** — Patrick runs `readelf -l liblitert_jni.so | grep -A1 LOAD` after next Android Studio build. `p_align: 0x4000` = pass.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -258,4 +273,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 16, 2026 | Version 21 | Upload every session | For full details use Master Summary v45*
+*Project Scout Quick Start | Last updated: July 16, 2026 | Version 22 | Upload every session | For full details use Master Summary v46*
