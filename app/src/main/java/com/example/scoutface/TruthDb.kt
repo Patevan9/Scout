@@ -65,6 +65,20 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
         return out
     }
 
+    fun deleteFact(entity: String, factKey: String) {
+        writableDatabase.execSQL(
+            "DELETE FROM entity_memory WHERE entity=? AND fact_key=?;",
+            arrayOf(entity.lowercase(), factKey.lowercase())
+        )
+    }
+
+    fun deleteFactsWithKeyLike(entity: String, pattern: String) {
+        writableDatabase.execSQL(
+            "DELETE FROM entity_memory WHERE entity=? AND fact_key LIKE ?;",
+            arrayOf(entity.lowercase(), pattern)
+        )
+    }
+
     fun getFactsUpdatedToday(entity: String): List<Pair<String, String>> {
         val cal = java.util.Calendar.getInstance()
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)

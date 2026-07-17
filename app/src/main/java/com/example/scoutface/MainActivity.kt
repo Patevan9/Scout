@@ -1081,6 +1081,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         ensureScoutIdentityDefaults()
 
+        migrateDoublePrefixFacts()
+
     }
 
     private fun setupTts() {
@@ -1192,6 +1194,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
+    }
+
+    private fun migrateDoublePrefixFacts() {
+        if (prefs.getBoolean("migrated_double_prefix_facts", false)) return
+        prefs.edit().putBoolean("migrated_double_prefix_facts", true).apply()
+        // Delete fact keys that were stored with a doubled "favorite_favorite_" prefix
+        // due to a TeachExtractor bug (now fixed). Scout will re-learn them naturally.
+        truthDb.deleteFactsWithKeyLike(ENTITY_USER_PRIMARY, "favorite_favorite_%")
     }
 
     private fun ensureScoutIdentityDefaults() {
