@@ -1077,7 +1077,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         voice = VoiceBank(prefs)
 
-        exportManager = ScoutExportManager(this, truthDb)
+        exportManager = ScoutExportManager(this, truthDb, peopleDb)
 
         ensureScoutIdentityDefaults()
 

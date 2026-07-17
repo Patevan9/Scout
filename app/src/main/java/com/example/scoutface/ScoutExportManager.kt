@@ -10,7 +10,8 @@ import java.io.File
 
 class ScoutExportManager(
     private val context: Context,
-    private val truthDb: TruthDb
+    private val truthDb: TruthDb,
+    private val peopleDb: PeopleDb
 ) {
 
     fun exportBrainToJson(): String? {
@@ -32,6 +33,38 @@ class ScoutExportManager(
                 }
             }
             root.put("truth", truthArr)
+
+            // Named faces from the hash-keyed people table
+            val peopleArr = JSONArray()
+            peopleDb.readableDatabase.rawQuery(
+                "SELECT face_hash, name, first_met, last_seen FROM people WHERE name IS NOT NULL AND name != '' ORDER BY last_seen DESC;",
+                null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val o = JSONObject()
+                    o.put("face_hash", c.getString(0))
+                    o.put("name", c.getString(1))
+                    o.put("first_met", c.getLong(2))
+                    o.put("last_seen", c.getLong(3))
+                    peopleArr.put(o)
+                }
+            }
+            root.put("people", peopleArr)
+
+            // Named embedding counts from the multi-embedding table
+            val embArr = JSONArray()
+            peopleDb.readableDatabase.rawQuery(
+                "SELECT name, COUNT(*) FROM person_embeddings GROUP BY name ORDER BY name;",
+                null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val o = JSONObject()
+                    o.put("name", c.getString(0))
+                    o.put("embedding_count", c.getInt(1))
+                    embArr.put(o)
+                }
+            }
+            root.put("face_embeddings", embArr)
 
             val outFile = File(context.filesDir, "scout_export_${System.currentTimeMillis()}.json")
             outFile.writeText(root.toString(2))
