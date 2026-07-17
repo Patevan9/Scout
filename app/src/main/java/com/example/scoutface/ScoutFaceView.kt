@@ -1257,8 +1257,14 @@ class ScoutFaceView @JvmOverloads constructor(
             lookX += (targetX - lookX) * 0.08f
             lookY += (targetY - lookY) * 0.08f
         } else {
-            lookVX += ((targetX - lookX) * springK - lookVX * dampK) * dtScale
-            lookVY += ((targetY - lookY) * springK - lookVY * dampK) * dtScale
+            // Semi-implicit Euler: damping divided out rather than subtracted — stable at any
+            // frame time. Explicit Euler oscillates (velocity sign-flips) when dampK*dtScale > 1,
+            // which happens on any frame slower than ~20ms. A32 routinely exceeds that.
+            val ax  = (targetX - lookX) * springK * dtScale
+            val ay  = (targetY - lookY) * springK * dtScale
+            val div = 1f + dampK * dtScale
+            lookVX  = (lookVX + ax) / div
+            lookVY  = (lookVY + ay) / div
             lookX  += lookVX * dtScale
             lookY  += lookVY * dtScale
         }
