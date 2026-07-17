@@ -291,6 +291,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var speakingStartedMs = 0L
     private val MAX_SPEAKING_DURATION_MS = 45_000L
 
+    // Guards against TinyLlama hanging with no reply. If isThinking stays true longer
+    // than this without Scout speaking, force-clear so the mic restarts.
+    private var thinkingStartedMs = 0L
+    private val MAX_THINKING_DURATION_MS = 120_000L
+
     // Mic visual gating
 
     private val MIC_RMS_FLOOR_DB = 2.5f
@@ -879,6 +884,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         startOfflineBrain()
 
+        checkBatteryOptimization()
+
+    }
+
+    private fun checkBatteryOptimization() {
+        if (prefs.getBoolean("battery_opt_shown", false)) return
+        prefs.edit().putBoolean("battery_opt_shown", true).apply()
+        // Delay so Scout finishes his boot announcement before the system dialog appears.
+        handler.postDelayed({
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                }
+            } catch (_: Exception) {
+                // Device doesn't support the direct prompt — user will need to set it manually.
+            }
+        }, 8_000L)
     }
 
     private val MODEL_FILENAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
@@ -2373,9 +2400,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 isSpeaking = false
                 speakingStartedMs = 0L
                 isThinking = false
+                thinkingStartedMs = 0L
                 wantListening = true
                 faceView.setSpeaking(false)
                 faceView.setThinking(false)
+            }
+
+            // If TinyLlama hung and never called respond(), isThinking stays true forever
+            // and the mic never restarts. Force-clear after MAX_THINKING_DURATION_MS.
+            if (isThinking && !isSpeaking && thinkingStartedMs > 0L && now - thinkingStartedMs > MAX_THINKING_DURATION_MS) {
+                journalDb.add("isThinking watchdog: stuck for ${(now - thinkingStartedMs)/1000}s — force clearing.")
+                isThinking = false
+                thinkingStartedMs = 0L
+                wantListening = true
+                faceView.setThinking(false)
+                scheduleListenRestart(immediate = true)
             }
 
             val shouldBeListening =
@@ -2561,6 +2600,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         wantListening = false
 
         isThinking = false
+        thinkingStartedMs = 0L
         isSpeaking = true
         speakingStartedMs = System.currentTimeMillis()
 
@@ -3257,6 +3297,7 @@ Respond only with Scout's next reply.
 
         llamaQueryGeneration++
         isThinking = true
+        thinkingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(true)
 
