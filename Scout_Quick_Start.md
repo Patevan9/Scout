@@ -1,8 +1,36 @@
 # Project Scout — Quick Start
-**Last updated: July 16, 2026 | Version 22**
+**Last updated: July 17, 2026 | Version 23**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v46).
+For full technical details, use the Scout Master Summary (v47).
+
+---
+
+## July 17, 2026 — What Is New:
+
+✓ **LiteRT import corrected — build was broken** — July 16's change set the import to `com.google.ai.edge.litert.Interpreter` (matching the Maven artifact name), but that class does not exist inside the LiteRT 2.1.5 AAR. LiteRT rebrands the Maven coordinates but the internal Java package is still `org.tensorflow.lite`. Fixed: `FaceEmbedder.kt` import reverted to `org.tensorflow.lite.Interpreter`. Build confirmed successful. Commit 83ed37f.
+
+✓ **16KB readelf verification COMPLETE — PASS** — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358). All LOAD segments show `Align 0x4000` (16KB). Also verified `libLiteRtClGlAccelerator.so` — same result. Both files PASS. 16KB compliance for LiteRT is now fully confirmed. Play Store submission is unblocked on the 16KB front.
+
+✓ **"Favorite favorite" double-prefix bug fixed** — `TeachExtractor.kt` was unconditionally prepending `"favorite_"` to all `"my X is Y"` teaching patterns. When X was already "favorite color", the stored key became `"favorite_favorite_color"`. Fixed: `startsWith("favorite")` guard prevents double-prefix. Now "my favorite color is cyan" → key `"favorite_color"`. Commit 9b353a8.
+
+✓ **Display fix for old double-prefix keys** — `keyToHuman()` in `handleWhatYouLearnedQuery()` now strips one `"favorite_"` prefix from any key that begins with `"favorite_favorite_"`. Scout reads back "your favorite color is cyan" correctly even for facts stored under the old bug. Same commit 9b353a8.
+
+✓ **Battery optimization prompt added** — `checkBatteryOptimization()` fires 8 seconds after first boot. Uses Android's `PowerManager.isIgnoringBatteryOptimizations()` + `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` to take users directly to the system setting. Fires once only (prefs guard). `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission added to AndroidManifest. Note: Samsung's additional "never sleeping apps" list is a second layer that this standard Android API cannot reach — users still need to add Scout there manually. Commit 1abcee1.
+
+✓ **Thinking watchdog added** — `thinkingStartedMs` field records when `isThinking` turns true. 120-second watchdog in `runRecognizerWatchdog()` force-clears stuck thinking: `isThinking = false`, `wantListening = true`, `scheduleListenRestart(immediate = true)`, logged to JournalDb. Prevents Scout going silent with eyes still moving when TinyLlama hangs. Commit 1abcee1.
+
+✓ **DB migration cleans up double-prefix facts** — `migrateDoublePrefixFacts()` in `setupMemory()` deletes all `"favorite_favorite_%"` keys from TruthDb on next launch (one-time, prefs-guarded). Cleans up both the TeachExtractor bug pollution and the TTS self-echo entry `"favorite_favorite_yes_my_favorite_color"`. Commit e24fad9.
+
+✓ **TruthDb gains `deleteFact()` and `deleteFactsWithKeyLike()`** — Two new methods. `deleteFact(entity, factKey)` removes a single fact. `deleteFactsWithKeyLike(entity, pattern)` removes all matching facts using SQL LIKE syntax. Used by the DB migration. Commit e24fad9.
+
+✓ **People DB added to brain export** — `ScoutExportManager` now takes `peopleDb: PeopleDb` and exports two new sections: `"people"` (named faces: face_hash, name, first_met, last_seen — no BLOBs) and `"face_embeddings"` (per-name embedding count from `person_embeddings` table). "Scout, export your brain" now shows the full people picture. Commit aa10bc9.
+
+⚠ **"Very" — in people DB, not truth DB** — Confirmed via brain export JSON: "Very" is not in truth DB. Must be in the people table (likely stored from an early hash-based recognition session). Patrick will run "Scout, export your brain" and share the new JSON (which now includes the people sections) to identify and fix this.
+
+⚠ **TTS self-echo vulnerability noted** — `"favorite_favorite_yes_my_favorite_color"` in the DB showed Scout re-teaching himself from his own TTS output ("yes, my favorite color is cyan" echoed back through the mic within the 30-second conversation window). The self-echo guard in `onResults()` failed (normalization mismatch on the prefix "yes,"). DB migration cleaned it up. Root vulnerability needs future tightening.
+
+*(Previous session July 16: LiteRT migration code done, face recognition 3-bug fix — see below)*
 
 ---
 
@@ -41,7 +69,7 @@ For full technical details, use the Scout Master Summary (v46).
 ✓ **Terms of Use — in-app dialog** — `showTermsOfUse()` in SettingsActivity. Scrollable dialog with acceptance clause, service-as-is, third-party (Gemini), changes-to-terms. Settings → About Scout → Terms of Use. DONE July 11.
 ✓ **terms.html added to repo root** — Website Terms of Use for lippy-robotics.gt.tc. Play Store compliance clauses: acceptance block + changes-to-terms block. Commit b5735f5. DONE July 10.
 ✓ **ML Kit 16KB alignment — DONE** — face-detection 16.1.6 → 16.1.7 (arm64 confirmed aligned, ML Kit issue #986 Dec 2025). image-labeling 17.0.7 → 17.0.9 (fixed vision-common). Commit 60443f3. DONE July 10.
-✓ **LiteRT migration — code done (readelf pending)** — `build.gradle.kts` + `FaceEmbedder.kt` updated July 16. `litert:2.1.5` (alignment confirmed in 2.1.x line per GitHub issue #6299). Drop-in replacement — same Interpreter API. Readelf verification required before Play Store submission (Patrick's task after next Android Studio build).
+✓ **LiteRT migration — FULLY DONE** — `build.gradle.kts` + `FaceEmbedder.kt` updated July 16–17. `litert:2.1.5` in build.gradle.kts; `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (the correct internal package). Readelf COMPLETE July 17 — all LOAD segments `Align 0x4000` (PASS). Play Store submission unblocked.
 
 *(Previous session July 7: 16KB scout_llama.so fix, bootstrapModelFile, head-turn amplitude, thinking expression — all DONE)*
 
@@ -208,6 +236,13 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
+✓ **16KB page size — FULLY DONE** — ML Kit (July 10), LiteRT code (July 16), LiteRT import fix + readelf VERIFIED PASS (July 17). All libraries confirmed 16KB-aligned. Play Store submission unblocked.
+✓ **LiteRT import fix** — `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (correct internal package for litert:2.1.5). Build confirmed. July 17.
+✓ **"Favorite favorite" bug fixed** — TeachExtractor double-prefix eliminated. New facts stored correctly as `"favorite_color"` not `"favorite_favorite_color"`. keyToHuman() collapses old keys for readback. DB migration cleans up existing bad entries on next launch. July 17.
+✓ **Battery optimization prompt** — Fires 8 seconds after first boot, takes user to system setting to exclude Scout from battery optimization. One-time only. July 17.
+✓ **Thinking watchdog** — 120-second timeout clears stuck `isThinking` state if TinyLlama hangs. Scout cannot stay frozen with eyes moving and no speech. July 17.
+✓ **People DB in brain export** — "Scout, export your brain" now includes named faces (face_hash, name, first_met, last_seen) and per-name embedding counts. July 17.
+✓ **TruthDb `deleteFact()` + `deleteFactsWithKeyLike()`** — New delete methods for targeted fact removal. July 17.
 ✓ **Diagnostic reporting system** — DiagReportActivity with View and Share modes, Privacy Notice, System Info, Event Log, Crash Log. July 13.
 ✓ **Settings DIAGNOSTICS section** — View Report, Share Report, Clear Diagnostic History. Support button opens browser. Reset Memory Layers red styling. July 13.
 ✓ **TinyLlama confirmed working on A32 and Fold 7** — Confirmed July 7. bootstrapModelFile() auto-copies model from external storage. Both devices tested with Online Features OFF.
@@ -231,7 +266,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **16KB page size — ML Kit ✓ done, LiteRT ✓ code done** — ML Kit done July 10. LiteRT code done July 16 — `litert:2.1.5` in build.gradle.kts, FaceEmbedder.kt import updated. **Readelf verification pending** — Patrick runs `readelf -l liblitert_jni.so | grep -A1 LOAD` after next Android Studio build. `p_align: 0x4000` = pass.
+7. **✓ 16KB page size — FULLY DONE July 17** — ML Kit done July 10 (face-detection 16.1.7, image-labeling 17.0.9). LiteRT code done July 16 (`litert:2.1.5`, import corrected July 17 to `org.tensorflow.lite.Interpreter`). Readelf COMPLETE July 17 — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358); all LOAD segments show `Align 0x4000`. PASS. Play Store submission unblocked.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -273,4 +308,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 16, 2026 | Version 22 | Upload every session | For full details use Master Summary v46*
+*Project Scout Quick Start | Last updated: July 17, 2026 | Version 23 | Upload every session | For full details use Master Summary v47*
