@@ -177,7 +177,10 @@ object TeachExtractor {
             return label to value
         }
 Regex("""\bmy ([a-z ]+?) is ([a-z ]+)""").find(s)?.let {
-            val label = FactKey.custom("favorite_" + it.groupValues[1].trim())
+            val rawLabel = it.groupValues[1].trim()
+            // Don't double-prefix: "my favorite color is X" → "favorite_color", not "favorite_favorite_color"
+            val label = if (rawLabel.startsWith("favorite")) FactKey.custom(rawLabel)
+                        else FactKey.custom("favorite_$rawLabel")
             val value = it.groupValues[2].trim()
                 .replaceFirstChar { c -> c.uppercase() }
             return label to value

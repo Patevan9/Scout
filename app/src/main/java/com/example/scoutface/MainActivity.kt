@@ -3078,11 +3078,12 @@ Respond only with Scout's next reply.
             "son_name" -> "son's name"
             "dog_name" -> "dog's name"
             else -> {
-                val s = if (key.endsWith("_name"))
-                    key.removeSuffix("_name").replace("_", " ") + "'s name"
+                // Collapse legacy double-prefix from old bug: "favorite_favorite_color" → "favorite_color"
+                val cleaned = if (key.startsWith("favorite_favorite_")) key.removePrefix("favorite_") else key
+                if (cleaned.endsWith("_name"))
+                    cleaned.removeSuffix("_name").replace("_", " ") + "'s name"
                 else
-                    key.replace("_", " ")
-                s
+                    cleaned.replace("_", " ")
             }
         }
 
