@@ -1,8 +1,16 @@
 # Project Scout — Quick Start
-**Last updated: July 17, 2026 | Version 23**
+**Last updated: July 18, 2026 | Version 24**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v47).
+For full technical details, use the Scout Master Summary (v48).
+
+---
+
+## July 18, 2026 — What Is New:
+
+⚠ **16KB page size — REOPENED, contradicted by real Fold 7 device evidence** — Android's own "Android App Compatibility" warning fired on Patrick's Fold 7 (Android 15) at app launch, listing **11 native libraries** as NOT 16KB aligned: `libLiteRt.so`, `libLiteRtClGlAccelerator.so`, `libface_detector_v2_jni.so`, `libimage_processing_util_jni.so`, `libmlkitcommonpipeline.so` (ML Kit), `libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so` (llama.cpp/ggml), and `libscout_llama.so`. This directly contradicts the July 17 "readelf VERIFIED PASS" claim below (for the exact file, `libLiteRt.so`, that check supposedly verified), the July 10 "ML Kit DONE" claim, and the July 7 "scout_llama.so confirmed working" claim. **Root cause, confirmed by reading `CMakeLists.txt` directly:** the `-Wl,-z,max-page-size=16384` linker flag from the July 7 fix only applies to the `scout_llama` build target — Scout's own thin JNI wrapper. `libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, and `libggml-cpu-android_armv8.2_2.so` are pre-built binaries checked directly into `app/src/main/jniLibs/arm64-v8a/` — CMakeLists.txt only links against them, it never compiles them, so the flag never reached them. Even `libscout_llama.so` itself is still failing on the real device, so the July 7 fix may never have actually taken effect (a stale native build cache is the leading suspect). The ML Kit and LiteRT "done" statuses were both based on checking an isolated artifact rather than the actual built and installed APK. **Real remaining work:** source or rebuild 16KB-aligned versions of the five prebuilt llama.cpp/ggml libraries, do a full clean rebuild to check whether the scout_llama.so flag is even taking effect, and re-verify ML Kit/LiteRT against the real built APK. **Play Store submission is NOT unblocked on the 16KB front** — every "FULLY DONE"/"PASS" claim below dated July 7 through July 17 regarding 16KB alignment is superseded by this entry.
+
+*(Previous session July 17: LiteRT import fix, "favorite favorite" bug fix, battery optimization prompt, thinking watchdog, people DB export — all still valid; only the 16KB claims below are affected)*
 
 ---
 
@@ -10,7 +18,7 @@ For full technical details, use the Scout Master Summary (v47).
 
 ✓ **LiteRT import corrected — build was broken** — July 16's change set the import to `com.google.ai.edge.litert.Interpreter` (matching the Maven artifact name), but that class does not exist inside the LiteRT 2.1.5 AAR. LiteRT rebrands the Maven coordinates but the internal Java package is still `org.tensorflow.lite`. Fixed: `FaceEmbedder.kt` import reverted to `org.tensorflow.lite.Interpreter`. Build confirmed successful. Commit 83ed37f.
 
-✓ **16KB readelf verification COMPLETE — PASS** — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358). All LOAD segments show `Align 0x4000` (16KB). Also verified `libLiteRtClGlAccelerator.so` — same result. Both files PASS. 16KB compliance for LiteRT is now fully confirmed. Play Store submission is unblocked on the 16KB front.
+✓ **16KB readelf verification COMPLETE — PASS** — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358). All LOAD segments show `Align 0x4000` (16KB). Also verified `libLiteRtClGlAccelerator.so` — same result. Both files PASS. 16KB compliance for LiteRT is now fully confirmed. Play Store submission is unblocked on the 16KB front. ⚠ **REOPENED July 18** — contradicted by real Fold 7 device evidence. See the July 18 entry at the top of this file for the full correction.
 
 ✓ **"Favorite favorite" double-prefix bug fixed** — `TeachExtractor.kt` was unconditionally prepending `"favorite_"` to all `"my X is Y"` teaching patterns. When X was already "favorite color", the stored key became `"favorite_favorite_color"`. Fixed: `startsWith("favorite")` guard prevents double-prefix. Now "my favorite color is cyan" → key `"favorite_color"`. Commit 9b353a8.
 
@@ -69,7 +77,7 @@ For full technical details, use the Scout Master Summary (v47).
 ✓ **Terms of Use — in-app dialog** — `showTermsOfUse()` in SettingsActivity. Scrollable dialog with acceptance clause, service-as-is, third-party (Gemini), changes-to-terms. Settings → About Scout → Terms of Use. DONE July 11.
 ✓ **terms.html added to repo root** — Website Terms of Use for lippy-robotics.gt.tc. Play Store compliance clauses: acceptance block + changes-to-terms block. Commit b5735f5. DONE July 10.
 ✓ **ML Kit 16KB alignment — DONE** — face-detection 16.1.6 → 16.1.7 (arm64 confirmed aligned, ML Kit issue #986 Dec 2025). image-labeling 17.0.7 → 17.0.9 (fixed vision-common). Commit 60443f3. DONE July 10.
-✓ **LiteRT migration — FULLY DONE** — `build.gradle.kts` + `FaceEmbedder.kt` updated July 16–17. `litert:2.1.5` in build.gradle.kts; `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (the correct internal package). Readelf COMPLETE July 17 — all LOAD segments `Align 0x4000` (PASS). Play Store submission unblocked.
+✓ **LiteRT migration — FULLY DONE** — `build.gradle.kts` + `FaceEmbedder.kt` updated July 16–17. `litert:2.1.5` in build.gradle.kts; `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (the correct internal package). Readelf COMPLETE July 17 — all LOAD segments `Align 0x4000` (PASS). Play Store submission unblocked. ⚠ **REOPENED July 18** — contradicted by real Fold 7 device evidence. See the July 18 entry at the top of this file for the full correction.
 
 *(Previous session July 7: 16KB scout_llama.so fix, bootstrapModelFile, head-turn amplitude, thinking expression — all DONE)*
 
@@ -77,7 +85,7 @@ For full technical details, use the Scout Master Summary (v47).
 
 ## July 7, 2026 — What Is New:
 
-✓ **16KB page alignment fix confirmed** — `scout_llama.so` now builds with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels. Confirmed working on both A32 and Fold 7.
+✓ **16KB page alignment fix confirmed** — `scout_llama.so` now builds with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels. Confirmed working on both A32 and Fold 7. ⚠ **REOPENED July 18** — contradicted by real Fold 7 device evidence. See the July 18 entry at the top of this file for the full correction.
 ✓ **bootstrapModelFile() added** — Scout auto-copies the TinyLlama model from external storage to filesDir on startup. Checks app-specific external dir first (no permission needed), then root /sdcard/ if READ_EXTERNAL_STORAGE is granted (Android ≤12). READ_EXTERNAL_STORAGE added to manifest with maxSdkVersion="32". Model file survives reinstalls automatically.
 ✓ **TinyLlama confirmed working on A32 and Fold 7** — Both devices tested with Online Features OFF. TinyLlama answers questions from local model. Primary brain confirmed.
 ✓ **Offline fallback message fixed** — When Online Features are deliberately OFF, Scout no longer says "having trouble connecting." Now says "I'm working offline right now, so that one's a bit beyond me."
@@ -236,7 +244,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-✓ **16KB page size — FULLY DONE** — ML Kit (July 10), LiteRT code (July 16), LiteRT import fix + readelf VERIFIED PASS (July 17). All libraries confirmed 16KB-aligned. Play Store submission unblocked.
+⚠ **16KB page size — REOPENED July 18** — Every native library in the app (11 total, including ML Kit, LiteRT, and the llama.cpp/ggml stack) fails Android's own alignment check on Patrick's real Fold 7. See the July 18 entry at the top of this file for the full correction and root cause. Play Store submission is blocked on this.
 ✓ **LiteRT import fix** — `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (correct internal package for litert:2.1.5). Build confirmed. July 17.
 ✓ **"Favorite favorite" bug fixed** — TeachExtractor double-prefix eliminated. New facts stored correctly as `"favorite_color"` not `"favorite_favorite_color"`. keyToHuman() collapses old keys for readback. DB migration cleans up existing bad entries on next launch. July 17.
 ✓ **Battery optimization prompt** — Fires 8 seconds after first boot, takes user to system setting to exclude Scout from battery optimization. One-time only. July 17.
@@ -266,7 +274,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **✓ 16KB page size — FULLY DONE July 17** — ML Kit done July 10 (face-detection 16.1.7, image-labeling 17.0.9). LiteRT code done July 16 (`litert:2.1.5`, import corrected July 17 to `org.tensorflow.lite.Interpreter`). Readelf COMPLETE July 17 — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358); all LOAD segments show `Align 0x4000`. PASS. Play Store submission unblocked.
+7. **⚠ 16KB page size — REOPENED July 18, now the top blocker** — Real Fold 7 testing showed all 11 native libraries failing Android's own alignment check, contradicting the July 7/10/17 "done" claims. Root cause: the 16KB linker flag only ever reached `scout_llama.so`; the five prebuilt llama.cpp/ggml libraries in `jniLibs/` were never touched by it. Needs a dedicated session to source/rebuild aligned libraries and re-verify against a real built APK — see July 18 entry above.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -308,4 +316,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 17, 2026 | Version 23 | Upload every session | For full details use Master Summary v47*
+*Project Scout Quick Start | Last updated: July 18, 2026 | Version 24 | Upload every session | For full details use Master Summary v48*
