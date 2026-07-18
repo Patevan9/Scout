@@ -110,6 +110,8 @@ import java.util.concurrent.ExecutorService
 
 import java.util.concurrent.Executors
 
+import java.util.concurrent.TimeUnit
+
 import java.util.concurrent.atomic.AtomicBoolean
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -271,6 +273,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // value when they launch and discard their reply if it no longer matches — prevents
     // a slow generation from firing after a newer question has already been answered.
     private var llamaQueryGeneration = 0L
+
+    // Single-thread executor for LlamaEngine.generate() calls. A raw Thread per call let
+    // two generations run concurrently against the native engine (the generation counter
+    // above only discarded the stale *reply*, it never stopped the stale *inference*).
+    // Routing through one executor serializes calls, and shutdownSystems() can await its
+    // termination before LlamaEngine.free() so free() can't race an in-flight generate().
+    private val llamaExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
 
@@ -615,6 +624,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    override fun onPause() {
+
+        super.onPause()
+
+        // Scout is no longer visible — stop listening and stop the recognizer watchdog
+        // from destroying/recreating the recognizer in the background. Without this,
+        // the watchdog (recognizerWatchdog) keeps rescheduling itself every
+        // RECOGNIZER_WATCHDOG_MS forever, regardless of foreground state.
+        stopListeningSafe()
+        handler.removeCallbacks(recognizerWatchdog)
+
+    }
+
     override fun onResume() {
 
         super.onResume()
@@ -631,9 +653,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         resumeSystems()
 
+        // Re-arm the watchdog that onPause() stopped.
+        setupRecognizerWatchdog()
+
     }
 
     private fun shutdownSystems() {
+
+        // The activity is going away for good — cancel every pending Handler callback
+        // (recognizerWatchdog's reschedule chain, the 90s tryLoadOfflineBrain() load,
+        // captionHideRunnable, etc.) so nothing fires against state that's about to be
+        // torn down below.
+        try {
+            handler.removeCallbacksAndMessages(null)
+        } catch (_: Exception) {
+        }
 
         try {
 
@@ -730,6 +764,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (_: Exception) {
 
             }
+
+        } catch (_: Exception) {
+
+        }
+
+        // Stop accepting new generations and wait briefly for any in-flight
+        // LlamaEngine.generate() call to return before freeing the native engine.
+        // Freeing while a generation is still running is a native-crash risk.
+        try {
+
+            llamaExecutor.shutdown()
+            llamaExecutor.awaitTermination(5, TimeUnit.SECONDS)
 
         } catch (_: Exception) {
 
@@ -2609,6 +2655,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         wantListening = false
 
+        // Captured before isThinking is cleared below — the delay `when` needs to know
+        // whether Scout *was* thinking, not his state after this function already reset it.
+        val wasThinking = isThinking
+
         isThinking = false
         thinkingStartedMs = 0L
         isSpeaking = true
@@ -2634,7 +2684,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val delay = when {
 
-            isThinking -> 650L
+            wasThinking -> 650L
 
             text.startsWith("Hmm", ignoreCase = true) -> 340L
 
@@ -2847,7 +2897,11 @@ Respond only with Scout's next reply.
             diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
             val llamaGenStart = System.currentTimeMillis()
 
-            Thread {
+            // Runs on llamaExecutor (single-thread) instead of a raw Thread — serializes
+            // back-to-back generations against the native engine instead of letting two
+            // run concurrently, and lets shutdownSystems() wait for this to finish before
+            // freeing the engine.
+            llamaExecutor.execute {
 
                 val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
 
@@ -2868,7 +2922,7 @@ Respond only with Scout's next reply.
                     }
                 }
 
-            }.start()
+            }
 
             return
 
@@ -3640,4 +3694,3 @@ Respond only with Scout's next reply.
     }
 
 }
-
