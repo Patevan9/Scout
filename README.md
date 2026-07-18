@@ -30,3 +30,28 @@ Internet connection for online features
 Optional AI API key for cloud-based intelligence
 Developer
 Created by Patrick Lippy through Lippy Robotics Lab.
+
+## Development with OpenAI
+
+Scout was developed with assistance from OpenAI tools throughout the project.
+
+### GPT-5
+GPT-5 was used as a development assistant to:
+- Brainstorm features and architecture
+- Review Kotlin and Android code
+- Help debug issues
+- Improve documentation
+- Refine user experience and interface ideas
+
+### Codex
+Codex was used to:
+- Assist with implementing Kotlin code
+- Suggest safe, incremental code changes
+- Review existing code for bugs and stability
+- Help troubleshoot Android-specific development issues
+
+OpenAI tools acted as development assistants throughout the project. Final design decisions, testing, integration, and implementation were performed by the developer.
+
+## Development Status
+
+Scout is currently in active development and is not yet feature complete. The project focuses on creating a privacy-first AI companion that performs as much processing locally on the device as possible while using cloud AI only when needed.
