@@ -29,7 +29,12 @@ object TeachExtractor {
         "now", "today", "then", "soon", "later", "again", "still", "next",
         "last", "already", "yet", "always", "never", "just", "only",
         "anymore", "sometimes", "often", "lately", "recently", "currently",
-        "here", "there", "away", "out", "up", "down"
+        "here", "there", "away", "out", "up", "down",
+        // Intensifiers/adverbs — "I am very tired", "that is really nice" must
+        // not register "very"/"really" as a name (root cause of a real bug:
+        // a false "Very" profile accumulated a full set of face embeddings).
+        "very", "really", "quite", "extremely", "totally", "pretty",
+        "so", "too", "kinda", "sorta"
     )
 
     fun extract(input: String): Pair<String, String>? {
