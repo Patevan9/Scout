@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 17, 2026 | Version 16**
+**What Scout needs to be worth $9.99 | Updated July 18, 2026 | Version 17**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -74,7 +74,7 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ **BOOT_NO_KEY phrases** — Replaced vague "online mode not configured" with actionable tip: "Open settings any time by sliding the screen to the right." DONE July 4.
 ✓ **CLAUDE.md** — Repo-root file documents git pull/push commands with full branch name, critical no-hardcoding rules, architecture notes. Persists across Claude session compaction. DONE July 4.
 ✓ **ModelDownloadActivity** — Portrait-only loading screen for TinyLlama model download. 39 humorous loading messages, ObjectAnimator slide animation, updateProgress() API. Ready for Play Asset Delivery wiring in a future session. DONE July 4.
-✓ **16KB page alignment fix confirmed** — scout_llama.so built with `-Wl,-z,max-page-size=16384`. Fixes dlopen failure on Samsung Linux 6.x kernels (Android 15). Confirmed working on A32 and Fold 7. DONE July 7.
+⚠ **16KB page alignment fix — REOPENED July 18** — Believed fixed July 7 (`-Wl,-z,max-page-size=16384` on scout_llama.so). Contradicted by real-device evidence: Android's own compatibility checker on Patrick's Fold 7 still flags `libscout_llama.so` as misaligned. The July 7 "confirmed working" claim was based on the app not crashing, not on an actual alignment check. See the full correction below.
 ✓ **bootstrapModelFile() — auto-copy on startup** — Scout copies the TinyLlama model from app-specific external storage to filesDir automatically. No more "model not found" after reinstall. READ_EXTERNAL_STORAGE added to manifest with maxSdkVersion="32" for Android ≤12 fallback. DONE July 7.
 ✓ **TinyLlama confirmed working on A32 and Fold 7** — Both devices tested with Online Features OFF. TinyLlama answers questions. Primary brain confirmed operational. DONE July 7.
 ✓ **Offline fallback message fixed** — When user deliberately turns off Online Features, Scout says "I'm working offline" not "having trouble connecting." DONE July 7.
@@ -90,7 +90,7 @@ Everything on this list makes him worth $9.99 to a family who has never met him 
 ✓ **LiteRT migration — code done (readelf pending)** — `app/build.gradle.kts`: replaced `org.tensorflow:tensorflow-lite:2.17.0` with `com.google.ai.edge.litert:litert:2.1.5`. `FaceEmbedder.kt`: import changed `org.tensorflow.lite.Interpreter` → `com.google.ai.edge.litert.Interpreter`. Drop-in replacement — same API, no logic changes. Alignment confirmed in 2.1.x line per GitHub issue #6299. ⚠ Readelf verification still required (Patrick's task) — run `readelf -l liblitert_jni.so | grep -A1 LOAD` after next Android Studio build; `p_align: 0x4000` = pass. DONE July 16 (code); readelf pending.
 ✓ **Face recognition accuracy — 3 root-cause bugs fixed** — Root cause of the repeated Diana/Elijah confusion found and fixed in `PeopleDb.kt` and `MainActivity.kt`. (1) Margin check: `findBestMatchName` now requires the top candidate to lead the second by ≥ 0.08f — Scout says nothing rather than guessing when two people score similarly. (2) Profile pollution gate: `CONFIDENT_EMBED_THRESHOLD = 0.72f` in `MainActivity` — embeddings added to a person's profile only when match score is ≥ 0.72f (well above the 0.65f floor), preventing borderline matches from corrupting profiles. (3) Rolling window at cap: when a person has 12 stored embeddings, the most-redundant one (highest cosine similarity to the incoming) is replaced — profiles stay diverse as lighting and angles change. `forgetPerson` now also clears `lastFaceEmbedding` for a clean re-introduction. New functions: `findBestMatchNameWithScore()`, `scoreByPerson()`. DONE July 16.
 ✓ **LiteRT import corrected — build was broken** — `FaceEmbedder.kt` import was set to `com.google.ai.edge.litert.Interpreter` (July 16), but that class does not exist inside the LiteRT AAR at runtime. Reverted to `org.tensorflow.lite.Interpreter` (the correct internal package). Build confirmed successful. Commit 83ed37f. DONE July 17.
-✓ **16KB page size — FULLY DONE** — ML Kit confirmed July 10 (face-detection 16.1.7, image-labeling 17.0.9). LiteRT code done July 16 (litert:2.1.5). Readelf verified July 17 — Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358); all LOAD segments show `Align 0x4000`. Both `libLiteRt.so` and `libLiteRtClGlAccelerator.so` PASS. Play Store submission unblocked. DONE July 17.
+⚠ **16KB page size — REOPENED July 18: real-device evidence contradicts this** — The July 17 "FULLY DONE" claim below was wrong. Android's own "Android App Compatibility" warning fired on Patrick's Fold 7 (Android 15), listing 11 native libraries as NOT 16KB aligned — every native library in the app, including `libLiteRt.so` itself (the one readelf supposedly verified), ML Kit's `libface_detector_v2_jni.so`/`libimage_processing_util_jni.so`/`libmlkitcommonpipeline.so`, and the entire llama.cpp/ggml stack (`libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so`, `libscout_llama.so`). Root cause found in `CMakeLists.txt`: the 16KB linker flag only applies to `scout_llama.so`, Scout's own thin JNI wrapper — the five llama.cpp/ggml libraries are pre-built binaries checked into `jniLibs/arm64-v8a/` that Scout's build never compiles, so the flag never reached them. Full corrected status is in the Play Store Listing section below. **Play Store submission is NOT unblocked on the 16KB front.**
 ✓ **"Favorite favorite" double-prefix bug fixed** — TeachExtractor.kt was doubling the `"favorite_"` prefix on keys like "favorite color", producing `"favorite_favorite_color"`. Fixed with `startsWith("favorite")` guard. `keyToHuman()` in `handleWhatYouLearnedQuery()` collapses old double-prefix keys for correct readback. DB migration deletes all `"favorite_favorite_%"` entries on next launch (cleans up TeachExtractor pollution and a TTS self-echo entry). Commits 9b353a8, e24fad9. DONE July 17.
 ✓ **TruthDb `deleteFact()` + `deleteFactsWithKeyLike()`** — Two new targeted delete methods for the truth DB. Used by the DB migration; available for future cleanup needs. Commit e24fad9. DONE July 17.
 ✓ **Battery optimization prompt** — `checkBatteryOptimization()` fires 8 seconds after first boot. Uses `PowerManager.isIgnoringBatteryOptimizations()` + `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` to take users directly to the battery optimization setting. One-time (prefs-guarded). `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission added to AndroidManifest. Commit 1abcee1. DONE July 17.
@@ -177,11 +177,28 @@ Required to submit to Google Play.
 - Content rating questionnaire — Scout is family-safe. Straightforward.
 - Short description — 60 characters max: 'A calm AI companion for your whole family. Private. Local. Yours.'
 
-**✓ 16KB page size — FULLY DONE July 17**
+**⚠ 16KB page size — REOPENED July 18: NOT done, contradicted by real-device evidence**
 
-- `mlkit:face-detection:16.1.7` ✓ — arm64-v8a confirmed 16KB aligned. DONE July 10.
-- `mlkit:image-labeling:17.0.9` ✓ — arm64 aligned. DONE July 10.
-- `com.google.ai.edge.litert:litert:2.1.5` ✓ — code done July 16; import corrected July 17 (`org.tensorflow.lite.Interpreter`); readelf VERIFIED July 17. Patrick ran `llvm-readelf.exe -l libLiteRt.so` on Windows (NDK 28.2.13676358). All LOAD segments `Align 0x4000`. `libLiteRt.so` and `libLiteRtClGlAccelerator.so` both PASS. Play Store submission unblocked.
+Patrick's Samsung Fold 7 (Android 15) shows Android's own "Android App Compatibility" dialog at launch — a live OS-level ELF alignment check, more authoritative than any of the isolated checks below. It lists **11 native libraries** as failing 16KB alignment:
+
+- `libLiteRt.so` — Unknown error (this is the exact file the July 17 readelf check reported as PASS — that check evidently did not reflect what's actually bundled in the built app)
+- `libLiteRtClGlAccelerator.so` — Unknown error
+- `libface_detector_v2_jni.so` — Unknown error (ML Kit — separately marked "done" July 10)
+- `libimage_processing_util_jni.so` — LOAD segment not aligned (ML Kit)
+- `libmlkitcommonpipeline.so` — Unknown error (ML Kit)
+- `libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so` — Unknown error (the TinyLlama/llama.cpp native stack)
+- `libscout_llama.so` — Unknown error (Scout's own JNI wrapper — the one library the July 7 fix specifically targeted)
+
+**Root cause, confirmed by reading `CMakeLists.txt` directly:** the `-Wl,-z,max-page-size=16384` linker flag from the July 7 fix is applied only to the `scout_llama` build target. `libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, and `libggml-cpu-android_armv8.2_2.so` are **pre-built binaries checked directly into `app/src/main/jniLibs/arm64-v8a/`** — CMakeLists.txt only links against them (`-lllama -lllama-common -lggml ...`), it never compiles them, so the flag has no way to reach them. Even `libscout_llama.so` itself is still failing on the real device, meaning the July 7 fix may never have actually taken effect (a stale native build cache is the leading suspect — the flag is present in the source but the .so may not have been rebuilt since).
+
+The ML Kit and LiteRT "done"/"verified" statuses were both based on checking an isolated artifact (a Maven AAR, an extracted library) rather than the actual built and installed APK — this real-device dialog is the first check that's actually looked at what ships.
+
+**Real remaining work, not yet started:**
+1. Source or rebuild 16KB-aligned versions of the five prebuilt llama.cpp/ggml libraries — either a newer upstream llama.cpp release built with alignment support, or a from-source NDK rebuild with the linker flag applied throughout.
+2. Do a full clean rebuild and re-check `libscout_llama.so` specifically, to rule out a stale build artifact before assuming the flag itself is insufficient.
+3. Re-verify ML Kit and LiteRT against the real built APK's bundled `.so` files, not an isolated AAR.
+
+**Play Store submission is blocked on the 16KB front. This is not a quick fix — it needs a dedicated session with real device/build verification at each step, not another isolated-source claim.**
 
 ---
 
@@ -349,12 +366,12 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is now fully verified — Play Store submission is unblocked on that front. The gap between today and the Play Store is focused sessions — not months.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is REOPENED as of July 18 — real-device testing on the Fold 7 showed every native library in the app failing Android's own compatibility check, contradicting the July 17 "fully done" status. The gap between today and the Play Store is focused sessions — not months — but 16KB is now the most concrete blocker on the list.
 
-**Next session: Identify "Very" in people DB (Patrick runs "Scout, export your brain" and shares new JSON), tighten TTS self-echo guard, Open Source Credits screen, Play Store listing, Fold 7 stability testing.**
+**Next session: 16KB alignment — source/rebuild 16KB-aligned llama.cpp/ggml libraries and re-verify against a real built APK (see Play Store Listing section). Also: tighten TTS self-echo guard, Open Source Credits screen, Play Store listing content, Fold 7 stability testing.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 17, 2026 | Version 16 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 18, 2026 | Version 17 | For Patrick, Diana, Elijah, and Scout*
