@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 18, 2026 | Version 17**
+**What Scout needs to be worth $9.99 | Updated July 18, 2026 | Version 18**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -119,7 +119,7 @@ These are the real blockers. Scout cannot ship without these.
 
 - Full 5-screen OnboardingActivity.kt built. First-boot redirect in MainActivity.onCreate().
 - currentPage is the single source of truth for dots and counter — not hardcoded in two places.
-- finishOnboarding() defaults new installs to offline mode (gemini_enabled=false in scout_memory).
+- finishOnboarding() defaults new installs to offline mode (gemini_enabled=false).
 
 ### 4. Fold 7 stability testing — Ongoing
 
@@ -199,6 +199,30 @@ The ML Kit and LiteRT "done"/"verified" statuses were both based on checking an 
 3. Re-verify ML Kit and LiteRT against the real built APK's bundled `.so` files, not an isolated AAR.
 
 **Play Store submission is blocked on the 16KB front. This is not a quick fix — it needs a dedicated session with real device/build verification at each step, not another isolated-source claim.**
+
+**⚠ UPDATE, same day — root cause partially wrong, corrected below.** The claim above (that the five prebuilt llama.cpp/ggml libraries are unaligned at the source level) does not hold up. Running `readelf -lW` directly against the actual files checked into `app/src/main/jniLibs/arm64-v8a/` in this repo shows:
+
+```
+libllama.so                      LOAD ... Align 0x4000
+libllama-common.so               LOAD ... Align 0x4000
+libggml.so                       LOAD ... Align 0x4000
+libggml-base.so                  LOAD ... Align 0x4000
+libggml-cpu-android_armv8.2_2.so LOAD ... Align 0x4000
+```
+
+`0x4000` = 16384 bytes = 16KB. All five are **already ELF-aligned** — this was checked against the real binary files in the repo, not a claim or a doc. These libraries' naming (`libggml-cpu-android_armv8.2_2.so`) matches llama.cpp's official Android CI output exactly (`build-android.yml` builds arm64 with `GGML_CPU_ALL_VARIANTS=ON` via NDK 29.0.14206865 — well past the NDK r28 threshold where 16KB alignment is the compiled default per Google's own docs), so these were almost certainly pulled from an official [ggml-org/llama.cpp release](https://github.com/ggml-org/llama.cpp/releases), not built by Scout — and that upstream build is already compliant.
+
+This also explains a detail in the Fold 7 dialog that was glossed over the first time: `libimage_processing_util_jni.so` is the *only* library tagged with the specific message "LOAD segment not aligned" (a real ELF `p_align` failure). Every other library — including these five — gets a generic "Unknown error," a different failure class entirely.
+
+**Corrected hypothesis:** since the ELF files themselves are fine, the 10 "Unknown error" failures are most likely an **APK packaging** issue (whether `.so` entries are stored uncompressed and page-aligned inside the installed zip — separate from each library's own internal alignment) or specific to how a **debuggable** build installs from Android Studio — the dialog explicitly says the warning only fires for debuggable apps under test. `libscout_llama.so`'s own alignment is still unverified since nobody has run `readelf` against a fresh compiled build.
+
+**Corrected remaining work — do this instead of "rebuild the libraries":**
+1. Do a clean **release** build (not a debug run from Android Studio) and side-load that APK. Check whether the same 10 "Unknown error" libraries clear once it's not a debug install.
+2. If they still fail on a release build, run `zipalign -c -P 16 -v 4` against the actual built APK — that checks zip-level page alignment, a different property than each library's internal ELF `p_align`.
+3. `libimage_processing_util_jni.so` is the one library with a confirmed real ELF alignment defect — that one needs an actual ML Kit dependency version bump, not a packaging fix.
+4. Run `readelf -lW` on the freshly compiled `libscout_llama.so` after a clean build to confirm whether its own alignment is actually correct — this is the one native-stack library that has never been directly checked.
+
+**Do not spend a session trying to source/rebuild llama.cpp for 16KB alignment — the evidence shows that specific fix isn't needed. Start with a release-build install test instead.**
 
 ---
 
@@ -366,12 +390,12 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is REOPENED as of July 18 — real-device testing on the Fold 7 showed every native library in the app failing Android's own compatibility check, contradicting the July 17 "fully done" status. The gap between today and the Play Store is focused sessions — not months — but 16KB is now the most concrete blocker on the list.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is REOPENED as of July 18 — real-device testing on the Fold 7 showed 11 native libraries failing Android's own compatibility check, contradicting the July 17 "fully done" status. A same-day follow-up check found 5 of those 6 llama.cpp/ggml libraries are actually already ELF-aligned, so the real suspect is now APK packaging on debug installs, not source-level rebuilds — see the Play Store Listing section for the corrected plan. The gap between today and the Play Store is focused sessions — not months — but 16KB is still the most concrete blocker on the list.
 
-**Next session: 16KB alignment — source/rebuild 16KB-aligned llama.cpp/ggml libraries and re-verify against a real built APK (see Play Store Listing section). Also: tighten TTS self-echo guard, Open Source Credits screen, Play Store listing content, Fold 7 stability testing.**
+**Next session: 16KB alignment — build a release APK (not debug), test it on the Fold 7, and run `zipalign -c -P 16 -v 4` against it to check packaging-level alignment; also confirm `libimage_processing_util_jni.so`'s dependency bump and check `libscout_llama.so`'s own alignment on a fresh build (see Play Store Listing section for the full corrected plan). Also: tighten TTS self-echo guard, Open Source Credits screen, Play Store listing content, Fold 7 stability testing.**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 18, 2026 | Version 17 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 18, 2026 | Version 18 | For Patrick, Diana, Elijah, and Scout*
