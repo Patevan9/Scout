@@ -1,8 +1,14 @@
 # Project Scout — Quick Start
-**Last updated: July 18, 2026 | Version 24**
+**Last updated: July 18, 2026 | Version 25**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v48).
+For full technical details, use the Scout Master Summary (v49).
+
+---
+
+## July 18, 2026 (Later Same Day) — 16KB Root Cause Refined:
+
+⚠ **Correction to the entry directly below: 5 of the 6 llama.cpp/ggml libraries are already ELF-aligned.** Running `readelf -lW` directly against the actual files checked into `app/src/main/jniLibs/arm64-v8a/` in this repo (not a doc claim — the real binaries) shows `libllama.so`, `libllama-common.so`, `libggml.so`, `libggml-base.so`, and `libggml-cpu-android_armv8.2_2.so` all have `Align 0x4000` (16384 bytes = 16KB) on every LOAD segment. These libraries were almost certainly pulled from an official [ggml-org/llama.cpp release](https://github.com/ggml-org/llama.cpp/releases) — their naming matches llama.cpp's own Android CI output exactly, which builds via NDK 29.0.14206865 (well past NDK r28, where Google's docs confirm 16KB alignment is the compiled-in default) — so the upstream build is already compliant. This also explains why the Fold 7 dialog tags `libimage_processing_util_jni.so` alone with the specific "LOAD segment not aligned" message while every other library (including these five) gets a generic "Unknown error" — two different failure classes. **Revised hypothesis:** the real suspect for the 10 "Unknown error" failures is APK packaging (whether `.so` entries are stored uncompressed and page-aligned in the installed zip) or something specific to how a **debuggable** build installs from Android Studio — not source-level misalignment. `libscout_llama.so`'s own alignment is still unverified (nobody has run `readelf` on a fresh compiled build). **Revised next steps:** (1) build a **release** APK, not a debug install, and re-test on the Fold 7; (2) if it still fails, run `zipalign -c -P 16 -v 4` against the built APK to check zip-level alignment; (3) `libimage_processing_util_jni.so` needs an actual ML Kit version bump — that's the one confirmed real defect; (4) check `libscout_llama.so`'s alignment on a fresh build. **Do not spend a session rebuilding llama.cpp from source for 16KB — the evidence says that's not the fix.**
 
 ---
 
@@ -244,7 +250,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-⚠ **16KB page size — REOPENED July 18** — Every native library in the app (11 total, including ML Kit, LiteRT, and the llama.cpp/ggml stack) fails Android's own alignment check on Patrick's real Fold 7. See the July 18 entry at the top of this file for the full correction and root cause. Play Store submission is blocked on this.
+⚠ **16KB page size — REOPENED July 18, root cause refined** — 11 native libraries fail Android's own alignment check on Patrick's real Fold 7, but a same-day follow-up check found 5 of the 6 llama.cpp/ggml libraries are actually already ELF-aligned — the real suspect is APK packaging on debug installs, not source rebuilds. See the "Later Same Day" entry at the top of this file. Play Store submission is still blocked on this pending a release-build test.
 ✓ **LiteRT import fix** — `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (correct internal package for litert:2.1.5). Build confirmed. July 17.
 ✓ **"Favorite favorite" bug fixed** — TeachExtractor double-prefix eliminated. New facts stored correctly as `"favorite_color"` not `"favorite_favorite_color"`. keyToHuman() collapses old keys for readback. DB migration cleans up existing bad entries on next launch. July 17.
 ✓ **Battery optimization prompt** — Fires 8 seconds after first boot, takes user to system setting to exclude Scout from battery optimization. One-time only. July 17.
@@ -274,7 +280,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **⚠ 16KB page size — REOPENED July 18, now the top blocker** — Real Fold 7 testing showed all 11 native libraries failing Android's own alignment check, contradicting the July 7/10/17 "done" claims. Root cause: the 16KB linker flag only ever reached `scout_llama.so`; the five prebuilt llama.cpp/ggml libraries in `jniLibs/` were never touched by it. Needs a dedicated session to source/rebuild aligned libraries and re-verify against a real built APK — see July 18 entry above.
+7. **⚠ 16KB page size — REOPENED July 18, root cause refined, still the top blocker** — Real Fold 7 testing showed 11 native libraries failing Android's own alignment check, contradicting the July 7/10/17 "done" claims. A same-day follow-up found 5 of the 6 llama.cpp/ggml libraries are already ELF-aligned (verified with `readelf` against the actual files in the repo) — the real suspect is now APK packaging on debug installs, not a source rebuild. Needs a dedicated session: build a release APK, test on Fold 7, `zipalign -c` the result, and check `libscout_llama.so`'s own alignment fresh — see the "Later Same Day" entry above. `libimage_processing_util_jni.so` is the one confirmed real ELF defect and needs an ML Kit version bump.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -316,4 +322,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 18, 2026 | Version 24 | Upload every session | For full details use Master Summary v48*
+*Project Scout Quick Start | Last updated: July 18, 2026 | Version 25 | Upload every session | For full details use Master Summary v49*
