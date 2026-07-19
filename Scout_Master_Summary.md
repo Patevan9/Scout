@@ -1,8 +1,18 @@
 # Project Scout — Master Project Summary
-**Last updated: July 18, 2026 | Version 49**
+**Last updated: July 19, 2026 | Version 50**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 19, 2026 — 16KB Alignment CONFIRMED PASS on Real Release APK: What Changed Since Version 49
+
+✓ **16KB page size — RESOLVED, verified against the actual built release APK.** Patrick built a signed **release** APK (not a debug build) and ran Google's own `zipalign -c -P 16 -v 4` verification tool directly against it — the authoritative local check for this requirement. Full itemized result: `libLiteRt.so`, `libLiteRtClGlAccelerator.so`, `libface_detector_v2_jni.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so`, `libggml.so`, `libimage_processing_util_jni.so`, `libllama-common.so`, `libllama.so`, `libmlkitcommonpipeline.so`, and `libscout_llama.so` — all 11 previously-flagged libraries — each individually listed **`(OK)`**, with an overall result of **"Verification successful."** Separately, installing this release APK on the Fold 7 no longer triggers the "Android App Compatibility" 16KB dialog at all.
+
+**What this confirms about the July 18 investigation:** the dialog seen on July 18 was specific to the **debuggable** build — the dialog's own text says as much ("This warning is showing because this is a debuggable app which is currently being tested"). The five llama.cpp/ggml prebuilt libraries were correctly ELF-aligned all along (confirmed via `readelf` on July 18, later same day). `libimage_processing_util_jni.so`'s alignment was genuinely fixed by the July 10 ML Kit version bump — this zipalign pass is the first real confirmation that fix landed correctly in an actual build, not just an isolated AAR. The root cause really was the debug-build install path, exactly as hypothesized in the July 18 "Later Same Day" correction below.
+
+**Play Store submission is unblocked on the 16KB front.** This is the first claim anywhere in this entire 16KB investigation verified against the real shipped artifact using Google's own tool — not an isolated file, not a debug-only dialog, not an inference. Every prior "REOPENED"/"blocked" entry below (dated July 18) is superseded by this entry; those entries are left in place as a historical record of the investigation rather than deleted.
 
 ---
 
@@ -447,7 +457,7 @@ Support Scout screen designed and ready. Message: 'You’re not just supporting 
 ✓ **Startup diagnostics** — DONE July 4. TTS failure Toast + STT unavailability spoken warning at boot.
 ✓ **Onboarding flow** — DONE July 4. OnboardingActivity.kt, 5 screens, first-boot redirect in MainActivity.
 ■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
-⚠ **16KB page size — REOPENED July 18, root cause refined same day** — Real Fold 7 testing showed 11 native libraries in the app failing Android's own alignment check, contradicting the July 7/10/17 "done" claims. A same-day follow-up found 5 of the 6 llama.cpp/ggml libraries are already ELF-aligned (verified directly with readelf) — the real suspect is APK packaging on debug installs, not a source rebuild. See the "Later Same Day" section at the top of this document. Play Store submission is blocked pending a release-build test — it is still the top launch blocker.
+✓ **16KB page size — RESOLVED July 19** — Confirmed via `zipalign -c -P 16 -v 4` against a real signed release APK: all 11 previously-flagged libraries pass individually, "Verification successful" overall. The July 18 dialog only ever fired on debuggable installs, not a real defect. See the July 19 section at the top of this document. No longer a launch blocker.
 ■ **Play Asset Delivery (PAD) wiring** — ModelDownloadActivity is built and ready. Wiring PAD to trigger the download screen and call updateProgress() is a future session.
 
 ✓ **Privacy Policy** — DONE July 11. In-app scrollable dialog (Settings → About Scout).
@@ -517,12 +527,13 @@ Do not act on this area without his input. His expertise is the right lens for t
 | STT name recognition | 'Scout' misheard as 'Gal', 'Scott', 'Out'. Partially handled by wake word filter. |
 | Live news | Neither brain reads live news. Future news feed needed. |
 | ScoutFaceView dead code | Line 1023: doubled condition. Line 709: unused browAsym. Harmless but messy. |
-| 16KB page size | ⚠ REOPENED July 18, root cause refined same day. Android's own compatibility check on Patrick's real Fold 7 flags 11 native libraries as failing — contradicting every prior "done" claim. A same-day follow-up check found 5 of the 6 llama.cpp/ggml libraries are actually already ELF-aligned (verified with readelf against the real files in the repo); the real suspect is now APK packaging on debug installs, not a source rebuild. See "Later Same Day" section at top. Play Store submission blocked pending a release-build test. |
+| 16KB page size | ✓ RESOLVED July 19. Confirmed via `zipalign -c -P 16 -v 4` against a real signed release APK — all 11 previously-flagged libraries pass individually, "Verification successful" overall. The July 18 dialog only ever fired on debuggable installs, not a real defect. See July 19 section at top. Play Store submission unblocked. |
 
 ---
 
 ## 7d. Session Log
 
+- July 19: 16KB alignment CONFIRMED PASS — built a signed release APK (not debug), ran `zipalign -c -P 16 -v 4` against it directly. All 11 previously-flagged native libraries pass individually (OK), overall "Verification successful." Installing the release APK on the Fold 7 no longer triggers the compatibility dialog at all, confirming the dialog was debug-build-specific as hypothesized. Play Store submission unblocked on the 16KB front. Separately diagnosed and documented (not yet fixed): `ModelDownloadActivity`'s `MODEL_DOWNLOAD_URL` is an unfilled placeholder, so its download flow can never complete, and it deletes any locally-staged model file before attempting to download — real TinyLlama delivery for a release build currently requires manually pushing the `.gguf` file into the app's external files directory via `adb push` after every fresh install. Summary updated to version 50.
 - June 5: IDENTITY intent + hardcoded responses. Weather offline fix. Total offline mode.
 - June 7: TinyLlama A32 crash stabilized. Identity routing expanded. Face direction locked.
 - June 8: Thinking expression built. Flexible Memory Planning Document created.
@@ -899,7 +910,7 @@ Two kinds of autonomy — both approved:
 | 19 | Open Source Credits — THIRD_PARTY_NOTICES.md started | In progress |
 | 20 | Weather API licensing | ✓ RESOLVED June 16 — switched to NWS, free for commercial use |
 | 21 | Play Store listing — description, screenshots, rating | Not started |
-| 22 | ⚠ 16KB page size — REOPENED July 18, root cause refined | Real Fold 7 device testing contradicts the July 17 "done" status — 11 native libraries fail Android's own alignment check. Same-day follow-up: 5 of the 6 llama.cpp/ggml libraries are already ELF-aligned (verified with readelf); real suspect is now APK packaging on debug installs. See "Later Same Day" section at top. Play Store submission blocked pending a release-build test. |
+| 22 | ✓ 16KB page size — RESOLVED July 19 | Confirmed via `zipalign -c -P 16 -v 4` against a real signed release APK — all 11 previously-flagged libraries pass individually, "Verification successful" overall. See July 19 section at top. Play Store submission unblocked. |
 
 ---
 
@@ -972,4 +983,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 18, 2026 | Version 49 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 19, 2026 | Version 50 | Single source of truth — upload every session*
