@@ -3132,27 +3132,36 @@ Respond only with Scout's next reply.
 
         val clean = qNorm.lowercase().trim()
 
-        val out = when {
-            clean.contains("tomorrow") ->
-                describeCalendarEvents(calendarReader.eventsTomorrow(), "tomorrow")
+        // "next event"/"next appointment" is an exact, unambiguous phrase — checked before
+        // the title-search regex below so "when is the next event" (no "my") is answered by
+        // the semantic next-event lookup, not mistaken for a literal title search.
+        val out = if (clean.contains("next event") || clean.contains("next appointment")) {
+            describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
+        } else {
+            // Checked before the bare day-keyword branches below — otherwise a title
+            // question that happens to end in a day word ("when is the vet appointment
+            // tomorrow") would get shadowed by the "tomorrow" check and list the whole day
+            // instead of answering about that one event. Trailing day words and a leading
+            // article are stripped from the captured keyword so the search term matches a
+            // plain event title ("Vet Appointment") instead of the full noisy phrase.
+            val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""")
+                .find(clean)?.groupValues?.get(1)?.trim()
+                ?.removeSuffix(" today")?.removeSuffix(" tomorrow")?.removeSuffix(" this week")
+                ?.removePrefix("the ")?.removePrefix("a ")?.removePrefix("an ")
+                ?.trim()
 
-            clean.contains("this week") ->
-                describeCalendarEvents(calendarReader.eventsThisWeek(), "this week")
-
-            clean.contains("next event") || clean.contains("next appointment") ->
-                describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
-
-            clean.contains("today") ->
-                describeCalendarEvents(calendarReader.eventsToday(), "today")
-
-            else -> {
-                val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""")
-                    .find(clean)?.groupValues?.get(1)?.trim()
-                if (!keyword.isNullOrBlank()) {
+            when {
+                !keyword.isNullOrBlank() ->
                     describeCalendarTitleMatch(calendarReader.findByTitle(keyword), keyword)
-                } else {
+
+                clean.contains("tomorrow") ->
+                    describeCalendarEvents(calendarReader.eventsTomorrow(), "tomorrow")
+
+                clean.contains("this week") ->
+                    describeCalendarEvents(calendarReader.eventsThisWeek(), "this week")
+
+                else ->
                     describeCalendarEvents(calendarReader.eventsToday(), "today")
-                }
             }
         }
 
