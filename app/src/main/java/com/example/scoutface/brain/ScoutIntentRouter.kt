@@ -208,6 +208,9 @@ clean.contains("what's my") ||
 clean.contains("do you know my") ||
 clean.contains("do you remember my") ||
 clean.contains("what was my") ||
+clean.contains("when is my") ||
+clean.contains("when's my") ||
+clean.contains("when was my") ||
 clean.contains("tell me my") ||
 clean.contains("what will you remember") ||
 clean.contains("what do you remember") ||
