@@ -19,13 +19,17 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
 
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
 
+    // Returns true if this call actually changed something (a brand-new fact, or an
+    // existing one whose value changed) — false if it's a duplicate re-teach of the
+    // same value. Callers use this to decide whether it's worth journaling.
     fun upsertFact(
         entity: String,
         factKey: String,
         value: String,
         confidence: Float,
         source: String
-    ) {
+    ): Boolean {
+        val existing = getFactValue(entity, factKey)
         val now = System.currentTimeMillis()
         writableDatabase.execSQL(
             "INSERT INTO entity_memory(entity, fact_key, value, confidence, source, last_confirmed, created_at, updated_at) " +
@@ -42,6 +46,7 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
                 now
             )
         )
+        return existing == null || !existing.equals(value, ignoreCase = true)
     }
 
     fun getFactValue(entity: String, factKey: String): String? {
