@@ -21,10 +21,10 @@ class ModelDownloadActivity : AppCompatActivity() {
 
     companion object {
         const val MODEL_FILENAME    = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-        // ⚠️ Fill this in before Play Store submission — host the GGUF file somewhere
-        // accessible (GitHub Releases, your server, etc.) and paste the direct download URL.
+        // Hosted as a GitHub Release asset on this repo. Re-upload and update this URL
+        // if the model file ever changes or the release is deleted.
         const val MODEL_DOWNLOAD_URL =
-            "https://PLACEHOLDER_FILL_IN_BEFORE_LAUNCH/$MODEL_FILENAME"
+            "https://github.com/Patevan9/Scout/releases/download/model-v1/$MODEL_FILENAME"
         private const val PREF_DOWNLOAD_ID = "model_download_id"
         // Minimum byte size for a valid Q4_K_M download — anything below this is truncated.
         const val MIN_MODEL_BYTES = 500_000_000L
