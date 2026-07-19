@@ -3444,6 +3444,18 @@ Respond only with Scout's next reply.
 
     }
 
+    // Stores a taught fact and, if it's genuinely new information (not a repeat of
+    // what Scout already knew), logs it to JournalDb for the memory reel — 'teaching'
+    // for a brand-new fact, 'correction' when an existing value actually changed.
+    private fun upsertFactAndJournal(factKey: String, value: String, subject: String? = null, weight: Int = 2) {
+        val hadPriorValue = truthDb.getFactValue(ENTITY_USER_PRIMARY, factKey) != null
+        val changed = truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+        if (!changed) return
+        val entryType = if (hadPriorValue) "correction" else "teaching"
+        val human = factKey.removePrefix("favorite_").replace("_", " ")
+        journalDb.add("Learned your $human is $value.", entryType, subject, weight)
+    }
+
     private fun handleTeaching(qNorm: String): Boolean {
 
         // "Scout, forget Elijah" / "forget Diana" — wipes a person's stored face
@@ -3479,7 +3491,7 @@ Respond only with Scout's next reply.
             // the dog, not a person. Re-route straight to DOG_NAME.
             if (factKey == FactKey.NAME && lastFaceCount == 0 &&
                 lastSceneLabels.any { it.first.lowercase() in setOf("dog", "puppy") }) {
-                truthDb.upsertFact(ENTITY_USER_PRIMARY, FactKey.DOG_NAME, value, 1.0f, "spoken_teach")
+                upsertFactAndJournal(FactKey.DOG_NAME, value, subject = value, weight = 3)
                 respond(Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value))
                 return true
             }
@@ -3532,7 +3544,7 @@ Respond only with Scout's next reply.
                     respond(Phrases.pickNamed("remember_name", Phrases.REMEMBER_NAME, value))
                     return true
                 }
-                truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+                upsertFactAndJournal(factKey, value, subject = value, weight = 3)
                 val embedding = lastFaceEmbedding
                 val targetHash: String? = if (embedding != null) {
                     peopleDb.findBestMatch(embedding) ?: lastFaceHashes.firstOrNull()
@@ -3549,7 +3561,12 @@ Respond only with Scout's next reply.
                 return true
             }
 
-            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+            val relationshipKeys = setOf(FactKey.WIFE_NAME, FactKey.SON_NAME, FactKey.DOG_NAME, "birthday", "anniversary")
+            upsertFactAndJournal(
+                factKey, value,
+                subject = if (factKey in setOf(FactKey.WIFE_NAME, FactKey.SON_NAME, FactKey.DOG_NAME)) value else null,
+                weight = if (factKey in relationshipKeys) 3 else 2
+            )
 
             if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
                 val faceRegistered = registerFamilyMemberFace(value)
