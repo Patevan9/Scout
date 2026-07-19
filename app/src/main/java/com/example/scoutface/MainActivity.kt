@@ -148,6 +148,8 @@ enum class IntentType {
 
     WEATHER,
 
+    CALENDAR,
+
     UNKNOWN
 
 }
@@ -200,6 +202,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val PREFS = "scout_memory"
 
     private val PREF_GEMINI_ENABLED = "gemini_enabled"
+
+    // Off by default — matches SettingsActivity's memPrefs key of the same name.
+    private val PREF_CALENDAR_ENABLED = "calendar_awareness_enabled"
 
     private val PREF_PRESENCE_MODE_ENABLED = "presence_mode_enabled"
 
@@ -469,6 +474,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var peopleDb: PeopleDb
 
     private lateinit var journalDb: JournalDb
+
+    private lateinit var calendarReader: CalendarReader
 
     private lateinit var diagDb: DiagnosticDb
     private lateinit var diagLog: DiagLog
@@ -1088,6 +1095,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         peopleDb = PeopleDb(this)
 
         journalDb = JournalDb(this)
+
+        calendarReader = CalendarReader(this)
 
         diagDb = DiagnosticDb(this)
         diagLog = DiagLog(diagDb)
@@ -3098,6 +3107,92 @@ Respond only with Scout's next reply.
 
     }
 
+    // =======================
+    // CALENDAR (read-only)
+    // =======================
+    // Purely reactive — only ever runs in response to a question the user just asked.
+    // No scheduling, no background checks, no unsolicited mentions of what's on the
+    // calendar. Gated by two independent checks, both required: the Settings toggle
+    // (app-level, checked first so a "no" here never even looks at OS permission) and
+    // the actual READ_CALENDAR grant (OS-level, re-checked live every time — never
+    // cached — so a permission revoked outside the app takes effect immediately).
+
+    private fun handleCalendarIntent(qNorm: String) {
+
+        if (!prefs.getBoolean(PREF_CALENDAR_ENABLED, false)) {
+            respond("I don't check calendars right now. You can turn that on in Settings if you'd like.")
+            return
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
+            != PackageManager.PERMISSION_GRANTED) {
+            respond("I don't have calendar access yet. You can turn that on in Settings.")
+            return
+        }
+
+        val clean = qNorm.lowercase().trim()
+
+        val out = when {
+            clean.contains("tomorrow") ->
+                describeCalendarEvents(calendarReader.eventsTomorrow(), "tomorrow")
+
+            clean.contains("this week") ->
+                describeCalendarEvents(calendarReader.eventsThisWeek(), "this week")
+
+            clean.contains("next event") || clean.contains("next appointment") ->
+                describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
+
+            clean.contains("today") ->
+                describeCalendarEvents(calendarReader.eventsToday(), "today")
+
+            else -> {
+                val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""")
+                    .find(clean)?.groupValues?.get(1)?.trim()
+                if (!keyword.isNullOrBlank()) {
+                    describeCalendarTitleMatch(calendarReader.findByTitle(keyword), keyword)
+                } else {
+                    describeCalendarEvents(calendarReader.eventsToday(), "today")
+                }
+            }
+        }
+
+        respond(out)
+
+    }
+
+    // Only title, start/end time, and all-day status are ever spoken — no description,
+    // attendees, or location, matching what CalendarReader reads from the provider.
+    private fun describeCalendarEvents(events: List<CalendarEvent>, whenLabel: String): String {
+        if (events.isEmpty()) return "You don't have anything on the calendar $whenLabel."
+        val fmt = SimpleDateFormat("h:mm a", Locale.US)
+        val parts = events.take(5).map { e ->
+            if (e.allDay) e.title else "${e.title} at ${fmt.format(Date(e.startMs))}"
+        }
+        return "Here's what's on the calendar $whenLabel: ${parts.joinToString(". ")}."
+    }
+
+    private fun describeNextCalendarEvent(event: CalendarEvent?, timeOnly: Boolean): String {
+        if (event == null) return "I don't see anything coming up on your calendar."
+        val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+        val fullFmt = SimpleDateFormat("h:mm a 'on' EEEE, MMMM d", Locale.US)
+        return when {
+            event.allDay -> "Your next event is ${event.title}, an all-day event."
+            timeOnly -> "Your next event, ${event.title}, is at ${timeFmt.format(Date(event.startMs))}."
+            else -> "Your next event is ${event.title}, at ${fullFmt.format(Date(event.startMs))}."
+        }
+    }
+
+    private fun describeCalendarTitleMatch(event: CalendarEvent?, keyword: String): String {
+        if (event == null) return "I don't see anything about $keyword on your calendar."
+        return if (event.allDay) {
+            val dateFmt = SimpleDateFormat("EEEE, MMMM d", Locale.US)
+            "${event.title} is on ${dateFmt.format(Date(event.startMs))}."
+        } else {
+            val fullFmt = SimpleDateFormat("h:mm a 'on' EEEE, MMMM d", Locale.US)
+            "${event.title} is at ${fullFmt.format(Date(event.startMs))}."
+        }
+    }
+
     private fun handleRecallIntent(qNorm: String) {
 
         val clean = qNorm.lowercase().trim()
@@ -3379,7 +3474,7 @@ Respond only with Scout's next reply.
             IntentType.IDENTITY, IntentType.RECALL_FACT,
             IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
             IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
-            IntentType.WEATHER -> true
+            IntentType.WEATHER, IntentType.CALENDAR -> true
             else -> false
         }
         if (isDirect) diagLog.logBrainStarted(DiagLog.BrainSource.DIRECT)
@@ -3437,6 +3532,8 @@ Respond only with Scout's next reply.
             IntentType.ASK_DOG_NAME -> handleAskDogNameIntent()
 
             IntentType.WEATHER -> weatherManager.fetchWeather(qNorm)
+
+            IntentType.CALENDAR -> handleCalendarIntent(qNorm)
 
             else -> handleUnknownIntent(qNorm)
 
@@ -3707,6 +3804,7 @@ Respond only with Scout's next reply.
         IntentType.TEACH_DOG_NAME  -> DiagLog.DiagIntent.TEACH_DOG_NAME
         IntentType.TEACH_MY_NAME   -> DiagLog.DiagIntent.TEACH_MY_NAME
         IntentType.WEATHER         -> DiagLog.DiagIntent.WEATHER
+        IntentType.CALENDAR        -> DiagLog.DiagIntent.CALENDAR
         IntentType.UNKNOWN         -> DiagLog.DiagIntent.UNKNOWN
     }
 
