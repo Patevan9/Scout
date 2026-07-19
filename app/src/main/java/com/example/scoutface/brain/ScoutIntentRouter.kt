@@ -203,6 +203,26 @@ clean.contains("go on the internet")
         }
 
         if (
+            clean.contains("what do i have today") ||
+            clean.contains("do i have anything today") ||
+            (clean.contains("today") && clean.contains("calendar")) ||
+            clean.contains("what is happening tomorrow") ||
+            (clean.contains("tomorrow") && clean.contains("calendar")) ||
+            (clean.contains("this week") && clean.contains("calendar")) ||
+            clean.contains("next event") ||
+            clean.contains("next appointment")
+        ) {
+            return IntentType.CALENDAR
+        }
+
+        // "when is Nick's vet appointment" / "what time is the school play" — calendar
+        // title search. Excludes "my" so personal facts (birthday, etc.) keep routing to
+        // RECALL_FACT below instead of being swallowed by this broader pattern.
+        Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""").find(clean)?.let {
+            if (it.groupValues[1].isNotBlank()) return IntentType.CALENDAR
+        }
+
+        if (
 clean.contains("what is my") ||
 clean.contains("what's my") ||
 clean.contains("do you know my") ||
