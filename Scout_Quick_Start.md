@@ -1,8 +1,14 @@
 # Project Scout — Quick Start
-**Last updated: July 18, 2026 | Version 25**
+**Last updated: July 19, 2026 | Version 26**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-For full technical details, use the Scout Master Summary (v49).
+For full technical details, use the Scout Master Summary (v50).
+
+---
+
+## July 19, 2026 — 16KB Alignment CONFIRMED PASS on Real Release APK:
+
+✓ **16KB page size — RESOLVED, verified against the actual built release APK.** Patrick built a signed **release** APK (not debug) and ran Google's own `zipalign -c -P 16 -v 4` verification tool directly against it. Result: **"Verification successful,"** with every one of the 11 previously-flagged native libraries individually listed `(OK)`: `libLiteRt.so`, `libLiteRtClGlAccelerator.so`, `libface_detector_v2_jni.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so`, `libggml.so`, `libimage_processing_util_jni.so`, `libllama-common.so`, `libllama.so`, `libmlkitcommonpipeline.so`, `libscout_llama.so`. Installing this release APK on the Fold 7 no longer shows the "Android App Compatibility" 16KB dialog at all. This confirms the July 18 "Corrected hypothesis" below was right: that dialog only ever fires for **debuggable** builds (its own text says so) — its July 18 appearance reflected the debug install, not a real defect. `libimage_processing_util_jni.so`'s alignment (the one library with a genuinely confirmed ELF defect) was fixed by the July 10 ML Kit version bump; this zipalign pass is the first real confirmation that fix landed correctly in an actual build. **Play Store submission is unblocked on the 16KB front** — the first claim in this whole investigation verified against the real shipped artifact with Google's own tool, not an isolated file or a debug-only dialog.
 
 ---
 
@@ -250,7 +256,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
 
 ## 5. Known Issues — Do Not Touch Without Discussion
 
-⚠ **16KB page size — REOPENED July 18, root cause refined** — 11 native libraries fail Android's own alignment check on Patrick's real Fold 7, but a same-day follow-up check found 5 of the 6 llama.cpp/ggml libraries are actually already ELF-aligned — the real suspect is APK packaging on debug installs, not source rebuilds. See the "Later Same Day" entry at the top of this file. Play Store submission is still blocked on this pending a release-build test.
+✓ **16KB page size — RESOLVED July 19** — Confirmed via `zipalign -c -P 16` against the real release APK: all 11 previously-flagged libraries pass, "Verification successful." See the July 19 entry at the top of this file. Play Store submission is unblocked on this front.
 ✓ **LiteRT import fix** — `FaceEmbedder.kt` uses `org.tensorflow.lite.Interpreter` (correct internal package for litert:2.1.5). Build confirmed. July 17.
 ✓ **"Favorite favorite" bug fixed** — TeachExtractor double-prefix eliminated. New facts stored correctly as `"favorite_color"` not `"favorite_favorite_color"`. keyToHuman() collapses old keys for readback. DB migration cleans up existing bad entries on next launch. July 17.
 ✓ **Battery optimization prompt** — Fires 8 seconds after first boot, takes user to system setting to exclude Scout from battery optimization. One-time only. July 17.
@@ -280,7 +286,7 @@ Scout should NOT feel: Excited. Scripted. Fake. Cartoonish. Hyperactive. Constan
    **✓ Terms of Use** — DONE July 10–11. In-app dialog + terms.html for website.
    **Open Source Credits** — Still needed. THIRD_PARTY_NOTICES.md started (MobileFaceNet done). Full in-app screen + website page required at launch.
 6. **Play Store listing** — description, screenshots, content rating.
-7. **⚠ 16KB page size — REOPENED July 18, root cause refined, still the top blocker** — Real Fold 7 testing showed 11 native libraries failing Android's own alignment check, contradicting the July 7/10/17 "done" claims. A same-day follow-up found 5 of the 6 llama.cpp/ggml libraries are already ELF-aligned (verified with `readelf` against the actual files in the repo) — the real suspect is now APK packaging on debug installs, not a source rebuild. Needs a dedicated session: build a release APK, test on Fold 7, `zipalign -c` the result, and check `libscout_llama.so`'s own alignment fresh — see the "Later Same Day" entry above. `libimage_processing_util_jni.so` is the one confirmed real ELF defect and needs an ML Kit version bump.
+7. **✓ 16KB page size — RESOLVED July 19** — Confirmed via `zipalign -c -P 16 -v 4` against a real signed release APK: all 11 previously-flagged libraries pass, "Verification successful." The July 18 dialog only ever fired on debuggable installs — see the July 19 entry at the top of this file. No longer a launch blocker.
 8. **Play Asset Delivery wiring** — ModelDownloadActivity is ready; PAD integration to trigger it is a future session.
 
 After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
@@ -322,4 +328,4 @@ After launch — Update 1.1 (Scout 1.1 — Growing Up) and beyond:
 
 ---
 
-*Project Scout Quick Start | Last updated: July 18, 2026 | Version 25 | Upload every session | For full details use Master Summary v49*
+*Project Scout Quick Start | Last updated: July 19, 2026 | Version 26 | Upload every session | For full details use Master Summary v50*
