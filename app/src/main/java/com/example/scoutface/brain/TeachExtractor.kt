@@ -160,6 +160,20 @@ object TeachExtractor {
         }
 
         // -------------------------
+        // BIRTHDAY / ANNIVERSARY
+        // Dates need to be stored in full, including the day number — the generic
+        // catch-all below only matches [a-z ], which silently truncates any date
+        // ("January 27th" → "January"). These also skip the "favorite_" auto-prefix
+        // since a birthday isn't a preference.
+        // -------------------------
+        Regex("""\bmy birthday is ([a-z0-9,'\-/\s]+)""").find(s)?.let {
+            return FactKey.custom("birthday") to cleanDateValue(it.groupValues[1])
+        }
+        Regex("""\b(?:our|my) anniversary is ([a-z0-9,'\-/\s]+)""").find(s)?.let {
+            return FactKey.custom("anniversary") to cleanDateValue(it.groupValues[1])
+        }
+
+        // -------------------------
         // FLEXIBLE — any relationship or fact
         // "my daughter's name is Sarah"
         // "my cat is named Whiskers"
@@ -181,13 +195,12 @@ object TeachExtractor {
             val value = cleanName(it.groupValues[2])
             return label to value
         }
-Regex("""\bmy ([a-z ]+?) is ([a-z ]+)""").find(s)?.let {
+Regex("""\bmy ([a-z ]+?) is ([a-z0-9,'\-/ ]+)""").find(s)?.let {
             val rawLabel = it.groupValues[1].trim()
             // Don't double-prefix: "my favorite color is X" → "favorite_color", not "favorite_favorite_color"
             val label = if (rawLabel.startsWith("favorite")) FactKey.custom(rawLabel)
                         else FactKey.custom("favorite_$rawLabel")
-            val value = it.groupValues[2].trim()
-                .replaceFirstChar { c -> c.uppercase() }
+            val value = cleanDateValue(it.groupValues[2])
             return label to value
         }
         Regex("""\bmy ([a-z ]+?) is ([a-z ]+)\b""").find(s)?.let {
@@ -202,5 +215,12 @@ Regex("""\bmy ([a-z ]+?) is ([a-z ]+)""").find(s)?.let {
 
     private fun cleanName(raw: String): String {
         return raw.trim().replaceFirstChar { it.uppercase() }
+    }
+
+    // Capitalizes each word — "january 27th" → "January 27th", "new york" → "New York".
+    private fun cleanDateValue(raw: String): String {
+        return raw.trim().split(" ").joinToString(" ") { w ->
+            w.replaceFirstChar { c -> c.uppercase() }
+        }
     }
 }
