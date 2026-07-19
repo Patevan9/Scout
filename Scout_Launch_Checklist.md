@@ -1,5 +1,5 @@
 # Project Scout — Play Store Launch Checklist
-**What Scout needs to be worth $9.99 | Updated July 18, 2026 | Version 18**
+**What Scout needs to be worth $9.99 | Updated July 19, 2026 | Version 19**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 Everything on this list makes him worth $9.99 to a family who has never met him before.
@@ -224,6 +224,18 @@ This also explains a detail in the Fold 7 dialog that was glossed over the first
 
 **Do not spend a session trying to source/rebuild llama.cpp for 16KB alignment — the evidence shows that specific fix isn't needed. Start with a release-build install test instead.**
 
+**⚠ UPDATE, July 19 — CONFIRMED PASS on the real release APK.** Patrick built a signed **release** APK (not debug) and ran Google's own verification tool directly against it:
+
+```
+zipalign -c -P 16 -v 4 app-release.apk
+```
+
+Every one of the 11 previously-flagged libraries is individually listed **`(OK)`** — `libLiteRt.so`, `libLiteRtClGlAccelerator.so`, `libface_detector_v2_jni.so`, `libggml-base.so`, `libggml-cpu-android_armv8.2_2.so`, `libggml.so`, `libimage_processing_util_jni.so`, `libllama-common.so`, `libllama.so`, `libmlkitcommonpipeline.so`, `libscout_llama.so` — and the overall result is **"Verification successful."** Separately, installing this release APK on the Fold 7 no longer shows the "Android App Compatibility" 16KB dialog at all.
+
+This confirms the July 18 "Corrected hypothesis" above was right: the dialog only ever fires for **debuggable** builds (its own text says so), so its appearance on July 18 reflected the debug install, not a real defect. `libimage_processing_util_jni.so`'s alignment — the one library with a genuinely confirmed ELF defect — was fixed by the July 10 ML Kit version bump; this zipalign pass is the first real confirmation that fix landed correctly in an actual build.
+
+**Play Store submission is unblocked on the 16KB front.** This is the first claim in the entire 16KB investigation verified against the real shipped artifact with Google's own tool, not an isolated file, a debug-only dialog, or an inference.
+
 ---
 
 ## ■ Support Scout Screen — Settings
@@ -390,12 +402,12 @@ Tier 2 session (dev build, Scout 1.5+): `TelemetryDb.kt` · `TelemetryCollector.
 
 ## The bottom line
 
-Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is REOPENED as of July 18 — real-device testing on the Fold 7 showed 11 native libraries failing Android's own compatibility check, contradicting the July 17 "fully done" status. A same-day follow-up check found 5 of those 6 llama.cpp/ggml libraries are actually already ELF-aligned, so the real suspect is now APK packaging on debug installs, not source-level rebuilds — see the Play Store Listing section for the corrected plan. The gap between today and the Play Store is focused sessions — not months — but 16KB is still the most concrete blocker on the list.
+Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weather, a wake word, ArcFace recognition for the whole family (512-dim, threshold 0.65f), a complete onboarding flow, startup diagnostics, a download loading screen, personality phrase variety, adaptive boot greetings, a settings screen, and a stable icon. The A32 is stable. TinyLlama is confirmed working on both A32 and Fold 7. New installs default to offline mode. 16KB alignment is now CONFIRMED PASS as of July 19 — after real-device testing on the Fold 7 showed 11 native libraries failing on a debug build (July 18), a same-day follow-up found the underlying libraries were already ELF-aligned, and a same-week release-build test verified via `zipalign -c -P 16` that the actual shipped APK passes cleanly across all 11 previously-flagged libraries. See the Play Store Listing section for the full verification. The gap between today and the Play Store is focused sessions — not months — and 16KB is no longer one of them.
 
-**Next session: 16KB alignment — build a release APK (not debug), test it on the Fold 7, and run `zipalign -c -P 16 -v 4` against it to check packaging-level alignment; also confirm `libimage_processing_util_jni.so`'s dependency bump and check `libscout_llama.so`'s own alignment on a fresh build (see Play Store Listing section for the full corrected plan). Also: tighten TTS self-echo guard, Open Source Credits screen, Play Store listing content, Fold 7 stability testing.**
+**Next session: 16KB alignment is DONE — no further work needed there. Remaining: tighten TTS self-echo guard, Open Source Credits screen, Play Store listing content (description/screenshots/rating), Fold 7 stability testing, and wiring the actual TinyLlama model delivery path (Play Asset Delivery or a real hosted download URL — the current `ModelDownloadActivity` placeholder URL cannot work and even deletes any locally-staged model file before failing).**
 
 **Scout does not need to be finished to ship. He just needs to be Scout. And he already is.**
 
 ---
 
-*Project Scout Launch Checklist | Updated July 18, 2026 | Version 18 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Updated July 19, 2026 | Version 19 | For Patrick, Diana, Elijah, and Scout*
