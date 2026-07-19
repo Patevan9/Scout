@@ -1,9 +1,11 @@
 package com.example.scoutface
 
+import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -19,7 +21,10 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import kotlin.math.abs
 
 class SettingsActivity : AppCompatActivity() {
@@ -27,6 +32,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var container: FrameLayout
     private lateinit var scoutPrefs: SharedPreferences
     private lateinit var memPrefs: SharedPreferences
+    private lateinit var calendarPermissionLauncher: ActivityResultLauncher<String>
 
     private val screenStack = ArrayDeque<String>()
 
@@ -71,6 +77,16 @@ class SettingsActivity : AppCompatActivity() {
         container  = FrameLayout(this).apply { setBackgroundColor(BG) }
         setContentView(container)
         tts = TextToSpeech(this) { /* init silent — ready by the time the user touches sliders */ }
+
+        // Must be registered unconditionally here, before the activity is STARTED —
+        // AndroidX requirement for ActivityResultLauncher.
+        calendarPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            scoutPrefs.edit().putBoolean("calendar_permission_asked_before", true).apply()
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", granted).apply()
+            refreshCurrentScreen()
+        }
 
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
@@ -130,6 +146,9 @@ class SettingsActivity : AppCompatActivity() {
     private fun push(screen: String) { screenStack.addLast(screen); show(screen) }
     private fun pop() { if (screenStack.size > 1) { screenStack.removeLast(); show(screenStack.last()) } else finish() }
     private fun show(s: String) { container.removeAllViews(); container.addView(build(s)) }
+    // Re-renders the current screen from live prefs/permission state — used after a
+    // calendar permission result so a toggle can't show a state that isn't actually true.
+    private fun refreshCurrentScreen() { show(screenStack.last()) }
 
     private fun build(s: String): View = when (s) {
         S_MAIN      -> mainScreen()
@@ -285,6 +304,55 @@ class SettingsActivity : AppCompatActivity() {
 
     // ─── PRIVACY & DATA ─────────────────────────────────────────
 
+    // Calendar Awareness toggle state machine. Handles all four permission states
+    // without ever nagging: granted (no dialog, just turn on), first-time-or-rationale-ok
+    // (explain, then let Android show the system prompt), and permanently denied (Android
+    // will no longer show its own prompt, so instead of calling launch() into a silent
+    // auto-deny, send the user to the app's system settings page — one clear path, shown
+    // only when the user just tapped the toggle, never proactively).
+    private fun onCalendarToggleChanged(wantsOn: Boolean) {
+        if (!wantsOn) {
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", false).apply()
+            return
+        }
+
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", true).apply()
+            return
+        }
+
+        val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.READ_CALENDAR)
+        val askedBefore = scoutPrefs.getBoolean("calendar_permission_asked_before", false)
+
+        if (!askedBefore || shouldShowRationale) {
+            AlertDialog.Builder(this)
+                .setTitle("Calendar Access")
+                .setMessage("Scout will look up your calendar to answer questions like \"what's on my calendar today.\" He can only read events — he can never create, change, or delete anything.")
+                .setPositiveButton("Continue") { _, _ ->
+                    scoutPrefs.edit().putBoolean("calendar_permission_asked_before", true).apply()
+                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                }
+                .setNegativeButton("Not Now") { _, _ -> refreshCurrentScreen() }
+                .setOnCancelListener { refreshCurrentScreen() }
+                .show()
+        } else {
+            // Permanently denied — Android will silently auto-deny a fresh request without
+            // showing any dialog, so don't call launch() here at all.
+            AlertDialog.Builder(this)
+                .setTitle("Calendar Access Needed")
+                .setMessage("Calendar access was turned off in your phone's settings. To use Calendar Awareness, open Scout's app settings and allow Calendar access.")
+                .setPositiveButton("Open Settings") { _, _ ->
+                    startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    })
+                }
+                .setNegativeButton("Cancel") { _, _ -> refreshCurrentScreen() }
+                .show()
+        }
+    }
+
     private fun privacyScreen(): View {
         val root = vCol(BG).fillParent()
         root.addView(subHeader("Privacy & Data", "Manage Scout's memory and privacy."))
@@ -305,6 +373,15 @@ class SettingsActivity : AppCompatActivity() {
             toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
                 scoutPrefs.getBoolean("voice_cam_cmds", true)
             ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("CALENDAR"))
+        body.addView(cardGroup(
+            toggleRow("Calendar Awareness", "Let Scout answer questions about your calendar (read-only)",
+                memPrefs.getBoolean("calendar_awareness_enabled", false) &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            ) { on -> onCalendarToggleChanged(on) }
         ))
 
         body.addView(cardSpacer())
