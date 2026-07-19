@@ -20,6 +20,9 @@
         android:maxSdkVersion="32" />
     <!-- Lets Scout ask Android to exclude itself from battery optimization on first run -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Read-only calendar lookup (Calendar Awareness, off by default). WRITE_CALENDAR is
+         deliberately never requested — Scout can never create, edit, move, or delete events. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <application
         android:allowBackup="true"
