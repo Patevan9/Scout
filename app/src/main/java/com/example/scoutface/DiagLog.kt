@@ -91,6 +91,7 @@ class DiagLog(private val db: DiagnosticDb) {
         ASK_WIFE_NAME, ASK_SON_NAME, ASK_DOG_NAME,
         TEACH_WIFE_NAME, TEACH_SON_NAME, TEACH_DOG_NAME, TEACH_MY_NAME,
         WEATHER,
+        CALENDAR,
         UNKNOWN
     }
 
