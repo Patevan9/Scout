@@ -195,7 +195,13 @@ clean.contains("go on the internet")
             clean.contains("is it warm") ||
             clean.contains("will it rain") ||
             clean.contains("will it snow") ||
-            clean.contains("tonight") ||
+            (clean.contains("tonight") && (
+                clean.contains("weather") || clean.contains("forecast") ||
+                clean.contains("rain") || clean.contains("snow") ||
+                clean.contains("temperature") || clean.contains("degrees") ||
+                clean.contains("hot") || clean.contains("cold") || clean.contains("warm") ||
+                clean.contains("outside")
+            )) ||
             (clean.contains("what") && clean.contains("outside")) ||
             (clean.contains("how") && clean.contains("outside"))
         ) {
