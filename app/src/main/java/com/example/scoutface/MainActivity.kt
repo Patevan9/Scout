@@ -990,7 +990,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (src == null) {
                 android.util.Log.w("ScoutBrain", "Model not found locally — launching download screen.")
                 runOnUiThread {
-                    modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+                    android.widget.Toast.makeText(this, "Scout: about to launch download screen", android.widget.Toast.LENGTH_LONG).show()
+                    try {
+                        modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+                        android.widget.Toast.makeText(this, "Scout: launch() returned normally", android.widget.Toast.LENGTH_LONG).show()
+                    } catch (e: Throwable) {
+                        android.widget.Toast.makeText(this, "Scout: launch() threw ${e.javaClass.simpleName}: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        android.util.Log.e("ScoutBrain", "modelDownloadLauncher.launch() threw", e)
+                    }
                 }
                 return@Thread
             }
