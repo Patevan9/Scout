@@ -84,6 +84,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     private var downloadId    = -1L
     private var downloadDone  = false
     private var lastNoRowLogMs = 0L
+    private var lastStallLogMs = 0L
 
     private val SLIDE_IN_MS = 320L
     private val HOLD_MS     = 3800L
@@ -99,6 +100,7 @@ class ModelDownloadActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.i("ScoutBrain", "ModelDownloadActivity.onCreate() reached")
         setContentView(R.layout.activity_model_download)
 
         messageView = findViewById(R.id.downloadMessage)
@@ -121,8 +123,10 @@ class ModelDownloadActivity : AppCompatActivity() {
         // Resume an in-progress download or start a new one
         val savedId = getSharedPreferences("scout_prefs", MODE_PRIVATE)
             .getLong(PREF_DOWNLOAD_ID, -1L)
+        val resumable = savedId != -1L && isDownloadActive(savedId)
+        android.util.Log.i("ScoutBrain", "onCreate: savedId=$savedId resumable=$resumable")
 
-        if (savedId != -1L && isDownloadActive(savedId)) {
+        if (resumable) {
             downloadId = savedId
             pollProgress()
         } else {
@@ -137,10 +141,15 @@ class ModelDownloadActivity : AppCompatActivity() {
     }
 
     private fun startDownload() {
+        android.util.Log.i("ScoutBrain", "startDownload() called")
         val dir = getExternalFilesDir(null) ?: filesDir
+        if (getExternalFilesDir(null) == null) {
+            android.util.Log.w("ScoutBrain", "getExternalFilesDir(null) returned null — falling back to filesDir")
+        }
         val stat = android.os.StatFs(dir.absolutePath)
         val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
         if (freeBytes < MIN_MODEL_BYTES + 50_000_000L) {
+            android.util.Log.e("ScoutBrain", "Not enough storage: dir=${dir.absolutePath} freeBytes=$freeBytes")
             sizeText.text = "Not enough storage — free up at least 700 MB and reopen Scout."
             percentText.text = ""
             return
@@ -191,6 +200,7 @@ class ModelDownloadActivity : AppCompatActivity() {
             }
             val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
             val total      = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+            val pauseReason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
             cursor.close()
             if (total > 0) {
                 val pct = ((downloaded * 100L) / total).toInt()
@@ -200,6 +210,22 @@ class ModelDownloadActivity : AppCompatActivity() {
                     total      = formatBytes(total),
                     timeLeft   = ""
                 )
+            } else {
+                // Row exists but DownloadManager hasn't reported a size yet — this is the
+                // state a permanently-stalled download (bad destination, blocked connection,
+                // stuck retry loop) sits in forever with no other signal anywhere.
+                val now = System.currentTimeMillis()
+                if (now - lastStallLogMs > 5_000L) {
+                    lastStallLogMs = now
+                    val statusName = when (status) {
+                        DownloadManager.STATUS_PENDING -> "PENDING"
+                        DownloadManager.STATUS_RUNNING -> "RUNNING"
+                        DownloadManager.STATUS_PAUSED -> "PAUSED(reason=$pauseReason)"
+                        else -> "UNKNOWN($status)"
+                    }
+                    android.util.Log.w("ScoutBrain",
+                        "pollProgress: id=$downloadId status=$statusName downloaded=$downloaded total=$total (no size reported yet)")
+                }
             }
         } else {
             cursor?.close()
