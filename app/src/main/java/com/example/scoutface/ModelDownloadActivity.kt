@@ -177,7 +177,9 @@ class ModelDownloadActivity : AppCompatActivity() {
                 return
             }
             if (status == DownloadManager.STATUS_FAILED) {
+                val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
                 cursor.close()
+                android.util.Log.e("ScoutBrain", "Download failed, reason code=$reason")
                 showRetry("Download failed — tap here to try again.")
                 return
             }
