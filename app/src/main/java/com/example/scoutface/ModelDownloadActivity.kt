@@ -83,6 +83,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     private var animating     = false
     private var downloadId    = -1L
     private var downloadDone  = false
+    private var lastNoRowLogMs = 0L
 
     private val SLIDE_IN_MS = 320L
     private val HOLD_MS     = 3800L
@@ -161,6 +162,7 @@ class ModelDownloadActivity : AppCompatActivity() {
 
         val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         downloadId = dm.enqueue(request)
+        android.util.Log.i("ScoutBrain", "Download enqueued id=$downloadId dest=${dir.absolutePath}/$MODEL_FILENAME")
 
         getSharedPreferences("scout_prefs", MODE_PRIVATE).edit()
             .putLong(PREF_DOWNLOAD_ID, downloadId).apply()
@@ -201,6 +203,11 @@ class ModelDownloadActivity : AppCompatActivity() {
             }
         } else {
             cursor?.close()
+            val now = System.currentTimeMillis()
+            if (now - lastNoRowLogMs > 5_000L) {
+                lastNoRowLogMs = now
+                android.util.Log.w("ScoutBrain", "pollProgress: DownloadManager has no row for id=$downloadId")
+            }
         }
         handler.postDelayed({ pollProgress() }, 800L)
     }
