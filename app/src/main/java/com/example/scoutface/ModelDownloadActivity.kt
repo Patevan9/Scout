@@ -151,7 +151,11 @@ class ModelDownloadActivity : AppCompatActivity() {
         val request = DownloadManager.Request(Uri.parse(MODEL_DOWNLOAD_URL))
             .setTitle("Scout offline brain")
             .setDescription("Downloading Scout's AI — this may take a few minutes on WiFi.")
-            .setDestinationUri(Uri.fromFile(destFile))
+            // A raw file:// URI (Uri.fromFile) can't be written by the DownloadManager
+            // system process into another app's app-specific external directory under
+            // scoped storage — it silently never progresses. This is the API Android
+            // requires for that case; it grants the Download provider process the needed access.
+            .setDestinationInExternalFilesDir(this, null, MODEL_FILENAME)
             .setAllowedOverMetered(true)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
 
