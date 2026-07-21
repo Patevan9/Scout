@@ -101,7 +101,6 @@ class ModelDownloadActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         android.util.Log.i("ScoutBrain", "ModelDownloadActivity.onCreate() reached")
-        android.widget.Toast.makeText(this, "Scout: ModelDownloadActivity.onCreate() reached", android.widget.Toast.LENGTH_LONG).show()
         setContentView(R.layout.activity_model_download)
 
         messageView = findViewById(R.id.downloadMessage)
