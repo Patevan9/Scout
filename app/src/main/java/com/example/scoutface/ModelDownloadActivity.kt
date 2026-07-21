@@ -99,6 +99,10 @@ class ModelDownloadActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // TEMPORARY tie-breaker test -- remove immediately after this test.
+        // If this doesn't crash the app on launch, the installed build is not
+        // running this source file's compiled code at all.
+        throw RuntimeException("MARKER_TEST_9999")
         super.onCreate(savedInstanceState)
         android.util.Log.i("ScoutBrain", "ModelDownloadActivity.onCreate() reached")
         android.widget.Toast.makeText(this, "Scout: ModelDownloadActivity.onCreate() reached", android.widget.Toast.LENGTH_LONG).show()
