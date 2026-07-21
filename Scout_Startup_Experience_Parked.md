@@ -100,6 +100,8 @@ These should only describe features that already exist. For example:
 
 Interruption is intentionally left out of the rotation until that feature works reliably — every tip should be accurate rather than advertise something still in development. Once interruption is working well, it can simply be added to the rotation.
 
+**Visual reference:** Best Fiends' loading screen (the idea's origin) presents tips as a single bordered/boxed callout with an icon (⚠️ in their case), sitting directly beneath the progress bar — one tip visible at a time rather than several lines at once. That boxed-callout treatment, not a plain line of text, is the look worth matching.
+
 ## Overall Goal
 
 Instead of feeling like:
