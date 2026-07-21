@@ -86,6 +86,20 @@ The entire startup sequence should remain in landscape:
 
 The user rotates the device once and never experiences a jarring orientation change.
 
+## 7. Feature tips in the rotation
+
+Instead of only showing humorous loading messages, rotate useful Scout tips beneath the progress bar (similar to how many games show hints while loading).
+
+These should only describe features that already exist. For example:
+
+> 💡 To enter Scout Settings, simply swipe to the right.
+> 💡 Scout remembers what you teach him locally.
+> 💡 Your privacy stays on your device whenever possible.
+> 💡 You can ask Scout about today's weather when connected to the internet.
+> 💡 Scout gets to know you over time.
+
+Interruption is intentionally left out of the rotation until that feature works reliably — every tip should be accurate rather than advertise something still in development. Once interruption is working well, it can simply be added to the rotation.
+
 ## Overall Goal
 
 Instead of feeling like:
