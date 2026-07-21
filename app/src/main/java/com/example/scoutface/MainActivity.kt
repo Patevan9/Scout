@@ -929,11 +929,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun startSystems() {
 
-        checkPermissionsAndStart()
+        val permissionRequestLaunched = checkPermissionsAndStart()
 
         setupRecognizerWatchdog()
 
-        bootstrapModelFile()
+        // If a permission request is in flight, it just started a system dialog activity on
+        // top of Scout. Launching the download screen at the same instant races it for the
+        // foreground -- the dialog can end up buried until the user backs out of the app.
+        // Deferred to the permission result callback in that case (see setupPermissionLauncher()).
+        if (!permissionRequestLaunched) {
+            bootstrapModelFile()
+        }
 
         startOfflineBrain()
 
@@ -1185,8 +1191,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (micOk) safeSetupSpeech("permissionCallback")
 
-            // If READ_EXTERNAL_STORAGE was just granted, retry the model copy now.
-            if (results[Manifest.permission.READ_EXTERNAL_STORAGE] == true) bootstrapModelFile()
+            // Deferred from startSystems() so the download screen never races the permission
+            // dialog for the foreground. Safe to call every time -- it no-ops if the model
+            // file already exists.
+            bootstrapModelFile()
 
         }
 
@@ -1278,7 +1286,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun checkPermissionsAndStart() {
+    // Returns true if a permission dialog was actually launched (result pending),
+    // false if nothing was needed and camera/speech were started directly.
+    private fun checkPermissionsAndStart(): Boolean {
 
         val need = ArrayList<String>()
 
@@ -1340,11 +1350,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             permissionLauncher.launch(need.toTypedArray())
 
+            return true
+
         } else {
 
             safeStartCamera("alreadyGranted")
 
             safeSetupSpeech("alreadyGranted")
+
+            return false
 
         }
 
