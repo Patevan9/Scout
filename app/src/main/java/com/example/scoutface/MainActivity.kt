@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val apiKey: String
         get() = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI) ?: ""
 
-    private val GEMINI_MODEL = "gemini-3.5-flash"
+    private val GEMINI_MODEL = "gemini-3.5-flash-lite"
 
     // =======================
 
