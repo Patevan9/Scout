@@ -101,4 +101,34 @@
 
     </LinearLayout>
 
+    <!-- Explains what's downloading, then rotates into real feature tips.
+         Separate from the humorous downloadMessage above -- this box only ever
+         shows accurate, reassuring, or genuinely useful text. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_tip_callout"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tipIcon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:text="💡"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tipText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="#C7D3EE"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.2" />
+
+    </LinearLayout>
+
 </LinearLayout>

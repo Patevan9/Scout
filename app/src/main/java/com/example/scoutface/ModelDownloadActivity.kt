@@ -77,6 +77,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     private lateinit var progressBar : ProgressBar
     private lateinit var percentText : TextView
     private lateinit var sizeText    : TextView
+    private lateinit var tipText     : TextView
 
     private var messageIndex  = 0
     private var screenWidth   = 0
@@ -85,10 +86,25 @@ class ModelDownloadActivity : AppCompatActivity() {
     private var downloadDone  = false
     private var lastNoRowLogMs = 0L
     private var lastStallLogMs = 0L
+    private var tipIndex      = 0
 
     private val SLIDE_IN_MS = 320L
     private val HOLD_MS     = 3800L
     private val SLIDE_OUT_MS = 280L
+    private val TIP_HOLD_MS = 6000L
+    private val TIP_FADE_MS = 200L
+
+    // Deliberately not shuffled -- the explanatory line always comes first, then real,
+    // already-shipped feature tips in a fixed order. Never advertise anything not yet
+    // reliable (e.g. interruption handling) -- only describe what Scout can actually do today.
+    private val tips = listOf(
+        "Downloading Scout's offline AI brain… this is a one-time setup and may take several minutes.",
+        "To enter Scout Settings, simply swipe to the right.",
+        "Scout remembers what you teach him, stored locally on this device.",
+        "Your privacy stays on your device whenever possible.",
+        "You can ask Scout about today's weather when connected to the internet.",
+        "Scout gets to know you over time."
+    )
 
     private val completionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -107,12 +123,16 @@ class ModelDownloadActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.downloadProgress)
         percentText = findViewById(R.id.downloadPercent)
         sizeText    = findViewById(R.id.downloadSizeText)
+        tipText     = findViewById(R.id.tipText)
 
         screenWidth = resources.displayMetrics.widthPixels
         messages.shuffle()
 
         messageView.text = messages[messageIndex]
         handler.postDelayed({ cycleMessage() }, HOLD_MS)
+
+        tipText.text = tips[tipIndex]
+        handler.postDelayed({ cycleTip() }, TIP_HOLD_MS)
 
         registerReceiver(
             completionReceiver,
@@ -330,5 +350,25 @@ class ModelDownloadActivity : AppCompatActivity() {
                 handler.postDelayed({ cycleMessage() }, HOLD_MS)
             }, SLIDE_IN_MS)
         }, SLIDE_OUT_MS)
+    }
+
+    // Simple crossfade -- independent of cycleMessage()'s slide animation above.
+    // Fixed order (no shuffle): the explanatory line stays first, real feature
+    // tips follow in the order declared in `tips`.
+    private fun cycleTip() {
+        val fadeOut = ObjectAnimator.ofFloat(tipText, "alpha", 1f, 0f)
+        fadeOut.duration = TIP_FADE_MS
+        fadeOut.start()
+
+        handler.postDelayed({
+            tipIndex = (tipIndex + 1) % tips.size
+            tipText.text = tips[tipIndex]
+
+            val fadeIn = ObjectAnimator.ofFloat(tipText, "alpha", 0f, 1f)
+            fadeIn.duration = TIP_FADE_MS
+            fadeIn.start()
+
+            handler.postDelayed({ cycleTip() }, TIP_HOLD_MS)
+        }, TIP_FADE_MS)
     }
 }
