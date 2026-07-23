@@ -102,7 +102,7 @@
     </LinearLayout>
 
     <!-- Explains what's downloading, then rotates into real feature tips.
-         Separate from the humorous downloadMessage above -- this box only ever
+         Separate from the humorous downloadMessage above; this box only ever
          shows accurate, reassuring, or genuinely useful text. -->
     <LinearLayout
         android:layout_width="match_parent"
