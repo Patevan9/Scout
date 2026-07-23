@@ -1078,6 +1078,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
 
+            if (success) {
+                runOnUiThread { onBrainReady() }
+            }
+
             // Only speaks this after a download actually just finished -- not on every
             // ordinary launch's load. First-ever line ("ready now") plays once, lifetime
             // of the install; every later download (upgrade, repair, different model)
@@ -1097,7 +1101,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // Called once, exactly when LlamaEngine.loadAsync's callback reports success (from a
+    // background thread -- must stay on the UI thread from here). Re-runs resumeSystems(),
+    // which was a no-op every time it fired before now because of its own isReady guard;
+    // this is what actually lets camera and mic come alive for the first time.
+    private fun onBrainReady() {
+        resumeSystems()
+    }
+
     private fun resumeSystems() {
+
+        // Scout is either loading or fully present -- never in between. Camera and mic
+        // only ever come alive once the offline brain is confirmed ready. Once ready,
+        // this stays true for the rest of the process, so every later onResume() (e.g.
+        // returning from Settings) behaves exactly as before this gate existed.
+        if (!LlamaEngine.isReady) return
 
         gazeEnabled = false
 
@@ -1212,9 +1230,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ) == PackageManager.PERMISSION_GRANTED)
 
-            if (camOk) safeStartCamera("permissionCallback")
-
-            if (micOk) safeSetupSpeech("permissionCallback")
+            // Gated the same as resumeSystems() -- onBrainReady() starts these once
+            // the offline brain is actually ready, not immediately on every launch.
+            if (LlamaEngine.isReady) {
+                if (camOk) safeStartCamera("permissionCallback")
+                if (micOk) safeSetupSpeech("permissionCallback")
+            }
 
             // Deferred from startSystems() so the download screen never races the permission
             // dialog for the foreground. Safe to call every time -- it no-ops if the model
@@ -1380,9 +1401,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         } else {
 
-            safeStartCamera("alreadyGranted")
-
-            safeSetupSpeech("alreadyGranted")
+            // Gated the same as resumeSystems() -- onBrainReady() starts these once
+            // the offline brain is actually ready, not immediately on every launch.
+            if (LlamaEngine.isReady) {
+                safeStartCamera("alreadyGranted")
+                safeSetupSpeech("alreadyGranted")
+            }
 
             return false
 
