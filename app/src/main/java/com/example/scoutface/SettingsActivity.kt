@@ -875,7 +875,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun showSupport() {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://lippy-robotics.gt.tc/support.html")))
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://patevan9.github.io/lippyrobotics.github.io/support.html")))
         } catch (_: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("Unable to open the Scout Support Center")
