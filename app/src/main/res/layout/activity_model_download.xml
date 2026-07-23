@@ -1,134 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- ScrollView is a safety net, not the primary fix; the sizes/margins below are
+     tuned to fit a normal landscape phone screen without scrolling at all. Content
+     previously sized for a taller portrait screen ran off the bottom in landscape. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0A0F1E"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:paddingStart="32dp"
-    android:paddingEnd="32dp"
-    android:paddingBottom="40dp"
-    android:paddingTop="48dp">
+    android:fillViewport="true">
 
-    <!-- SCOUT wordmark -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:fontFamily="sans-serif-black"
-        android:letterSpacing="0.15"
-        android:text="SCOUT"
-        android:textColor="#FFFFFF"
-        android:textSize="38sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:layout_marginBottom="24dp"
-        android:letterSpacing="0.25"
-        android:text="AI COMPANION APP"
-        android:textColor="#9BBEFF"
-        android:textSize="12sp" />
-
-    <!-- Scout face icon — fills the center -->
-    <ImageView
-        android:layout_width="220dp"
-        android:layout_height="220dp"
-        android:layout_marginBottom="32dp"
-        android:src="@mipmap/ic_launcher" />
-
-    <!-- Animated rotating message — clip so slide animation stays inside bounds -->
-    <FrameLayout
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:clipChildren="true"
-        android:layout_marginBottom="28dp">
+        android:layout_height="wrap_content"
+        android:minHeight="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp">
+
+        <!-- SCOUT wordmark -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.15"
+            android:text="SCOUT"
+            android:textColor="#FFFFFF"
+            android:textSize="30sp"
+            android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/downloadMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="10dp"
+            android:letterSpacing="0.25"
+            android:text="AI COMPANION APP"
+            android:textColor="#9BBEFF"
+            android:textSize="11sp" />
+
+        <!-- Scout face icon -->
+        <ImageView
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:layout_marginBottom="10dp"
+            android:src="@mipmap/ic_launcher" />
+
+        <!-- Animated rotating message — clip so slide animation stays inside bounds -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:clipChildren="true"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/downloadMessage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:lineSpacingMultiplier="1.2" />
+
+        </FrameLayout>
+
+        <!-- Progress bar -->
+        <ProgressBar
+            android:id="@+id/downloadProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginBottom="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="#9BBEFF"
+            android:progressBackgroundTint="#1E2A45" />
+
+        <!-- Percentage + size/time row -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:textColor="#FFFFFF"
-            android:textSize="15sp"
-            android:lineSpacingMultiplier="1.3" />
+            android:orientation="horizontal">
 
-    </FrameLayout>
+            <TextView
+                android:id="@+id/downloadSizeText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#6B7FA8"
+                android:textSize="13sp"
+                android:text="" />
 
-    <!-- Spacer pushes progress to bottom -->
-    <View
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+            <TextView
+                android:id="@+id/downloadPercent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#9BBEFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:text="0%" />
 
-    <!-- Progress bar -->
-    <ProgressBar
-        android:id="@+id/downloadProgress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="8dp"
-        android:layout_marginBottom="8dp"
-        android:max="100"
-        android:progress="0"
-        android:progressTint="#9BBEFF"
-        android:progressBackgroundTint="#1E2A45" />
+        </LinearLayout>
 
-    <!-- Percentage + size/time row -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/downloadSizeText"
-            android:layout_width="0dp"
+        <!-- Explains what's downloading, then rotates into real feature tips.
+             Separate from the humorous downloadMessage above; this box only ever
+             shows accurate, reassuring, or genuinely useful text. -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textColor="#6B7FA8"
-            android:textSize="13sp"
-            android:text="" />
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_tip_callout"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <TextView
-            android:id="@+id/downloadPercent"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#9BBEFF"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:text="0%" />
+            <TextView
+                android:id="@+id/tipIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="10dp"
+                android:text="💡"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/tipText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#C7D3EE"
+                android:textSize="13sp"
+                android:lineSpacingMultiplier="1.2" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
-    <!-- Explains what's downloading, then rotates into real feature tips.
-         Separate from the humorous downloadMessage above; this box only ever
-         shows accurate, reassuring, or genuinely useful text. -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:background="@drawable/bg_tip_callout"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <TextView
-            android:id="@+id/tipIcon"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="10dp"
-            android:text="💡"
-            android:textSize="16sp" />
-
-        <TextView
-            android:id="@+id/tipText"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textColor="#C7D3EE"
-            android:textSize="13sp"
-            android:lineSpacingMultiplier="1.2" />
-
-    </LinearLayout>
-
-</LinearLayout>
+</ScrollView>
