@@ -210,6 +210,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val PREF_SPONTANEOUS_ENABLED = "spontaneous_enabled"
 
+    // Lives in "scout_prefs" (scoutPrefs), not "scout_memory" — a one-time lifecycle
+    // milestone like PREF_ONBOARDING_DONE, not a user-configurable setting. Means "has
+    // this install ever completed its first real startup," independent of which model
+    // is currently loaded -- a future model upgrade or repair download must never look
+    // like Scout meeting the user for the first time again.
+    private val PREF_FIRST_STARTUP_DONE = "first_startup_experienced"
+
     // =======================
 
     // STATE
@@ -219,6 +226,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private enum class Mode { PRESENCE, REST }
 
     private var currentMode = Mode.PRESENCE
+
+    // Set right after a model download finishes; consumed (and cleared) the next time
+    // TinyLlama actually finishes loading. Not persisted -- only meaningful within the
+    // single app session where the download just happened, never across restarts.
+    private var pendingDownloadReadyAnnouncement = false
 
     @Volatile
 
@@ -1065,6 +1077,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             scoutPrefs.edit().putLong("llama_last_load_ms", loadMs).apply()
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
+
+            // Only speaks this after a download actually just finished -- not on every
+            // ordinary launch's load. First-ever line ("ready now") plays once, lifetime
+            // of the install; every later download (upgrade, repair, different model)
+            // gets the "ready again" line so Scout doesn't act newly-born each time.
+            if (success && pendingDownloadReadyAnnouncement) {
+                pendingDownloadReadyAnnouncement = false
+                val alreadyMetUser = scoutPrefs.getBoolean(PREF_FIRST_STARTUP_DONE, false)
+                val line = if (alreadyMetUser) {
+                    "Thanks for waiting. My offline brain is ready again."
+                } else {
+                    scoutPrefs.edit().putBoolean(PREF_FIRST_STARTUP_DONE, true).apply()
+                    "Hi... thanks for waiting. My offline brain is ready now."
+                }
+                runOnUiThread { respond(line) }
+            }
         }
 
     }
@@ -1200,6 +1228,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == RESULT_OK) {
+                pendingDownloadReadyAnnouncement = true
                 bootstrapModelFile()
                 startOfflineBrain()
             }
