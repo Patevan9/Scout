@@ -68,7 +68,7 @@
         <activity
             android:name=".ModelDownloadActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
 
         <activity
