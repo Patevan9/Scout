@@ -63,6 +63,13 @@ class CalendarReader(private val context: Context) {
 
     fun eventsTomorrow(): List<CalendarEvent> = dayRange(1).let { eventsBetween(it.first, it.second) }
 
+    // Events on an arbitrary date -- startOfDayMs must already be midnight for that date
+    // (CalendarDateParser.parseDate() returns exactly that).
+    fun eventsOnDate(startOfDayMs: Long): List<CalendarEvent> {
+        val cal = Calendar.getInstance().apply { timeInMillis = startOfDayMs; add(Calendar.DAY_OF_YEAR, 1) }
+        return eventsBetween(startOfDayMs, cal.timeInMillis)
+    }
+
     fun eventsThisWeek(): List<CalendarEvent> {
         val start = startOfToday()
         val cal = Calendar.getInstance().apply { timeInMillis = start; add(Calendar.DAY_OF_YEAR, 7) }

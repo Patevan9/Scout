@@ -60,6 +60,8 @@ import androidx.core.view.WindowCompat
 
 import androidx.core.view.WindowInsetsControllerCompat
 
+import com.example.scoutface.brain.CalendarDateParser
+
 import com.example.scoutface.brain.FactKey
 
 import com.example.scoutface.brain.ScoutBootStatus
@@ -3246,10 +3248,18 @@ Respond only with Scout's next reply.
 
         val clean = qNorm.lowercase().trim()
 
-        // "next event"/"next appointment" is an exact, unambiguous phrase — checked before
-        // the title-search regex below so "when is the next event" (no "my") is answered by
-        // the semantic next-event lookup, not mistaken for a literal title search.
-        val out = if (clean.contains("next event") || clean.contains("next appointment")) {
+        // "am I free on July 10th" / "what do I have on the 10th of July" / "are we busy
+        // next Saturday" — arbitrary date lookup, checked first since an explicit date is
+        // the most specific, unambiguous signal available.
+        val parsedDate = CalendarDateParser.parseDate(clean)
+
+        val out = if (parsedDate != null) {
+            describeCalendarForDate(
+                calendarReader.eventsOnDate(parsedDate.timeInMillis),
+                parsedDate,
+                isFreeBusyPhrasing = clean.contains("free") || clean.contains("busy") || clean.contains("available")
+            )
+        } else if (clean.contains("next event") || clean.contains("next appointment")) {
             describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
         } else {
             // Checked before the bare day-keyword branches below — otherwise a title
@@ -3286,6 +3296,27 @@ Respond only with Scout's next reply.
 
         respond(out)
 
+    }
+
+    // Arbitrary-date lookup ("am I free on July 10th") -- phrased as a free/busy answer
+    // when the question was framed that way, otherwise as a plain listing like the
+    // today/tomorrow/this-week variants.
+    private fun describeCalendarForDate(events: List<CalendarEvent>, date: Calendar, isFreeBusyPhrasing: Boolean): String {
+        val dateFmt = SimpleDateFormat("EEEE, MMMM d", Locale.US)
+        val label = dateFmt.format(Date(date.timeInMillis))
+        if (events.isEmpty()) {
+            return if (isFreeBusyPhrasing) {
+                "You're free on $label — nothing on the calendar."
+            } else {
+                "You don't have anything on the calendar on $label."
+            }
+        }
+        val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+        val parts = events.take(5).map { e ->
+            if (e.allDay) e.title else "${e.title} at ${timeFmt.format(Date(e.startMs))}"
+        }
+        val prefix = if (isFreeBusyPhrasing) "You're not free on $label — you have" else "Here's what's on the calendar for $label:"
+        return "$prefix ${parts.joinToString(". ")}."
     }
 
     // Only title, start/end time, and all-day status are ever spoken — no description,

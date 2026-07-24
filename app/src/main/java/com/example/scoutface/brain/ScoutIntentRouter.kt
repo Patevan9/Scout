@@ -230,6 +230,21 @@ clean.contains("go on the internet")
             if (it.groupValues[1].isNotBlank()) return IntentType.CALENDAR
         }
 
+        // "am I free on July 10th" / "what do I have on the 10th of July" / "are we busy
+        // next Saturday" — arbitrary date lookup. Also requires a clear calendar-question
+        // word so a date mentioned for some other reason isn't mistaken for one.
+        if (
+            CalendarDateParser.parseDate(clean) != null &&
+            (
+                clean.contains("free") || clean.contains("busy") || clean.contains("available") ||
+                clean.contains("anything") || clean.contains("plans") || clean.contains("calendar") ||
+                clean.contains("schedule") || clean.contains("do i have") ||
+                clean.contains("appointment") || clean.contains("event")
+            )
+        ) {
+            return IntentType.CALENDAR
+        }
+
         if (
 clean.contains("what is my") ||
 clean.contains("what's my") ||
