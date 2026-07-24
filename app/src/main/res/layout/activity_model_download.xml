@@ -3,6 +3,7 @@
      tuned to fit a normal landscape phone screen without scrolling at all. Content
      previously sized for a taller portrait screen ran off the bottom in landscape. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0A0F1E"

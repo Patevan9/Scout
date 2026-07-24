@@ -60,7 +60,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         "Practicing his \"calm\" face in the mirror.",
         "Whistling a quiet tune while the data transfers...",
         "Mapping out the living room in his daydreams.",
-        "Rummaging through the Samsung junk drawer...",
+        "Rummaging through the junk drawer...",
         "Polishing the pixels...",
         "Organizing the ones and zeros into a neat little pile.",
         "Teaching the hardware how to be a friend.",
@@ -87,6 +87,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     )
 
     private val handler    = Handler(Looper.getMainLooper())
+    private lateinit var rootScroll   : View
     private lateinit var messageView  : TextView
     private lateinit var progressBar  : ProgressBar
     private lateinit var percentText  : TextView
@@ -135,6 +136,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         android.util.Log.i("ScoutBrain", "ModelDownloadActivity.onCreate() reached")
         setContentView(R.layout.activity_model_download)
 
+        rootScroll   = findViewById(R.id.rootScroll)
         messageView  = findViewById(R.id.downloadMessage)
         progressBar  = findViewById(R.id.downloadProgress)
         percentText  = findViewById(R.id.downloadPercent)
@@ -369,8 +371,15 @@ class ModelDownloadActivity : AppCompatActivity() {
             return
         }
 
-        progressBar.progress = 100
-        percentText.text = ""
+        // Loading has no real progress metric to report (llama.cpp gives no partial-load
+        // percentage), so this phase is deliberately styled differently from Downloading
+        // rather than faking a bar/number: solid black background matching Scout's own
+        // face screen, with just a large, prominent status line.
+        rootScroll.setBackgroundColor(android.graphics.Color.BLACK)
+        progressBar.visibility = View.GONE
+        percentText.visibility = View.GONE
+        sizeText.textSize = 20f
+        sizeText.setTypeface(sizeText.typeface, android.graphics.Typeface.BOLD)
         sizeText.text = "Loading offline brain…"
 
         tipContainer.visibility = View.VISIBLE

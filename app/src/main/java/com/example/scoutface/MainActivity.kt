@@ -229,7 +229,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // Set by onInit() if TTS becomes ready before the offline brain does (the common
     // case). Consumed once, from startSystems(), once the brain is actually ready.
-    private var pendingBootAnnouncement: String? = null
+    // A boolean, not the built string itself -- bootStatus.build() must be called fresh
+    // at actual speak-time, since building it early (while the brain is still loading)
+    // and speaking that same text later produced a stale "still warming up" line even
+    // after the brain had already finished loading.
+    private var pendingBootAnnouncement = false
 
     @Volatile
 
@@ -959,8 +963,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // TTS almost always finishes initializing before the offline brain does; this
         // is the queued boot announcement from onInit() in that case, spoken now that
         // the brain is actually ready instead of the moment TTS happened to be ready.
-        pendingBootAnnouncement?.let { out ->
-            pendingBootAnnouncement = null
+        // Built fresh here (not back in onInit()) so it reflects the brain's actual,
+        // now-ready state rather than a stale message captured while still loading.
+        if (pendingBootAnnouncement) {
+            pendingBootAnnouncement = false
+            val out = bootStatus.build()
             speak(out, true)
             convoDb.logTurn("scout", out)
             journalDb.add("Booted. Spoke: $out")
@@ -2730,18 +2737,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val sttOk = SpeechRecognizer.isRecognitionAvailable(this)
 
-            val out = bootStatus.build()
-
             // TTS init finishes independently of the offline-brain gate -- almost always
             // well before it. Speaking here unconditionally is exactly the "half-awake
             // Scout" the gate exists to prevent. Queued and spoken from startSystems()
-            // instead if the brain isn't ready yet.
+            // instead if the brain isn't ready yet -- built fresh there, not here, so
+            // the message reflects the brain's state at actual speak-time.
             if (LlamaEngine.isReady) {
+                val out = bootStatus.build()
                 speak(out, true)
                 convoDb.logTurn("scout", out)
                 journalDb.add("Booted. Spoke: $out")
             } else {
-                pendingBootAnnouncement = out
+                pendingBootAnnouncement = true
             }
 
             if (!sttOk && LlamaEngine.isReady) {
