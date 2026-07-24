@@ -380,7 +380,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         percentText.visibility = View.GONE
         sizeText.textSize = 20f
         sizeText.setTypeface(sizeText.typeface, android.graphics.Typeface.BOLD)
-        sizeText.text = "Loading offline brain…"
+        sizeText.text = "Waking Scout up…"
 
         tipContainer.visibility = View.VISIBLE
         tipText.text = tips[tipIndex]
