@@ -1,5 +1,6 @@
 package com.example.scoutface
 
+import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.app.DownloadManager
@@ -7,16 +8,25 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import java.io.File
 
+// The one gate MainActivity waits on before it appears, asks permissions, or does
+// anything else -- covers three phases in order: Downloading (only if the model file
+// isn't present anywhere locally), Loading (TinyLlama into memory, triggered from here
+// since that's the only reliable way to avoid a deadlock with MainActivity's own boot),
+// and a brief Preparing beat before handing control back. Never finishes with RESULT_OK
+// until LlamaEngine.isReady is actually true.
 class ModelDownloadActivity : AppCompatActivity() {
 
     companion object {
@@ -28,6 +38,10 @@ class ModelDownloadActivity : AppCompatActivity() {
         private const val PREF_DOWNLOAD_ID = "model_download_id"
         // Minimum byte size for a valid Q4_K_M download — anything below this is truncated.
         const val MIN_MODEL_BYTES = 500_000_000L
+        // True only when a real network download actually happened this run -- lets
+        // MainActivity distinguish "just downloaded" (speak the first-time/again line)
+        // from an ordinary launch that only needed to load an already-present file.
+        const val EXTRA_DID_DOWNLOAD = "did_download"
     }
 
     private val messages = mutableListOf(
@@ -73,11 +87,12 @@ class ModelDownloadActivity : AppCompatActivity() {
     )
 
     private val handler    = Handler(Looper.getMainLooper())
-    private lateinit var messageView : TextView
-    private lateinit var progressBar : ProgressBar
-    private lateinit var percentText : TextView
-    private lateinit var sizeText    : TextView
-    private lateinit var tipText     : TextView
+    private lateinit var messageView  : TextView
+    private lateinit var progressBar  : ProgressBar
+    private lateinit var percentText  : TextView
+    private lateinit var sizeText     : TextView
+    private lateinit var tipText      : TextView
+    private lateinit var tipContainer : View
 
     private var messageIndex  = 0
     private var screenWidth   = 0
@@ -87,18 +102,19 @@ class ModelDownloadActivity : AppCompatActivity() {
     private var lastNoRowLogMs = 0L
     private var lastStallLogMs = 0L
     private var tipIndex      = 0
+    private var didDownload   = false
 
     private val SLIDE_IN_MS = 320L
     private val HOLD_MS     = 3800L
     private val SLIDE_OUT_MS = 280L
     private val TIP_HOLD_MS = 6000L
     private val TIP_FADE_MS = 200L
+    private val PREPARING_MS = 1400L
 
-    // Deliberately not shuffled -- the explanatory line always comes first, then real,
-    // already-shipped feature tips in a fixed order. Never advertise anything not yet
-    // reliable (e.g. interruption handling) -- only describe what Scout can actually do today.
+    // Real, already-shipped feature tips only -- deliberately not shuffled, fixed
+    // order. Interruption handling is intentionally excluded until that feature is
+    // reliable; tips should only ever describe what Scout can actually do today.
     private val tips = listOf(
-        "Downloading Scout's offline AI brain… this is a one-time setup and may take several minutes.",
         "To enter Scout Settings, simply swipe to the right.",
         "Scout remembers what you teach him, stored locally on this device.",
         "Your privacy stays on your device whenever possible.",
@@ -119,20 +135,17 @@ class ModelDownloadActivity : AppCompatActivity() {
         android.util.Log.i("ScoutBrain", "ModelDownloadActivity.onCreate() reached")
         setContentView(R.layout.activity_model_download)
 
-        messageView = findViewById(R.id.downloadMessage)
-        progressBar = findViewById(R.id.downloadProgress)
-        percentText = findViewById(R.id.downloadPercent)
-        sizeText    = findViewById(R.id.downloadSizeText)
-        tipText     = findViewById(R.id.tipText)
+        messageView  = findViewById(R.id.downloadMessage)
+        progressBar  = findViewById(R.id.downloadProgress)
+        percentText  = findViewById(R.id.downloadPercent)
+        sizeText     = findViewById(R.id.downloadSizeText)
+        tipText      = findViewById(R.id.tipText)
+        tipContainer = findViewById(R.id.tipContainer)
 
         screenWidth = resources.displayMetrics.widthPixels
         messages.shuffle()
-
         messageView.text = messages[messageIndex]
         handler.postDelayed({ cycleMessage() }, HOLD_MS)
-
-        tipText.text = tips[tipIndex]
-        handler.postDelayed({ cycleTip() }, TIP_HOLD_MS)
 
         registerReceiver(
             completionReceiver,
@@ -140,18 +153,57 @@ class ModelDownloadActivity : AppCompatActivity() {
             RECEIVER_NOT_EXPORTED
         )
 
-        // Resume an in-progress download or start a new one
-        val savedId = getSharedPreferences("scout_prefs", MODE_PRIVATE)
-            .getLong(PREF_DOWNLOAD_ID, -1L)
-        val resumable = savedId != -1L && isDownloadActive(savedId)
-        android.util.Log.i("ScoutBrain", "onCreate: savedId=$savedId resumable=$resumable")
-
-        if (resumable) {
-            downloadId = savedId
-            pollProgress()
-        } else {
-            startDownload()
+        if (LlamaEngine.isReady) {
+            finishReady()
+            return
         }
+
+        val internalDest = File(filesDir, MODEL_FILENAME)
+        if (internalDest.exists() && internalDest.length() >= MIN_MODEL_BYTES) {
+            enterLoadingPhase()
+            return
+        }
+
+        val externalDest = File(getExternalFilesDir(null) ?: filesDir, MODEL_FILENAME)
+        if (externalDest.exists() && externalDest.length() >= MIN_MODEL_BYTES) {
+            // Downloaded in an earlier session but never copied into filesDir
+            // (e.g. the app was closed before that step completed).
+            copyIntoFilesDirThenLoad(externalDest, internalDest)
+            return
+        }
+
+        // Check for any other pre-existing local copy before falling back to a real
+        // download -- same search MainActivity.bootstrapModelFile() used to do.
+        Thread {
+            val sources = mutableListOf<File>()
+            getExternalFilesDir(null)?.let { sources.add(File(it, MODEL_FILENAME)) }
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.READ_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                @Suppress("DEPRECATION")
+                sources.add(File(android.os.Environment.getExternalStorageDirectory(), MODEL_FILENAME))
+            }
+            val src = sources.firstOrNull { it.exists() && it.canRead() && it.length() >= MIN_MODEL_BYTES }
+
+            runOnUiThread {
+                if (src != null) {
+                    copyIntoFilesDirThenLoad(src, internalDest)
+                } else {
+                    val savedId = getSharedPreferences("scout_prefs", MODE_PRIVATE)
+                        .getLong(PREF_DOWNLOAD_ID, -1L)
+                    val resumable = savedId != -1L && isDownloadActive(savedId)
+                    android.util.Log.i("ScoutBrain", "onCreate: savedId=$savedId resumable=$resumable")
+                    if (resumable) {
+                        didDownload = true
+                        downloadId = savedId
+                        pollProgress()
+                    } else {
+                        startDownload()
+                    }
+                }
+            }
+        }.start()
     }
 
     override fun onDestroy() {
@@ -160,8 +212,11 @@ class ModelDownloadActivity : AppCompatActivity() {
         runCatching { unregisterReceiver(completionReceiver) }
     }
 
+    // ── Phase 1: Downloading ──────────────────────────────────────
+
     private fun startDownload() {
         android.util.Log.i("ScoutBrain", "startDownload() called")
+        didDownload = true
         val dir = getExternalFilesDir(null) ?: filesDir
         if (getExternalFilesDir(null) == null) {
             android.util.Log.w("ScoutBrain", "getExternalFilesDir(null) returned null — falling back to filesDir")
@@ -215,7 +270,7 @@ class ModelDownloadActivity : AppCompatActivity() {
                 val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
                 cursor.close()
                 android.util.Log.e("ScoutBrain", "Download failed, reason code=$reason")
-                showRetry("Download failed — tap here to try again.")
+                showRetry("Download failed — tap here to try again.") { startDownload() }
                 return
             }
             val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
@@ -265,25 +320,84 @@ class ModelDownloadActivity : AppCompatActivity() {
             dest.delete()
             getSharedPreferences("scout_prefs", MODE_PRIVATE).edit()
                 .remove(PREF_DOWNLOAD_ID).apply()
-            showRetry("Download incomplete — tap here to try again.")
+            showRetry("Download incomplete — tap here to try again.") { startDownload() }
             return
         }
         downloadDone = true
         getSharedPreferences("scout_prefs", MODE_PRIVATE).edit()
             .remove(PREF_DOWNLOAD_ID).apply()
         updateProgress(100, "", "", "")
-        // Signal MainActivity that the model file is ready
-        setResult(RESULT_OK)
+        copyIntoFilesDirThenLoad(dest, File(filesDir, MODEL_FILENAME))
+    }
+
+    private fun copyIntoFilesDirThenLoad(src: File, dest: File) {
+        Thread {
+            try {
+                if (src.absolutePath != dest.absolutePath) {
+                    src.inputStream().use { input ->
+                        dest.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                android.util.Log.i("ScoutBrain", "Model copy complete (${dest.length() / 1_048_576}MB)")
+            } catch (e: Exception) {
+                android.util.Log.e("ScoutBrain", "Model copy failed", e)
+                dest.delete()
+            }
+            runOnUiThread { enterLoadingPhase() }
+        }.start()
+    }
+
+    // ── Phase 2: Loading into memory ──────────────────────────────
+
+    private fun enterLoadingPhase() {
+        val dest = File(filesDir, MODEL_FILENAME)
+        if (!dest.exists() || dest.length() < MIN_MODEL_BYTES) {
+            showRetry("Something went wrong preparing the offline brain — tap here to try again.") {
+                startDownload()
+            }
+            return
+        }
+
+        progressBar.progress = 100
+        percentText.text = ""
+        sizeText.text = "Loading offline brain…"
+
+        tipContainer.visibility = View.VISIBLE
+        tipText.text = tips[tipIndex]
+        handler.postDelayed({ cycleTip() }, TIP_HOLD_MS)
+
+        LlamaEngine.loadAsync(modelFile = dest, nCtx = 512, nThreads = 2) { success ->
+            runOnUiThread {
+                if (success) {
+                    enterPreparingPhase()
+                } else {
+                    showRetry("The offline brain failed to load — tap here to try again.") {
+                        enterLoadingPhase()
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Phase 3: Preparing (brief beat before handing back to MainActivity) ──────
+
+    private fun enterPreparingPhase() {
+        sizeText.text = "Preparing Scout…"
+        handler.postDelayed({ finishReady() }, PREPARING_MS)
+    }
+
+    private fun finishReady() {
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_DID_DOWNLOAD, didDownload))
         finish()
     }
 
-    private fun showRetry(message: String) {
+    private fun showRetry(message: String, retry: () -> Unit) {
         percentText.text = ""
         sizeText.text = message
         sizeText.setOnClickListener {
             sizeText.setOnClickListener(null)
             sizeText.text = "Retrying…"
-            startDownload()
+            retry()
         }
     }
 
@@ -352,9 +466,8 @@ class ModelDownloadActivity : AppCompatActivity() {
         }, SLIDE_OUT_MS)
     }
 
-    // Simple crossfade -- independent of cycleMessage()'s slide animation above.
-    // Fixed order (no shuffle): the explanatory line stays first, real feature
-    // tips follow in the order declared in `tips`.
+    // Simple crossfade — independent of cycleMessage()'s slide animation above.
+    // Fixed order (no shuffle): real feature tips only, in the order declared in `tips`.
     private fun cycleTip() {
         val fadeOut = ObjectAnimator.ofFloat(tipText, "alpha", 1f, 0f)
         fadeOut.duration = TIP_FADE_MS

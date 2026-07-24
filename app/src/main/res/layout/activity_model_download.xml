@@ -103,16 +103,18 @@
 
         </LinearLayout>
 
-        <!-- Explains what's downloading, then rotates into real feature tips.
-             Separate from the humorous downloadMessage above; this box only ever
-             shows accurate, reassuring, or genuinely useful text. -->
+        <!-- Real feature tips, shown only during the Loading phase, not while
+             Downloading; gone by default. ModelDownloadActivity.kt reveals this
+             once the download (if any) finishes and loading into memory begins. -->
         <LinearLayout
+            android:id="@+id/tipContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:background="@drawable/bg_tip_callout"
             android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:gravity="center_vertical"
+            android:visibility="gone">
 
             <TextView
                 android:id="@+id/tipIcon"

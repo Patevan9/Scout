@@ -227,11 +227,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var currentMode = Mode.PRESENCE
 
-    // Set right after a model download finishes; consumed (and cleared) the next time
-    // TinyLlama actually finishes loading. Not persisted -- only meaningful within the
-    // single app session where the download just happened, never across restarts.
-    private var pendingDownloadReadyAnnouncement = false
-
     @Volatile
 
     private var isSpeaking = false
@@ -550,8 +545,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         setupTts()
 
-        startSystems()
+        // Scout never appears -- no face, no permissions, no listening, no greeting --
+        // until the offline brain is confirmed ready. The loading screen always shows
+        // first; startSystems() only ever runs once it returns (see modelDownloadLauncher).
+        if (LlamaEngine.isReady) {
+            startSystems()
+        } else {
+            launchLoadingGate()
+        }
 
+    }
+
+    private fun launchLoadingGate() {
+        try {
+            modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+        } catch (e: Throwable) {
+            android.util.Log.e("ScoutBrain", "modelDownloadLauncher.launch() threw", e)
+            startSystems() // fall back rather than leaving Scout stuck forever
+        }
     }
 
     private fun setupBrainServices() {
@@ -1078,24 +1089,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
 
+            // The first-time/again announcement now lives in modelDownloadLauncher's
+            // callback, which is the only place that reliably knows a real download
+            // just happened (EXTRA_DID_DOWNLOAD) -- this callback fires here on every
+            // ordinary load too, where no announcement should ever play.
             if (success) {
                 runOnUiThread { onBrainReady() }
-            }
-
-            // Only speaks this after a download actually just finished -- not on every
-            // ordinary launch's load. First-ever line ("ready now") plays once, lifetime
-            // of the install; every later download (upgrade, repair, different model)
-            // gets the "ready again" line so Scout doesn't act newly-born each time.
-            if (success && pendingDownloadReadyAnnouncement) {
-                pendingDownloadReadyAnnouncement = false
-                val alreadyMetUser = scoutPrefs.getBoolean(PREF_FIRST_STARTUP_DONE, false)
-                val line = if (alreadyMetUser) {
-                    "Thanks for waiting. My offline brain is ready again."
-                } else {
-                    scoutPrefs.edit().putBoolean(PREF_FIRST_STARTUP_DONE, true).apply()
-                    "Hi... thanks for waiting. My offline brain is ready now."
-                }
-                runOnUiThread { respond(line) }
             }
         }
 
@@ -1244,14 +1243,31 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
-        // When ModelDownloadActivity finishes (download complete), bootstrap and start the brain.
+        // ModelDownloadActivity is the one gate: covers downloading (if needed) and
+        // loading TinyLlama into memory, and never returns RESULT_OK until
+        // LlamaEngine.isReady is actually true. Speaks the first-time/again line only
+        // when a real download just happened (never on an ordinary no-download launch,
+        // per EXTRA_DID_DOWNLOAD), then runs the rest of boot for the first time --
+        // permissions, camera, mic. Always called on the main thread by the Activity
+        // Result API, so no runOnUiThread needed here.
         modelDownloadLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == RESULT_OK) {
-                pendingDownloadReadyAnnouncement = true
-                bootstrapModelFile()
-                startOfflineBrain()
+                val didDownload = result.data?.getBooleanExtra(
+                    ModelDownloadActivity.EXTRA_DID_DOWNLOAD, false
+                ) ?: false
+                if (didDownload) {
+                    val alreadyMetUser = scoutPrefs.getBoolean(PREF_FIRST_STARTUP_DONE, false)
+                    val line = if (alreadyMetUser) {
+                        "Thanks for waiting. My offline brain is ready again."
+                    } else {
+                        scoutPrefs.edit().putBoolean(PREF_FIRST_STARTUP_DONE, true).apply()
+                        "Hi... thanks for waiting. My offline brain is ready now."
+                    }
+                    respond(line)
+                }
+                startSystems()
             }
         }
 
