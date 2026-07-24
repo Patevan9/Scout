@@ -227,6 +227,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var currentMode = Mode.PRESENCE
 
+    // Set by onInit() if TTS becomes ready before the offline brain does (the common
+    // case). Consumed once, from startSystems(), once the brain is actually ready.
+    private var pendingBootAnnouncement: String? = null
+
     @Volatile
 
     private var isSpeaking = false
@@ -951,6 +955,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun startSystems() {
+
+        // TTS almost always finishes initializing before the offline brain does; this
+        // is the queued boot announcement from onInit() in that case, spoken now that
+        // the brain is actually ready instead of the moment TTS happened to be ready.
+        pendingBootAnnouncement?.let { out ->
+            pendingBootAnnouncement = null
+            speak(out, true)
+            convoDb.logTurn("scout", out)
+            journalDb.add("Booted. Spoke: $out")
+        }
 
         val permissionRequestLaunched = checkPermissionsAndStart()
 
@@ -2718,13 +2732,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val out = bootStatus.build()
 
-            speak(out, true)
+            // TTS init finishes independently of the offline-brain gate -- almost always
+            // well before it. Speaking here unconditionally is exactly the "half-awake
+            // Scout" the gate exists to prevent. Queued and spoken from startSystems()
+            // instead if the brain isn't ready yet.
+            if (LlamaEngine.isReady) {
+                speak(out, true)
+                convoDb.logTurn("scout", out)
+                journalDb.add("Booted. Spoke: $out")
+            } else {
+                pendingBootAnnouncement = out
+            }
 
-            convoDb.logTurn("scout", out)
-
-            journalDb.add("Booted. Spoke: $out")
-
-            if (!sttOk) {
+            if (!sttOk && LlamaEngine.isReady) {
                 handler.postDelayed({
                     val msg = "One thing — I can't hear on this device. Speech recognition may not be installed. Check your device's voice settings when you get a chance."
                     speak(msg, false)

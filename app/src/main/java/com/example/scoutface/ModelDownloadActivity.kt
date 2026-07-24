@@ -190,17 +190,13 @@ class ModelDownloadActivity : AppCompatActivity() {
                 if (src != null) {
                     copyIntoFilesDirThenLoad(src, internalDest)
                 } else {
-                    val savedId = getSharedPreferences("scout_prefs", MODE_PRIVATE)
-                        .getLong(PREF_DOWNLOAD_ID, -1L)
-                    val resumable = savedId != -1L && isDownloadActive(savedId)
-                    android.util.Log.i("ScoutBrain", "onCreate: savedId=$savedId resumable=$resumable")
-                    if (resumable) {
-                        didDownload = true
-                        downloadId = savedId
-                        pollProgress()
-                    } else {
-                        startDownload()
-                    }
+                    // Deliberately never resumes a saved download ID -- DownloadManager's
+                    // entries live in a system-wide database that isn't necessarily cleared
+                    // by "clear app data," so a stale saved ID can point at an old, silently
+                    // dead entry that reports as active forever. Always starting fresh trades
+                    // a small convenience (resuming after briefly backgrounding mid-download)
+                    // for eliminating a real, repeat "stuck at 0%" failure mode.
+                    startDownload()
                 }
             }
         }.start()
@@ -230,8 +226,24 @@ class ModelDownloadActivity : AppCompatActivity() {
             return
         }
 
+        // Shown immediately -- DownloadManager doesn't report real byte progress for a
+        // few seconds after enqueueing, and the screen shouldn't sit blank until then.
+        // updateProgress() overwrites this once real numbers start coming in.
+        sizeText.text = "Downloading Scout's offline AI brain — this is a one-time setup and may take a few minutes."
+
         val destFile = File(dir, MODEL_FILENAME)
         if (destFile.exists()) destFile.delete()
+
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+        // Explicitly cancel any old entry from a previous attempt rather than leaving it
+        // orphaned in DownloadManager's own system-wide database -- that database isn't
+        // necessarily cleared by "clear app data," so leftover dead entries can otherwise
+        // accumulate indefinitely across repeated fresh installs.
+        val oldId = getSharedPreferences("scout_prefs", MODE_PRIVATE).getLong(PREF_DOWNLOAD_ID, -1L)
+        if (oldId != -1L) {
+            try { dm.remove(oldId) } catch (_: Exception) {}
+        }
 
         val request = DownloadManager.Request(Uri.parse(MODEL_DOWNLOAD_URL))
             .setTitle("Scout offline brain")
@@ -244,7 +256,6 @@ class ModelDownloadActivity : AppCompatActivity() {
             .setAllowedOverMetered(true)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
 
-        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         downloadId = dm.enqueue(request)
         android.util.Log.i("ScoutBrain", "Download enqueued id=$downloadId dest=${dir.absolutePath}/$MODEL_FILENAME")
 
@@ -399,17 +410,6 @@ class ModelDownloadActivity : AppCompatActivity() {
             sizeText.text = "Retrying…"
             retry()
         }
-    }
-
-    private fun isDownloadActive(id: Long): Boolean {
-        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val cursor = dm.query(DownloadManager.Query().setFilterById(id)) ?: return false
-        if (!cursor.moveToFirst()) { cursor.close(); return false }
-        val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-        cursor.close()
-        return status == DownloadManager.STATUS_RUNNING ||
-               status == DownloadManager.STATUS_PENDING ||
-               status == DownloadManager.STATUS_PAUSED
     }
 
     private fun formatBytes(bytes: Long): String {
