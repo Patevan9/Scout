@@ -3258,9 +3258,14 @@ Respond only with Scout's next reply.
             // instead of answering about that one event. Trailing day words and a leading
             // article are stripped from the captured keyword so the search term matches a
             // plain event title ("Vet Appointment") instead of the full noisy phrase.
-            val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""")
+            val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b(?!\s+next\b))([a-z0-9' ]+?)\??$""")
                 .find(clean)?.groupValues?.get(1)?.trim()
                 ?.removeSuffix(" today")?.removeSuffix(" tomorrow")?.removeSuffix(" this week")
+                // "my next injection" / "next injection" -> "injection" -- findByTitle()
+                // requires the event's title to contain the whole search term, so filler
+                // words like "my"/"next" have to come off before matching a bare event
+                // title such as "injection".
+                ?.removePrefix("my next ")?.removePrefix("my ")?.removePrefix("next ")
                 ?.removePrefix("the ")?.removePrefix("a ")?.removePrefix("an ")
                 ?.trim()
 

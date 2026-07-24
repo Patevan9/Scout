@@ -222,9 +222,11 @@ clean.contains("go on the internet")
         }
 
         // "when is Nick's vet appointment" / "what time is the school play" — calendar
-        // title search. Excludes "my" so personal facts (birthday, etc.) keep routing to
-        // RECALL_FACT below instead of being swallowed by this broader pattern.
-        Regex("""\b(?:when is|what time is)\s+(?!my\b)([a-z0-9' ]+?)\??$""").find(clean)?.let {
+        // title search. Excludes bare "my" (e.g. "when is my birthday") so personal facts
+        // keep routing to RECALL_FACT below -- but "my next ___" (e.g. "when is my next
+        // injection") is a recurring-event calendar lookup, not a personal fact, so that
+        // specific phrasing is allowed through instead of being excluded.
+        Regex("""\b(?:when is|what time is)\s+(?!my\b(?!\s+next\b))([a-z0-9' ]+?)\??$""").find(clean)?.let {
             if (it.groupValues[1].isNotBlank()) return IntentType.CALENDAR
         }
 
