@@ -125,7 +125,11 @@ class SettingsActivity : AppCompatActivity() {
         val pitch = scoutPrefs.getFloat("voice_pitch", 1.0f)
         val speed = scoutPrefs.getFloat("voice_speed", 1.0f)
         val name  = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
-        val phrase = if (full) "Hello. My name is $name." else "Hello."
+        // Deliberately not phrased as "My name is $name" / "I'm $name" -- those exact
+        // sentence shapes are what TeachExtractor listens for to learn the *user's* own
+        // name (FactKey.NAME), so if this preview were ever picked up by the recognizer,
+        // it would misattribute Scout's own new name to the user instead.
+        val phrase = if (full) "Hi! How does this voice sound, $name?" else "Hello."
         tts?.let {
             it.setPitch(pitch)
             it.setSpeechRate(speed)

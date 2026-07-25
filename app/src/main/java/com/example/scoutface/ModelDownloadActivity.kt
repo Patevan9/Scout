@@ -432,8 +432,8 @@ class ModelDownloadActivity : AppCompatActivity() {
             percentText.text = "$percent%"
             sizeText.text = when {
                 percent == 100        -> "Download complete!"
-                timeLeft.isNotBlank() -> "$downloaded of $total  •  $timeLeft"
-                downloaded.isNotBlank() -> "$downloaded of $total"
+                timeLeft.isNotBlank() -> "Downloading… $downloaded of $total  •  $timeLeft"
+                downloaded.isNotBlank() -> "Downloading… $downloaded of $total"
                 else                  -> "Starting download…"
             }
         }

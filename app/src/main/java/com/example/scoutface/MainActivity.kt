@@ -283,6 +283,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var wantListening = true
 
+    // Guards maybeStartListening() against restarting the mic while MainActivity isn't
+    // actually in the foreground (e.g. while SettingsActivity is on top). onPause() cancels
+    // the recognizer and the watchdog, but a scheduleListenRestart() Handler callback queued
+    // just before the pause can still fire later and call maybeStartListening() regardless --
+    // that queued callback has no other way of knowing the activity was backgrounded since.
+    private var isForeground = true
+
     private var pendingListenStart = false
 
     private var bootFinishedSpeaking = false
@@ -672,6 +679,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // from destroying/recreating the recognizer in the background. Without this,
         // the watchdog (recognizerWatchdog) keeps rescheduling itself every
         // RECOGNIZER_WATCHDOG_MS forever, regardless of foreground state.
+        isForeground = false
         stopListeningSafe()
         handler.removeCallbacks(recognizerWatchdog)
 
@@ -680,6 +688,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
 
         super.onResume()
+
+        isForeground = true
 
         // Re-apply voice settings in case they were changed in SettingsActivity.
         tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
@@ -2437,6 +2447,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun maybeStartListening() {
+
+        if (!isForeground) return
 
         if (!wantListening) return
 
