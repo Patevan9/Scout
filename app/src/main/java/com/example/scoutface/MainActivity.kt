@@ -3265,13 +3265,15 @@ Respond only with Scout's next reply.
     private fun handleCalendarIntent(qNorm: String) {
 
         if (!prefs.getBoolean(PREF_CALENDAR_ENABLED, false)) {
-            respond("I don't check calendars right now. You can turn that on in Settings if you'd like.")
+            respond("I don't check calendars right now. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
+            openSettingsScreen(SettingsActivity.S_PRIVACY)
             return
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
             != PackageManager.PERMISSION_GRANTED) {
-            respond("I don't have calendar access yet. You can turn that on in Settings.")
+            respond("I don't have calendar access yet. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
+            openSettingsScreen(SettingsActivity.S_PRIVACY)
             return
         }
 
@@ -3581,10 +3583,19 @@ Respond only with Scout's next reply.
 
         respond("Here's Calendar Awareness, in Settings.")
 
+        openSettingsScreen(SettingsActivity.S_PRIVACY)
+
+    }
+
+    // Shared by every voice path that needs to land the user on a specific Settings
+    // screen (Calendar Awareness, Brain & Behavior) instead of just telling them where
+    // to look and leaving them to find it by hand.
+    private fun openSettingsScreen(screen: String) {
+
         handler.postDelayed({
             startActivity(
                 Intent(this, SettingsActivity::class.java)
-                    .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, SettingsActivity.S_PRIVACY)
+                    .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, screen)
             )
             overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
         }, 600L)
@@ -4000,13 +4011,7 @@ Respond only with Scout's next reply.
             // Internet's fine -- go straight to Brain & Behavior (where Online Features
             // and the API key live) instead of just describing status and leaving the
             // user to hunt for it themselves.
-            handler.postDelayed({
-                startActivity(
-                    Intent(this, SettingsActivity::class.java)
-                        .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, SettingsActivity.S_BRAIN)
-                )
-                overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
-            }, 600L)
+            openSettingsScreen(SettingsActivity.S_BRAIN)
 
         }
 
