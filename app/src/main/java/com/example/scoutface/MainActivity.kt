@@ -148,6 +148,10 @@ enum class IntentType {
 
     TEACH_WIFE_NAME, TEACH_SON_NAME, TEACH_DOG_NAME, TEACH_MY_NAME,
 
+    FAMILY_NAMES,
+
+    OPEN_CALENDAR_SETTINGS,
+
     WEATHER,
 
     CALENDAR,
@@ -3530,6 +3534,47 @@ Respond only with Scout's next reply.
 
     }
 
+    // "what are the names in my family" -- a summary across wife/son/dog, answered
+    // straight from stored facts. Never sent to Gemini or TinyLlama, which have no
+    // access to these facts and would otherwise have to guess.
+    private fun handleFamilyNamesQuery() {
+
+        val wife = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.WIFE_NAME)
+        val son  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
+        val dog  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.DOG_NAME)
+
+        val parts = mutableListOf<String>()
+        if (!wife.isNullOrBlank()) parts.add("your wife is $wife")
+        if (!son.isNullOrBlank()) parts.add("your son is $son")
+        if (!dog.isNullOrBlank()) parts.add("your dog is $dog")
+
+        val out = if (parts.isEmpty()) {
+            "I don't know anyone in your family yet. You can tell me their names and I'll remember."
+        } else {
+            "In your family, " + parts.joinToString(", ") + "."
+        }
+
+        respond(out)
+
+    }
+
+    // "turn on calendar" -- opens Settings straight to Calendar Awareness (Privacy & Data)
+    // instead of just telling the user where to look, matching the existing "open settings"
+    // shortcut's own delayed-launch/slide-in pattern.
+    private fun handleOpenCalendarSettingsIntent() {
+
+        respond("Here's Calendar Awareness, in Settings.")
+
+        handler.postDelayed({
+            startActivity(
+                Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, SettingsActivity.S_PRIVACY)
+            )
+            overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+        }, 600L)
+
+    }
+
     private fun handleAskSonNameIntent() {
 
         val s = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
@@ -3642,6 +3687,7 @@ Respond only with Scout's next reply.
             IntentType.IDENTITY, IntentType.RECALL_FACT,
             IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
             IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
+            IntentType.FAMILY_NAMES, IntentType.OPEN_CALENDAR_SETTINGS,
             IntentType.WEATHER, IntentType.CALENDAR -> true
             else -> false
         }
@@ -3698,6 +3744,10 @@ Respond only with Scout's next reply.
             IntentType.ASK_SON_NAME -> handleAskSonNameIntent()
 
             IntentType.ASK_DOG_NAME -> handleAskDogNameIntent()
+
+            IntentType.FAMILY_NAMES -> handleFamilyNamesQuery()
+
+            IntentType.OPEN_CALENDAR_SETTINGS -> handleOpenCalendarSettingsIntent()
 
             IntentType.WEATHER -> weatherManager.fetchWeather(qNorm)
 
@@ -3923,9 +3973,24 @@ Respond only with Scout's next reply.
 
         if (!validated) {
 
+            // Not connected at all -- fixing that comes first, so the OS's own
+            // connectivity panel takes priority over Scout's own Settings screen.
             journalDb.add("GoOnline: not validated, opened panel.")
 
             connectivityManager.openInternetPanel()
+
+        } else {
+
+            // Internet's fine -- go straight to Brain & Behavior (where Online Features
+            // and the API key live) instead of just describing status and leaving the
+            // user to hunt for it themselves.
+            handler.postDelayed({
+                startActivity(
+                    Intent(this, SettingsActivity::class.java)
+                        .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, SettingsActivity.S_BRAIN)
+                )
+                overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+            }, 600L)
 
         }
 
@@ -3967,6 +4032,8 @@ Respond only with Scout's next reply.
         IntentType.ASK_WIFE_NAME   -> DiagLog.DiagIntent.ASK_WIFE_NAME
         IntentType.ASK_SON_NAME    -> DiagLog.DiagIntent.ASK_SON_NAME
         IntentType.ASK_DOG_NAME    -> DiagLog.DiagIntent.ASK_DOG_NAME
+        IntentType.FAMILY_NAMES    -> DiagLog.DiagIntent.RECALL_FACT
+        IntentType.OPEN_CALENDAR_SETTINGS -> DiagLog.DiagIntent.CALENDAR
         IntentType.TEACH_WIFE_NAME -> DiagLog.DiagIntent.TEACH_WIFE_NAME
         IntentType.TEACH_SON_NAME  -> DiagLog.DiagIntent.TEACH_SON_NAME
         IntentType.TEACH_DOG_NAME  -> DiagLog.DiagIntent.TEACH_DOG_NAME

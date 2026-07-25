@@ -29,6 +29,35 @@ object ScoutIntentRouter {
             return IntentType.IDENTITY
         }
 
+        // "what are the names in my family" / "who's in my family" -- a summary across
+        // wife/son/dog, checked before the individual wife/son/dog checks below since
+        // it doesn't name any one relation specifically.
+        if (
+            clean.contains("names in my family") ||
+            clean.contains("name in my family") ||
+            clean.contains("who's in my family") ||
+            clean.contains("who is in my family") ||
+            clean.contains("family's names") ||
+            clean.contains("families names") ||
+            clean.contains("who are the people in my family") ||
+            (clean.contains("family") && clean.contains("member") && clean.contains("name"))
+        ) {
+            return IntentType.FAMILY_NAMES
+        }
+
+        // "turn on calendar" / "enable calendar" -- opens Calendar Awareness in Settings.
+        // Distinct from the CALENDAR intent below, which reads calendar events -- this is
+        // about finding the toggle itself, not asking what's on the calendar.
+        if (
+            clean.contains("turn on calendar") ||
+            clean.contains("turn calendar on") ||
+            clean.contains("enable calendar") ||
+            clean.contains("calendar settings") ||
+            clean.contains("calendar awareness")
+        ) {
+            return IntentType.OPEN_CALENDAR_SETTINGS
+        }
+
         if (clean.contains("wife") || clean.contains("spouse")) {
             if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
                 return IntentType.ASK_WIFE_NAME

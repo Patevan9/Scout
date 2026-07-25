@@ -60,11 +60,16 @@ class SettingsActivity : AppCompatActivity() {
     private val IC_EXTRAS    = Color.parseColor("#3E2E10")
 
     companion object {
+        // Lets other activities (MainActivity, via voice commands like "go online" /
+        // "turn on calendar") launch straight into a specific screen instead of always
+        // landing on the main menu -- S_BRAIN and S_PRIVACY are exposed for that.
+        const val EXTRA_TARGET_SCREEN = "target_screen"
+        const val S_BRAIN     = "brain"
+        const val S_PRIVACY   = "privacy"
+
         private const val S_MAIN      = "main"
         private const val S_IDENTITY  = "identity"
-        private const val S_BRAIN     = "brain"
         private const val S_WORKBENCH = "workbench"
-        private const val S_PRIVACY   = "privacy"
         private const val S_EXTRAS    = "extras"
         private const val S_ROBOT     = "robot_name"
         private const val S_APIKEY    = "api_key"
@@ -101,6 +106,12 @@ class SettingsActivity : AppCompatActivity() {
         })
 
         push(S_MAIN)
+
+        // Voice-command deep link (e.g. "go online" / "turn on calendar") -- lands on
+        // the requested screen on top of Main, so back navigation still makes sense.
+        intent.getStringExtra(EXTRA_TARGET_SCREEN)?.let { target ->
+            if (target == S_BRAIN || target == S_PRIVACY) push(target)
+        }
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
