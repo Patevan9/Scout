@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -181,7 +182,21 @@ class ApiKeySetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         rootLayout = buildLayout()
-        setContentView(rootLayout)
+
+        // The picker phase stacks a title, subtitle, a responsibility note, and three
+        // provider cards (Gemini/OpenAI/Claude) in a plain vertical layout with no scroll
+        // capability -- on this screen's locked landscape orientation (short height), that
+        // content is taller than the visible screen, silently cutting off the last card
+        // (Claude) below the fold rather than showing it scrolled. Wrapping in a ScrollView
+        // fixes that without changing anything about how the content itself is built.
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(
+                rootLayout,
+                ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
+        }
+        setContentView(scroll)
 
         renderPhase()
     }
