@@ -2978,8 +2978,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val convo = convoDb.getLastTurns(limit = 2)
 
             val userName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+            val wifeName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.WIFE_NAME)
+            val sonName   = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
+            val dogName   = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.DOG_NAME)
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-            val nameLine  = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
+
+            // Only the four fixed facts, not the full flexible fact store -- nCtx=512
+            // leaves little room to spare, and these are the ones people actually ask
+            // about in passing ("what's my wife's name again?") that don't always match
+            // a dedicated intent and fall through to here.
+            val factLines = buildList {
+                if (!userName.isNullOrBlank()) add("The user's name is $userName.")
+                if (!wifeName.isNullOrBlank()) add("His wife's name is $wifeName.")
+                if (!sonName.isNullOrBlank())  add("His son's name is $sonName.")
+                if (!dogName.isNullOrBlank())  add("His dog's name is $dogName.")
+            }
+            val nameLine = if (factLines.isNotEmpty()) factLines.joinToString(" ") + " " else ""
 
             val system = """
 ${nameLine}You are $scoutName.
@@ -2989,6 +3003,8 @@ You are a warm, calm companion who lives with the family.
 You speak out loud, listen through the microphone, and can see through the camera when vision is active.
 
 Always answer as Scout.
+
+If asked about the user's name, wife, son, or dog, answer only using the facts given above. Do not invent any other names or family members.
 
 Do not call yourself a chatbot, assistant, AI model, language model, or robot.
 
