@@ -45,13 +45,15 @@ object ScoutIntentRouter {
             return IntentType.FAMILY_NAMES
         }
 
-        // "turn on calendar" / "enable calendar" -- opens Calendar Awareness in Settings.
-        // Distinct from the CALENDAR intent below, which reads calendar events -- this is
-        // about finding the toggle itself, not asking what's on the calendar.
+        // "turn on calendar" / "turn on the calendar" / "enable calendar" -- opens Calendar
+        // Awareness in Settings. Distinct from the CALENDAR intent below, which reads
+        // calendar events -- this is about finding the toggle itself. The optional "the"
+        // matters: "turn on THE calendar" is the more natural phrasing and a bare
+        // clean.contains("turn on calendar") substring check misses it entirely.
         if (
-            clean.contains("turn on calendar") ||
-            clean.contains("turn calendar on") ||
-            clean.contains("enable calendar") ||
+            Regex("""\bturn on (?:the\s+)?calendar\b""").containsMatchIn(clean) ||
+            Regex("""\bturn (?:the\s+)?calendar on\b""").containsMatchIn(clean) ||
+            Regex("""\benable (?:the\s+)?calendar\b""").containsMatchIn(clean) ||
             clean.contains("calendar settings") ||
             clean.contains("calendar awareness")
         ) {
