@@ -2977,26 +2977,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val convo = convoDb.getLastTurns(limit = 2)
 
-            val userName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
-            val wifeName  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.WIFE_NAME)
-            val sonName   = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
-            val dogName   = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.DOG_NAME)
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
 
-            // Only the four fixed facts, not the full flexible fact store -- nCtx=512
-            // leaves little room to spare, and these are the ones people actually ask
-            // about in passing ("what's my wife's name again?") that don't always match
-            // a dedicated intent and fall through to here.
-            val factLines = buildList {
-                if (!userName.isNullOrBlank()) add("The user's name is $userName.")
-                if (!wifeName.isNullOrBlank()) add("His wife's name is $wifeName.")
-                if (!sonName.isNullOrBlank())  add("His son's name is $sonName.")
-                if (!dogName.isNullOrBlank())  add("His dog's name is $dogName.")
-            }
-            val nameLine = if (factLines.isNotEmpty()) factLines.joinToString(" ") + " " else ""
+            // Every fact TruthDb holds on the user -- name, wife, son, dog, favorite
+            // things, birthday, whatever's been taught -- not just a hand-picked few.
+            // Capped defensively against nCtx=512 overflow, but ordered oldest-first
+            // (TruthDb.getAllFacts()'s natural order), so foundational facts taught
+            // early -- name, family, pets -- survive the cap even as more get added
+            // over time; take() drops only the newest overflow, not the core ones.
+            val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY).take(12)
+            val factsLine = if (allFacts.isNotEmpty()) {
+                "Known facts about the user: " +
+                    allFacts.joinToString(" ") { (k, v) -> "${keyToHuman(k)}: $v." } + " "
+            } else ""
 
             val system = """
-${nameLine}You are $scoutName.
+${factsLine}You are $scoutName.
 
 You are a warm, calm companion who lives with the family.
 
@@ -3004,7 +3000,7 @@ You speak out loud, listen through the microphone, and can see through the camer
 
 Always answer as Scout.
 
-If asked about the user's name, wife, son, or dog, answer only using the facts given above. Do not invent any other names or family members.
+If asked about the user's name, family, or personal facts, answer only using the facts given above. Do not invent names, relationships, or details that aren't listed there.
 
 Do not call yourself a chatbot, assistant, AI model, language model, or robot.
 
@@ -3449,6 +3445,21 @@ Respond only with Scout's next reply.
 
     }
 
+    private fun keyToHuman(key: String): String = when (key) {
+        "name" -> "name"
+        "wife_name" -> "wife's name"
+        "son_name" -> "son's name"
+        "dog_name" -> "dog's name"
+        else -> {
+            // Collapse legacy double-prefix from old bug: "favorite_favorite_color" → "favorite_color"
+            val cleaned = if (key.startsWith("favorite_favorite_")) key.removePrefix("favorite_") else key
+            if (cleaned.endsWith("_name"))
+                cleaned.removeSuffix("_name").replace("_", " ") + "'s name"
+            else
+                cleaned.replace("_", " ")
+        }
+    }
+
     private fun handleWhatYouLearnedQuery() {
 
         val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY)
@@ -3460,21 +3471,6 @@ Respond only with Scout's next reply.
         }
 
         val olderFacts = allFacts.filter { it !in todayFacts }
-
-        fun keyToHuman(key: String): String = when (key) {
-            "name" -> "name"
-            "wife_name" -> "wife's name"
-            "son_name" -> "son's name"
-            "dog_name" -> "dog's name"
-            else -> {
-                // Collapse legacy double-prefix from old bug: "favorite_favorite_color" → "favorite_color"
-                val cleaned = if (key.startsWith("favorite_favorite_")) key.removePrefix("favorite_") else key
-                if (cleaned.endsWith("_name"))
-                    cleaned.removeSuffix("_name").replace("_", " ") + "'s name"
-                else
-                    cleaned.replace("_", " ")
-            }
-        }
 
         fun formatList(facts: List<Pair<String, String>>): String =
             facts.take(5).joinToString(" ") { (k, v) -> "Your ${keyToHuman(k)} is $v." }
