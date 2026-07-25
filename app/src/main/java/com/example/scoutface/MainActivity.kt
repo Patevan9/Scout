@@ -663,9 +663,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             hasApiKey = { apiKey.trim().isNotBlank() },
 
-            hasValidatedInternet = { connectivityManager.hasValidatedInternet() },
-
-            lastLlamaLoadMs = { scoutPrefs.getLong("llama_last_load_ms", Long.MAX_VALUE) }
+            hasValidatedInternet = { connectivityManager.hasValidatedInternet() }
 
         )
 
@@ -1118,7 +1116,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // uses 2 conversation turns, so 512 tokens is more than enough.
         LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
             val loadMs = System.currentTimeMillis() - llamaLoadStart
-            scoutPrefs.edit().putLong("llama_last_load_ms", loadMs).apply()
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
 
