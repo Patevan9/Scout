@@ -3581,6 +3581,15 @@ Respond only with Scout's next reply.
     // shortcut's own delayed-launch/slide-in pattern.
     private fun handleOpenCalendarSettingsIntent() {
 
+        val alreadyOn = prefs.getBoolean(PREF_CALENDAR_ENABLED, false) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (alreadyOn) {
+            respond("Calendar Awareness is already on.")
+            return
+        }
+
         respond("Here's Calendar Awareness, in Settings.")
 
         openSettingsScreen(SettingsActivity.S_PRIVACY)

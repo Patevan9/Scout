@@ -276,6 +276,15 @@ clean.contains("go on the internet")
             return IntentType.CALENDAR
         }
 
+        // Catch-all: any other mention of "calendar" that didn't match a more specific
+        // pattern above still routes through handleCalendarIntent() -- which already
+        // opens Calendar Awareness in Settings when it isn't on, or gives a best-effort
+        // answer (defaulting to today) when it is -- instead of falling through to the
+        // general conversational brain, which has no calendar awareness of its own.
+        if (clean.contains("calendar")) {
+            return IntentType.CALENDAR
+        }
+
         if (
 clean.contains("what is my") ||
 clean.contains("what's my") ||
