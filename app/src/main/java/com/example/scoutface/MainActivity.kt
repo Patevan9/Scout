@@ -69,6 +69,7 @@ import com.example.scoutface.brain.ScoutBootStatus
 import com.example.scoutface.brain.ScoutConnectivityManager
 
 import com.example.scoutface.brain.ScoutIntentRouter
+import com.example.scoutface.brain.ScoutMemoryGate
 
 import com.example.scoutface.brain.TeachExtractor
 
@@ -2943,6 +2944,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun handleUnknownIntent(qNorm: String) {
 
+        // Structural guarantee, not a phrasing list: anything that might concern
+        // the owner, family, pets, preferences, or learned facts is checked here,
+        // before Gemini is ever considered. If it matches, this returns and
+        // Gemini is never called for this query -- handlePersonalMemoryQuery()
+        // below has no path to scoutGeminiManager at all. The gate is deliberately
+        // broad (see ScoutMemoryGate) since a false positive just costs a wasted
+        // TruthDb check, while a false negative would mean a personal question
+        // reaching a fact-blind Gemini.
+        val userFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY)
+        if (ScoutMemoryGate.isPossiblePersonalMemoryQuery(qNorm.lowercase().trim(), userFacts)) {
+            handlePersonalMemoryQuery(qNorm, userFacts)
+            return
+        }
+
         val convo = convoDb.getLastTurns(limit = 6)
 
         val usedGemini = scoutGeminiManager.tryGemini(
@@ -2960,6 +2975,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (usedGemini) return
 
         // Gemini not available (disabled / no key / no internet) — go straight to TinyLlama
+        tryTinyLlamaOrFallback(qNorm)
+
+    }
+
+    // TruthDb is authoritative here: an empty fact store means a hard, deterministic
+    // "I don't know" (voice.say, no LLM call at all -- can't hallucinate what it never
+    // asked a model for). A non-empty store reuses tryTinyLlamaOrFallback() as-is --
+    // it already never calls Gemini and already grounds every reply in TruthDb's
+    // facts, so this needs no separate/duplicated generation path.
+    private fun handlePersonalMemoryQuery(qNorm: String, facts: List<Pair<String, String>>) {
+
+        if (facts.isEmpty()) {
+            respond(voice.say("DONT_KNOW"))
+            return
+        }
+
         tryTinyLlamaOrFallback(qNorm)
 
     }
@@ -2985,6 +3016,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // (TruthDb.getAllFacts()'s natural order), so foundational facts taught
             // early -- name, family, pets -- survive the cap even as more get added
             // over time; take() drops only the newest overflow, not the core ones.
+            //
+            // This is a minimal, safe placeholder, not the final retrieval design.
+            // It's an oldest-first dump-and-cap, not relevance-based selection --
+            // once the fact count exceeds 12, a newer fact that's actually the one
+            // being asked about could still get pushed out. Selecting only the
+            // facts relevant to the current question is a later hardening step.
             val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY).take(12)
             val factsLine = if (allFacts.isNotEmpty()) {
                 "Known facts about the user: " +

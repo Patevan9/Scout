@@ -60,19 +60,32 @@ object ScoutIntentRouter {
             return IntentType.OPEN_CALENDAR_SETTINGS
         }
 
-        if (clean.contains("wife") || clean.contains("spouse")) {
+        // A query naming more than one relation ("what are my wife and son's
+        // names") isn't answerable by any single one of these three handlers --
+        // each only knows how to say one name. Rather than pick one relation
+        // arbitrarily and drop the rest, a compound mention falls through
+        // unmatched here so it reaches UNKNOWN, where the personal-memory gate
+        // retrieves every relevant fact instead of just one.
+        val relationCategoriesPresent = listOf(
+            clean.contains("wife") || clean.contains("spouse"),
+            clean.contains("son") || clean.contains("kid") || clean.contains("child"),
+            clean.contains("dog") || clean.contains("pet")
+        ).count { it }
+        val isSingleRelation = relationCategoriesPresent <= 1
+
+        if (isSingleRelation && (clean.contains("wife") || clean.contains("spouse"))) {
             if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
                 return IntentType.ASK_WIFE_NAME
             }
         }
 
-        if (clean.contains("son") || clean.contains("kid") || clean.contains("child")) {
+        if (isSingleRelation && (clean.contains("son") || clean.contains("kid") || clean.contains("child"))) {
             if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
                 return IntentType.ASK_SON_NAME
             }
         }
 
-        if (clean.contains("dog") || clean.contains("pet")) {
+        if (isSingleRelation && (clean.contains("dog") || clean.contains("pet"))) {
             if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("what is my") || clean.contains("what's my") || clean.contains("tell me about my")) {
                 return IntentType.ASK_DOG_NAME
             }
