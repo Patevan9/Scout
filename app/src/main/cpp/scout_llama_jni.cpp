@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cerrno>
 #include <dlfcn.h>
+#include <algorithm>
 
 #include "scout_llama_api.h"
 
@@ -139,10 +140,15 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerate(
     LOGI("nativeGenerate: START prompt_len=%zu nPredict=%d temp=%.2f",
          prompt.size(), (int)nPredict, (double)temp);
 
+    const int kNBatch = 512;   // must match cparams.n_batch below -- llama_decode()
+                               // aborts (ggml_abort/SIGABRT) if a batch exceeds this,
+                               // so every llama_decode() call in this function is kept
+                               // at or under kNBatch tokens, never just n_ctx.
+
     llama_free(sm->ctx);
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = 2048;
-    cparams.n_batch = 512;
+    cparams.n_batch = kNBatch;
     cparams.n_threads = 2;
     sm->ctx = llama_new_context_with_model(sm->model, cparams);
     if (!sm->ctx) {
@@ -170,27 +176,59 @@ vocab,
     }
     prompt_tokens.resize(n_prompt);
 
-    LOGI("nativeGenerate: step F — calling llama_batch_init(%d)", n_prompt);
-    llama_batch batch = llama_batch_init(n_prompt, 0, 1);
-    LOGI("nativeGenerate: step G — filling batch token=%p pos=%p logits=%p",
-         (void*)batch.token, (void*)batch.pos, (void*)batch.logits);
+    // Prefill in chunks of at most kNBatch tokens instead of one llama_batch_init(n_prompt)
+    // covering the whole prompt -- a prompt over 512 tokens (easily reached now that the
+    // personal-memory/general fact grounding can inject a dozen facts plus conversation
+    // history) used to build one oversized batch and crash llama_decode() with SIGABRT.
+    // Positions stay absolute across chunks (idx, not the chunk-local loop index i) so the
+    // model sees the same token sequence it would have in a single batch; only the true
+    // final token of the whole prompt requests logits, since that's the only one needed to
+    // start the generation loop below.
+    LOGI("nativeGenerate: step F — prefilling %d prompt token(s) in chunks of %d", n_prompt, kNBatch);
 
-    for (int i = 0; i < n_prompt; i++) {
-        batch.token[i]     = prompt_tokens[i];
-        batch.pos[i]       = i;
-        batch.n_seq_id[i]  = 1;
-        batch.seq_id[i][0] = 0;
-        batch.logits[i]    = (i == n_prompt - 1) ? 1 : 0;
-    }
-    batch.n_tokens = n_prompt;
+    // llama_get_logits_ith(ctx, i) indexes into the batch from the *most recent*
+    // llama_decode() call, not a global position across every decode ever made --
+    // so once prefill is chunked, the final prompt token's logits live at its
+    // local index within the *last* chunk's batch, not at n_prompt-1. Captured
+    // below as lastPromptLogitsIdx and used instead of n_prompt-1 for step 0.
+    int n_done = 0;
+    int lastPromptLogitsIdx = 0;
+    while (n_done < n_prompt) {
+        int chunk = std::min(kNBatch, n_prompt - n_done);
 
-    LOGI("nativeGenerate: step H — calling llama_decode (prefill)");
-    if (llama_decode(sm->ctx, batch) != 0) {
-        LOGE("nativeGenerate: prefill decode failed");
+        llama_batch batch = llama_batch_init(chunk, 0, 1);
+        for (int i = 0; i < chunk; i++) {
+            int idx = n_done + i;
+            batch.token[i]     = prompt_tokens[idx];
+            batch.pos[i]       = idx;
+            batch.n_seq_id[i]  = 1;
+            batch.seq_id[i][0] = 0;
+            bool isLastPromptToken = (idx == n_prompt - 1);
+            batch.logits[i]    = isLastPromptToken ? 1 : 0;
+            if (isLastPromptToken) lastPromptLogitsIdx = i;
+        }
+        batch.n_tokens = chunk;
+
+        if (batch.n_tokens > kNBatch) {
+            LOGE("nativeGenerate: refusing oversized prefill batch n_tokens=%d > kNBatch=%d",
+                 batch.n_tokens, kNBatch);
+            llama_batch_free(batch);
+            return env->NewStringUTF("");
+        }
+
+        LOGI("nativeGenerate: step G — prefill chunk [%d, %d) n_tokens=%d calling llama_decode",
+             n_done, n_done + chunk, batch.n_tokens);
+        int rc = llama_decode(sm->ctx, batch);
+        LOGI("nativeGenerate: step H — prefill chunk decode rc=%d", rc);
         llama_batch_free(batch);
-        return env->NewStringUTF("");
+
+        if (rc != 0) {
+            LOGE("nativeGenerate: prefill decode failed at chunk starting %d (rc=%d)", n_done, rc);
+            return env->NewStringUTF("");
+        }
+
+        n_done += chunk;
     }
-    llama_batch_free(batch);
     LOGI("nativeGenerate: step I — prefill done, starting generation loop");
 
     llama_token eos = 2;   // TinyLlama EOS = </s> — confirmed in model metadata
@@ -202,7 +240,7 @@ vocab,
     int  cur_pos = n_prompt;
 
     for (int step = 0; step < (int)nPredict; step++) {
-        int logits_idx = (step == 0) ? (n_prompt - 1) : 0;
+        int logits_idx = (step == 0) ? lastPromptLogitsIdx : 0;
         float* logits = llama_get_logits_ith(sm->ctx, logits_idx);
         if (!logits) { LOGE("nativeGenerate: null logits step %d", step); break; }
 
@@ -244,8 +282,17 @@ vocab,
         next.seq_id[0][0] = 0;
         next.logits[0]    = 1;
         next.n_tokens     = 1;
-        if (llama_decode(sm->ctx, next) != 0) {
-            LOGE("nativeGenerate: decode failed step %d", step);
+        if (next.n_tokens > kNBatch) {
+            // Always 1 token here, so this can't actually fire -- kept for the same
+            // reason as the prefill guard: no llama_decode() call in this function
+            // should ever be able to exceed kNBatch without being caught explicitly.
+            LOGE("nativeGenerate: refusing oversized step batch n_tokens=%d > kNBatch=%d",
+                 next.n_tokens, kNBatch);
+            llama_batch_free(next); break;
+        }
+        int rc = llama_decode(sm->ctx, next);
+        if (rc != 0) {
+            LOGE("nativeGenerate: decode failed step %d rc=%d", step, rc);
             llama_batch_free(next); break;
         }
         llama_batch_free(next);
