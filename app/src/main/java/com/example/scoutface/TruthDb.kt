@@ -70,6 +70,38 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
         return out
     }
 
+    // Every distinct entity that has ever had a fact stored -- "user_primary",
+    // "scout", and any named person/pet (e.g. "diana", "nicolas") once something's
+    // been taught about them directly. Lets callers discover and gather facts for
+    // every person/pet Scout knows about, not just a fixed pair of entity names.
+    fun getAllEntities(): List<String> {
+        val out = mutableListOf<String>()
+        readableDatabase.rawQuery(
+            "SELECT DISTINCT entity FROM entity_memory;",
+            null
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    // Aliases (nicknames) for an entity, stored as one comma-joined "aliases" fact
+    // rather than a new table -- "Nicolas" can pick up "Nick," then later "Nicky,"
+    // without a schema change, and without one row per alias.
+    fun addAlias(entity: String, alias: String) {
+        val aliasClean = alias.trim()
+        if (aliasClean.isBlank()) return
+        val existing = getAliases(entity)
+        if (existing.any { it.equals(aliasClean, ignoreCase = true) }) return
+        val updated = (existing + aliasClean).joinToString(", ")
+        upsertFact(entity, "aliases", updated, 1.0f, "spoken_teach")
+    }
+
+    fun getAliases(entity: String): List<String> {
+        val raw = getFactValue(entity, "aliases") ?: return emptyList()
+        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
     fun deleteFact(entity: String, factKey: String) {
         writableDatabase.execSQL(
             "DELETE FROM entity_memory WHERE entity=? AND fact_key=?;",

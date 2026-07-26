@@ -72,6 +72,8 @@ import com.example.scoutface.brain.ScoutIntentRouter
 import com.example.scoutface.brain.ScoutMemoryGate
 
 import com.example.scoutface.brain.TeachExtractor
+import com.example.scoutface.brain.ScoutEntityResolver
+import com.example.scoutface.brain.ScoutFactExtractor
 
 import com.example.scoutface.brain.ScoutPromptBuilder
 
@@ -2942,6 +2944,32 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // Every fact Scout holds, across the user's own entity and every named
+    // person/pet entity resolved from teaching (Diana, Nicolas, ...) -- not just
+    // the user's own facts. The user's own entity is listed first so it survives
+    // any downstream cap ahead of named entities' facts. Tagged with which entity
+    // each fact is about so callers can attribute it correctly (e.g. "Diana's
+    // birthday" vs. an unqualified "birthday").
+    private fun getAllKnownFacts(): List<Triple<String, String, String>> {
+        val entities = truthDb.getAllEntities().filter { it != ENTITY_SCOUT }
+        val ordered = listOfNotNull(ENTITY_USER_PRIMARY.takeIf { it in entities }) +
+            entities.filter { it != ENTITY_USER_PRIMARY }
+        val out = mutableListOf<Triple<String, String, String>>()
+        for (entity in ordered) {
+            for ((key, value) in truthDb.getAllFacts(entity)) {
+                if (key == "aliases") {
+                    // Expand the comma-joined alias list into individual entries so
+                    // the memory gate can recognize each nickname on its own, not
+                    // just the literal joined string.
+                    for (alias in truthDb.getAliases(entity)) out.add(Triple(entity, "alias", alias))
+                } else {
+                    out.add(Triple(entity, key, value))
+                }
+            }
+        }
+        return out
+    }
+
     private fun handleUnknownIntent(qNorm: String) {
 
         // Structural guarantee, not a phrasing list: anything that might concern
@@ -2952,9 +2980,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // broad (see ScoutMemoryGate) since a false positive just costs a wasted
         // TruthDb check, while a false negative would mean a personal question
         // reaching a fact-blind Gemini.
-        val userFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY)
-        if (ScoutMemoryGate.isPossiblePersonalMemoryQuery(qNorm.lowercase().trim(), userFacts)) {
-            handlePersonalMemoryQuery(qNorm, userFacts)
+        val flatFacts = getAllKnownFacts().map { (_, k, v) -> k to v }
+        if (ScoutMemoryGate.isPossiblePersonalMemoryQuery(qNorm.lowercase().trim(), flatFacts)) {
+            handlePersonalMemoryQuery(qNorm, flatFacts)
             return
         }
 
@@ -3010,22 +3038,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
 
-            // Every fact TruthDb holds on the user -- name, wife, son, dog, favorite
-            // things, birthday, whatever's been taught -- not just a hand-picked few.
-            // Capped defensively against nCtx=512 overflow, but ordered oldest-first
-            // (TruthDb.getAllFacts()'s natural order), so foundational facts taught
-            // early -- name, family, pets -- survive the cap even as more get added
-            // over time; take() drops only the newest overflow, not the core ones.
+            // Every fact TruthDb holds -- the user's own, plus anyone/anything
+            // named Scout knows about (Diana, Nicolas, ...) -- not just a
+            // hand-picked few. Capped defensively against nCtx=512 overflow, with
+            // the user's own facts ordered first (see getAllKnownFacts()), so
+            // foundational facts survive the cap even as more get added over time.
             //
             // This is a minimal, safe placeholder, not the final retrieval design.
             // It's an oldest-first dump-and-cap, not relevance-based selection --
             // once the fact count exceeds 12, a newer fact that's actually the one
             // being asked about could still get pushed out. Selecting only the
             // facts relevant to the current question is a later hardening step.
-            val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY).take(12)
+            val allFacts = getAllKnownFacts().take(12)
             val factsLine = if (allFacts.isNotEmpty()) {
-                "Known facts about the user: " +
-                    allFacts.joinToString(" ") { (k, v) -> "${keyToHuman(k)}: $v." } + " "
+                "Known facts: " +
+                    allFacts.joinToString(" ") { (entity, k, v) ->
+                        val label = if (entity == ENTITY_USER_PRIMARY) keyToHuman(k)
+                                    else "${ScoutEntityResolver.displayName(entity)}'s ${keyToHuman(k)}"
+                        "$label: $v."
+                    } + " "
             } else ""
 
             val system = """
@@ -3952,6 +3983,18 @@ Respond only with Scout's next reply.
                 weight = if (factKey in relationshipKeys) 3 else 2
             )
 
+            // "my dog's name is Nicolas, but we call him Nick" -- a nickname riding
+            // along with the name Scout just learned attaches to that same
+            // person/pet's own entity (aliases, not a new relation-prefixed key),
+            // so later mentions of "Nick" are recognized as Nicolas.
+            var nickname: String? = null
+            if (factKey == FactKey.WIFE_NAME || factKey == FactKey.SON_NAME || factKey == FactKey.DOG_NAME) {
+                nickname = ScoutFactExtractor.extractNicknameClause(qNorm)
+                if (nickname != null) {
+                    truthDb.addAlias(value.trim().lowercase(), nickname)
+                }
+            }
+
             if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
                 val faceRegistered = registerFamilyMemberFace(value)
                 if (!faceRegistered) {
@@ -3960,7 +4003,7 @@ Respond only with Scout's next reply.
                 }
             }
 
-            val out = when (factKey) {
+            var out = when (factKey) {
 
                 FactKey.WIFE_NAME -> Phrases.pickNamed("remember_wife", Phrases.REMEMBER_WIFE, value)
 
@@ -3972,10 +4015,49 @@ Respond only with Scout's next reply.
 
             }
 
+            if (nickname != null) out += " And I'll remember you call $value $nickname."
+
             respond(out)
 
             return true
 
+        }
+
+        // Facts about someone other than the user -- "Diana's birthday is
+        // November 27," "my wife's favorite food is sushi" -- attach to that
+        // person's own entity instead of a new relation-prefixed key, resolved
+        // from whatever's already been taught (ScoutEntityResolver). Always a
+        // deterministic confirmation naming exactly what was learned; TinyLlama
+        // and Gemini are never involved in acknowledging a taught fact.
+        val aliasMap = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY)
+        val aboutFacts = ScoutFactExtractor.extract(qNorm, aliasMap.keys)
+        if (aboutFacts.isNotEmpty()) {
+            val subjectPhrase = aboutFacts.first().subject
+            val entity = aliasMap[subjectPhrase]
+                ?: ScoutEntityResolver.resolveEntity(subjectPhrase, truthDb, ENTITY_USER_PRIMARY)
+            val displayName = ScoutEntityResolver.displayName(entity)
+            val confirmations = mutableListOf<String>()
+            for (fact in aboutFacts) {
+                if (fact.property == "nickname") {
+                    truthDb.addAlias(entity, fact.value)
+                    confirmations.add("you call $displayName ${fact.value}")
+                } else {
+                    truthDb.upsertFact(entity, fact.property, fact.value, 1.0f, "spoken_teach")
+                    confirmations.add("$displayName's ${keyToHuman(fact.property)} is ${fact.value}")
+                }
+            }
+            respond("Got it. I'll remember that " + confirmations.joinToString(", and ") + ".")
+            return true
+        }
+
+        // Even when extraction above found nothing, this may still be a teaching
+        // attempt phrased in a way Scout doesn't parse yet -- an honest ask to
+        // rephrase beats silently falling through to TinyLlama, which would
+        // improvise a reply that sounds like confirmation without anything
+        // actually having been learned.
+        if (ScoutFactExtractor.looksLikeUnrecognizedTeaching(qNorm, aliasMap.keys)) {
+            respond("I want to make sure I get that right -- can you say that a different way?")
+            return true
         }
 
         return false

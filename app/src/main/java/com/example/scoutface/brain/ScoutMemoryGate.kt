@@ -40,7 +40,9 @@ object ScoutMemoryGate {
     private fun mentionsKnownName(clean: String, knownFacts: List<Pair<String, String>>): Boolean {
         for ((key, value) in knownFacts) {
             if (value.isBlank()) continue
-            if (key != "name" && !key.endsWith("_name")) continue
+            val isNameLike = key == "name" || key == "alias" || key == "nickname" ||
+                key.endsWith("_name") || key.endsWith("_nickname")
+            if (!isNameLike) continue
             if (containsWord(clean, value.trim())) return true
         }
         return false

@@ -84,4 +84,12 @@ class ScoutMemoryGateTest {
         assertTrue(gate("what is my favorite color", knownFacts = emptyList()))
         assertFalse(gate("tell me about Diana", knownFacts = emptyList()))
     }
+
+    // --- Aliases (nicknames stored under a named entity, not the user) ---
+
+    @Test fun `an alias fact is recognized the same way a name fact is`() {
+        val withAlias = listOf("alias" to "Nick")
+        assertTrue(gate("where is Nick", withAlias))
+        assertFalse(gate("I need a mechanic", withAlias))
+    }
 }
