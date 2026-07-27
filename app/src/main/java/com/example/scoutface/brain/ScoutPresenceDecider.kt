@@ -88,12 +88,16 @@ class ScoutPresenceDecider(
      * a direct address — "hey Scout", "wake up", etc.
      * In all other modes Scout always responds.
      * If presence mode is off entirely, always respond.
+     *
+     * currentName is passed in by the caller (the same TruthDb-configured name
+     * used by wake-word detection) rather than stored here, so there's only ever
+     * one source of truth for Scout's name.
      */
-    fun shouldRespondToInput(qNorm: String): Boolean {
+    fun shouldRespondToInput(qNorm: String, currentName: String): Boolean {
         if (!isPresenceModeEnabled()) return true
         rechargeIfNeeded()
         return if (getCurrentMode() == PresenceMode.SLEEP) {
-            looksLikeDirectAddress(qNorm)
+            looksLikeDirectAddress(qNorm, currentName)
         } else {
             true
         }
@@ -241,13 +245,76 @@ class ScoutPresenceDecider(
      * Returns true if the input sounds like a direct address to Scout.
      * Used in SLEEP mode to decide whether to respond at all.
      */
-    private fun looksLikeDirectAddress(qNorm: String): Boolean {
+    private fun looksLikeDirectAddress(qNorm: String, currentName: String): Boolean {
         val q = qNorm.trim().lowercase()
-        return q.startsWith("scout") ||
-                q.contains("hey scout") ||
-                q.contains("hello scout") ||
+        val nameLower = currentName.trim().lowercase()
+        return q.startsWith(nameLower) ||
+                q.contains("hey $nameLower") ||
+                q.contains("hello $nameLower") ||
                 q.contains("wake up") ||
                 q.contains("are you there") ||
                 q.contains("are you awake")
+    }
+
+
+    // =======================
+    // PRESENCE LAYER -- IDLE-SILENCE ACKNOWLEDGMENT
+    //
+    // First, narrowest "presence moment": a rare, quiet acknowledgment after
+    // someone's been continuously present for a long stretch with no
+    // conversation at all -- not a check-in, not a question, just proof Scout's
+    // still there. Two cooldowns gate it: a global one shared by every presence
+    // moment (so future moments, like a proactive return greeting, can't stack
+    // close together with this one), and a longer category cooldown so this
+    // specific moment itself doesn't repeat too often.
+    // =======================
+
+    /** How long someone must be continuously present, with no conversation, before
+     *  the first idle-silence acknowledgment can fire. Deliberately conservative
+     *  for this first version -- easy to shorten once the rhythm's been tested. */
+    private val IDLE_SILENCE_PRESENCE_THRESHOLD_MS = 75L * 60L * 1_000L // ~75 min
+
+    /** Minimum time since ANY Scout-initiated presence remark -- any category --
+     *  before another one can fire. */
+    private val PRESENCE_GLOBAL_COOLDOWN_MS = 20L * 60L * 1_000L // 20 min
+
+    /** Minimum time between idle-silence acknowledgments specifically. */
+    private val IDLE_SILENCE_CATEGORY_COOLDOWN_MS = 90L * 60L * 1_000L // 90 min
+
+    private var lastPresenceRemarkMs    = 0L // any presence-moment category
+    private var lastIdleSilenceRemarkMs = 0L // this category specifically
+
+    /**
+     * Can Scout make the idle-silence acknowledgment right now?
+     *
+     * continuousPresenceMs is supplied by the caller (MainActivity owns face
+     * tracking; this class deliberately doesn't touch the camera) using its own
+     * gap-tolerant presence measurement -- a brief missed frame shouldn't reset
+     * this the way it would the arrival-greeting timer.
+     */
+    fun canMakeIdleSilenceRemark(continuousPresenceMs: Long): Boolean {
+        if (!isPresenceModeEnabled()) return false
+
+        val mode = getCurrentMode()
+        if (mode == PresenceMode.QUIET || mode == PresenceMode.SLEEP) return false
+
+        if (continuousPresenceMs < IDLE_SILENCE_PRESENCE_THRESHOLD_MS) return false
+
+        val now = System.currentTimeMillis()
+        val msSinceLastConversation =
+            if (lastConversationTurnMs == 0L) Long.MAX_VALUE else now - lastConversationTurnMs
+        if (msSinceLastConversation < IDLE_SILENCE_PRESENCE_THRESHOLD_MS) return false
+
+        if (now - lastPresenceRemarkMs < PRESENCE_GLOBAL_COOLDOWN_MS) return false
+        if (now - lastIdleSilenceRemarkMs < IDLE_SILENCE_CATEGORY_COOLDOWN_MS) return false
+
+        return true
+    }
+
+    /** Call after Scout actually speaks the idle-silence acknowledgment. */
+    fun onIdleSilenceRemarkMade() {
+        val now = System.currentTimeMillis()
+        lastPresenceRemarkMs = now
+        lastIdleSilenceRemarkMs = now
     }
 }

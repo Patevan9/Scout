@@ -252,6 +252,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var isListening = false
 
+    // True only between onBeginningOfSpeech() and the recognizer session ending --
+    // unlike isListening (true almost continuously while idle, since sessions
+    // just cycle), this reflects whether a user utterance is actually being
+    // captured right now. Used to keep presence-initiated speech from cutting
+    // someone off mid-sentence.
+    @Volatile
+
+    private var isCapturingSpeech = false
+
     @Volatile
 
     private var isThinking = false
@@ -435,6 +444,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @Volatile
 
     private var greetedThisSession = false
+
+    // Separate, gap-tolerant presence measurement for the idle-silence
+    // acknowledgment only -- does not feed the arrival greeting above, which
+    // keeps its existing strict faceAppearanceMs behavior unchanged. A brief
+    // missed frame or a person glancing away shouldn't restart a 75-minute
+    // timer; a genuine departure should.
+    /** How long a face can go undetected before the presence streak below is
+     *  considered broken (not just a missed frame). Named and tunable. */
+    private val PRESENCE_GAP_GRACE_MS = 2L * 60L * 1_000L // 2 min
+
+    @Volatile
+    private var presencePresentSinceMs = 0L // when the current tolerant streak began
+
+    @Volatile
+    private var presenceLastSeenMs = 0L // last time a face was actually seen
+
+    // Set right before speaking a presence-initiated remark; consumed once by the
+    // TTS onDone callback to open the presence reply window below.
+    @Volatile
+    private var lastUtteranceWasPresenceRemark = false
+
+    /** How long after a presence-initiated remark someone can reply naturally
+     *  without saying Scout's name first. Starts when TTS finishes speaking, not
+     *  when it begins. */
+    private val PRESENCE_REPLY_WINDOW_MS = 40_000L
+
+    @Volatile
+    private var presenceReplyWindowUntilMs = 0L
 
     @Volatile
 
@@ -1995,6 +2032,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 if (faceAppearanceMs == 0L) faceAppearanceMs = now
 
+                                // Gap-tolerant streak for the idle-silence acknowledgment: only
+                                // restart it if the gap since the last sighting exceeded the
+                                // grace period -- otherwise this is the same streak continuing.
+                                if (presencePresentSinceMs == 0L ||
+                                    now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) {
+                                    presencePresentSinceMs = now
+                                }
+                                presenceLastSeenMs = now
+
+                                maybeMakeIdleSilencePresenceRemark()
+
                                 if (!greetedThisSession &&
                                         now - faceAppearanceMs >= GREET_STABILIZE_MS &&
                                         !isSpeaking && !isListening) {
@@ -2166,6 +2214,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 isListening = true
 
+                isCapturingSpeech = false
+
                 faceView.setListening(true)
 
                 faceView.setMicLevel(0f)
@@ -2191,6 +2241,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onBeginningOfSpeech() {
 
                 lastRecognizerEventMs = System.currentTimeMillis()
+
+                isCapturingSpeech = true
 
             }
 
@@ -2218,6 +2270,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 isListening = false
 
+                isCapturingSpeech = false
+
                 faceView.setListening(false)
 
                 faceView.setMicLevel(0f)
@@ -2231,6 +2285,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 lastRecognizerEventMs = System.currentTimeMillis()
 
                 isListening = false
+
+                isCapturingSpeech = false
 
                 faceView.setListening(false)
 
@@ -2254,6 +2310,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 lastRecognizerEventMs = System.currentTimeMillis()
 
                 isListening = false
+
+                isCapturingSpeech = false
 
                 faceView.setListening(false)
 
@@ -2344,7 +2402,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         normalized.contains("out")
                     ))
                 val inConvoWindow =
-                    (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
+                    (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS ||
+                    System.currentTimeMillis() < presenceReplyWindowUntilMs
                 val speechListenMode = if (inConvoWindow) DiagLog.ListenMode.FOLLOW_UP
                     else DiagLog.ListenMode.WAKE_WORD
                 diagLog.logSpeechResult(
@@ -2720,6 +2779,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     lastScoutResponseMs = System.currentTimeMillis()
 
+                    if (lastUtteranceWasPresenceRemark) {
+                        presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
+                        lastUtteranceWasPresenceRemark = false
+                    }
+
                     wantListening = true
 
                     scheduleListenRestart(immediate = true)
@@ -2736,6 +2800,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     isThinking = false
 
                     faceView.setThinking(false)
+
+                    // TTS never finished, so no reply window should open for it --
+                    // just clear the flag rather than leave it to misattribute later.
+                    lastUtteranceWasPresenceRemark = false
 
                     val now = System.currentTimeMillis()
 
@@ -2879,17 +2947,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun respond(out: String) {
+    // isPresenceInitiated: true only for Scout-initiated presence remarks (e.g.
+    // the idle-silence acknowledgment), never for a real reply to the user.
+    // Default false, so every existing call site is unaffected. When true, skips
+    // onConversationTurn() -- calling that here would misread 75+ minutes of
+    // silence as a long absence and wrongly queue a "welcome back" greeting for
+    // the person's next real sentence, even though they never left -- and flags
+    // the utterance for the TTS onDone callback to open the presence reply window.
+    private fun respond(out: String, isPresenceInitiated: Boolean = false) {
 
         lastScoutResponseMs = System.currentTimeMillis()
 
         lastScoutUtteranceNormalized = TextNormalizer.normalizeUtterance(out)
 
+        if (isPresenceInitiated) lastUtteranceWasPresenceRemark = true
+
         speak(out, true)
 
         convoDb.logTurn("scout", out)
 
-        presenceDecider.onConversationTurn()
+        if (!isPresenceInitiated) {
+            presenceDecider.onConversationTurn()
+        }
 
         finishThinking()
 
@@ -3794,7 +3873,8 @@ Respond only with Scout's next reply.
             return
         }
 
-        if (!presenceDecider.shouldRespondToInput(qNorm)) return
+        val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+        if (!presenceDecider.shouldRespondToInput(qNorm, currentScoutName)) return
 
         llamaQueryGeneration++
         isThinking = true
@@ -3967,8 +4047,13 @@ Respond only with Scout's next reply.
                 val isExplicitPhrase = qNorm.contains("my name is") ||
                         qNorm.contains("i am named") ||
                         qNorm.contains("im named")
-                val hearsScout = qNorm.contains("scout") || qNorm.contains("gal") ||
-                        qNorm.contains("scott")
+                // Reads the same TruthDb-configured name wake-word detection uses,
+                // not a separate copy -- if Scout's renamed to Charlie, this hears
+                // "Charlie" too. "gal"/"scott" stay as STT-mishearing tolerance only
+                // when the configured name is actually still "Scout".
+                val currentName = (truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout").lowercase()
+                val hearsScout = qNorm.contains(currentName) ||
+                        (currentName == "scout" && (qNorm.contains("gal") || qNorm.contains("scott")))
                 if (!isExplicitPhrase && !hearsScout && lastFaceCount == 0) {
                     return false
                 }
@@ -4125,6 +4210,44 @@ Respond only with Scout's next reply.
     private fun finishThinking() {
         isThinking = false
         faceView.setThinking(false)
+    }
+
+    // =======================
+    // PRESENCE LAYER -- IDLE-SILENCE ACKNOWLEDGMENT (first, narrowest moment)
+    // =======================
+
+    /** How often to even evaluate the idle-silence check -- cheap, so this can be
+     *  fairly frequent without cost; the real gating is in ScoutPresenceDecider. */
+    private val PRESENCE_CHECK_INTERVAL_MS = 30L * 1_000L
+    private var lastPresenceCheckMs = 0L
+
+    /** Live, gap-tolerant continuous-presence duration. Zero if no face has been
+     *  seen within the last PRESENCE_GAP_GRACE_MS, even between frames. */
+    private fun currentTolerantPresenceMs(): Long {
+        if (presencePresentSinceMs == 0L) return 0L
+        val now = System.currentTimeMillis()
+        if (now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) return 0L
+        return now - presencePresentSinceMs
+    }
+
+    // Called from the face-tracking loop. Throttled internally, so it's safe to
+    // call on every frame. Speaks only when every guard passes: not speaking,
+    // not actively hearing a user utterance, not thinking/processing a request,
+    // boot has finished, the app is foregrounded and showing the normal presence
+    // screen, and ScoutPresenceDecider's own time-of-day/cooldown gates all agree.
+    private fun maybeMakeIdleSilencePresenceRemark() {
+        val now = System.currentTimeMillis()
+        if (now - lastPresenceCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
+        lastPresenceCheckMs = now
+
+        if (isSpeaking || isCapturingSpeech || isThinking) return
+        if (!bootFinishedSpeaking) return
+        if (!isForeground || currentMode != Mode.PRESENCE) return
+
+        if (!presenceDecider.canMakeIdleSilenceRemark(currentTolerantPresenceMs())) return
+
+        presenceDecider.onIdleSilenceRemarkMade()
+        respond(voice.say("PRESENCE_IDLE_SILENCE"), isPresenceInitiated = true)
     }
 
     private fun isGeminiEnabled(): Boolean =

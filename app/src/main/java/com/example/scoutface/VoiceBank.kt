@@ -42,6 +42,13 @@ class VoiceBank(private val prefs: SharedPreferences) {
                 "I’m not confident about what I’m seeing.",
                 "I can’t identify things clearly right now."
             )
+            "PRESENCE_IDLE_SILENCE" -> listOf(
+                "It’s nice having you around.",
+                "I’m enjoying the quiet company.",
+                "Just keeping you company.",
+                "I hope your day is going okay.",
+                "It’s good to have some company."
+            )
             else -> listOf("Okay.")
         }
 
