@@ -271,8 +271,11 @@ class ScoutPresenceDecider(
 
     /** How long someone must be continuously present, with no conversation, before
      *  the first idle-silence acknowledgment can fire. Deliberately conservative
-     *  for this first version -- easy to shorten once the rhythm's been tested. */
-    private val IDLE_SILENCE_PRESENCE_THRESHOLD_MS = 75L * 60L * 1_000L // ~75 min
+     *  for this first version -- easy to shorten once the rhythm's been tested.
+     *
+     *  TEMPORARY SMOKE-TEST VALUE -- restore to 75L * 60L * 1_000L (~75 min)
+     *  once A32 testing confirms the behavior. */
+    private val IDLE_SILENCE_PRESENCE_THRESHOLD_MS = 3L * 60L * 1_000L // ~3 min (TEMP, was ~75 min)
 
     /** Minimum time since ANY Scout-initiated presence remark -- any category --
      *  before another one can fire. */
@@ -292,22 +295,58 @@ class ScoutPresenceDecider(
      * gap-tolerant presence measurement -- a brief missed frame shouldn't reset
      * this the way it would the arrival-greeting timer.
      */
+    // TEMPORARY SMOKE-TEST LOGGING (tag "ScoutPresenceDebug") -- remove or disable
+    // once A32 testing confirms the behavior. Deduped against the last message so
+    // an unchanged reason doesn't repeat on every 30-second check.
+    private var lastIdleDebugMsg = ""
+    private fun logIdleDebug(msg: String) {
+        if (msg == lastIdleDebugMsg) return
+        lastIdleDebugMsg = msg
+        Log.d("ScoutPresenceDebug", msg)
+    }
+
     fun canMakeIdleSilenceRemark(continuousPresenceMs: Long): Boolean {
-        if (!isPresenceModeEnabled()) return false
+        // From the user's perspective this IS a spontaneous comment, so it
+        // respects that toggle -- but deliberately doesn't touch
+        // shouldMakeSpontaneousComment()'s own battery/8-minute-gap logic below;
+        // this moment keeps its own separately-tuned thresholds and cooldowns.
+        if (!isSpontaneousCommentsEnabled()) {
+            logIdleDebug("Idle remark blocked: spontaneous comments setting is off")
+            return false
+        }
+        if (!isPresenceModeEnabled()) {
+            logIdleDebug("Idle remark blocked: presence mode is off")
+            return false
+        }
 
         val mode = getCurrentMode()
-        if (mode == PresenceMode.QUIET || mode == PresenceMode.SLEEP) return false
+        if (mode == PresenceMode.QUIET || mode == PresenceMode.SLEEP) {
+            logIdleDebug("Idle remark blocked: quiet hours ($mode)")
+            return false
+        }
 
+        // Not logged -- this is the normal, frequent "still accumulating" state
+        // while presence builds toward the threshold, not a diagnostic event.
         if (continuousPresenceMs < IDLE_SILENCE_PRESENCE_THRESHOLD_MS) return false
 
         val now = System.currentTimeMillis()
         val msSinceLastConversation =
             if (lastConversationTurnMs == 0L) Long.MAX_VALUE else now - lastConversationTurnMs
-        if (msSinceLastConversation < IDLE_SILENCE_PRESENCE_THRESHOLD_MS) return false
+        if (msSinceLastConversation < IDLE_SILENCE_PRESENCE_THRESHOLD_MS) {
+            logIdleDebug("Idle remark blocked: conversation too recent")
+            return false
+        }
 
-        if (now - lastPresenceRemarkMs < PRESENCE_GLOBAL_COOLDOWN_MS) return false
-        if (now - lastIdleSilenceRemarkMs < IDLE_SILENCE_CATEGORY_COOLDOWN_MS) return false
+        if (now - lastPresenceRemarkMs < PRESENCE_GLOBAL_COOLDOWN_MS) {
+            logIdleDebug("Idle remark blocked: global presence cooldown")
+            return false
+        }
+        if (now - lastIdleSilenceRemarkMs < IDLE_SILENCE_CATEGORY_COOLDOWN_MS) {
+            logIdleDebug("Idle remark blocked: idle-silence category cooldown")
+            return false
+        }
 
+        logIdleDebug("Idle remark is eligible")
         return true
     }
 

@@ -2035,9 +2035,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 // Gap-tolerant streak for the idle-silence acknowledgment: only
                                 // restart it if the gap since the last sighting exceeded the
                                 // grace period -- otherwise this is the same streak continuing.
-                                if (presencePresentSinceMs == 0L ||
-                                    now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) {
+                                if (presencePresentSinceMs == 0L) {
                                     presencePresentSinceMs = now
+                                    logPresenceDebug("Tolerant presence streak started")
+                                } else if (now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) {
+                                    logPresenceDebug("Presence streak reset -- gap of " +
+                                        "${(now - presenceLastSeenMs) / 1000}s exceeded the grace period")
+                                    presencePresentSinceMs = now
+                                } else {
+                                    val gapMs = now - presenceLastSeenMs
+                                    // Only meaningful gaps -- skips routine per-frame timing noise.
+                                    if (gapMs > 5_000L) {
+                                        logPresenceDebug("Brief face gap (${gapMs / 1000}s) within " +
+                                            "grace period -- streak continues")
+                                    }
                                 }
                                 presenceLastSeenMs = now
 
@@ -2782,6 +2793,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (lastUtteranceWasPresenceRemark) {
                         presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
                         lastUtteranceWasPresenceRemark = false
+                        // TEMPORARY SMOKE-TEST LOGGING -- remove or disable once A32
+                        // testing confirms the behavior.
+                        Log.d("ScoutPresenceDebug", "Forty-second reply window opened")
+                        handler.postDelayed({
+                            Log.d("ScoutPresenceDebug", "Forty-second reply window expired")
+                        }, PRESENCE_REPLY_WINDOW_MS)
                     }
 
                     wantListening = true
@@ -4230,6 +4247,16 @@ Respond only with Scout's next reply.
         return now - presencePresentSinceMs
     }
 
+    // TEMPORARY SMOKE-TEST LOGGING (tag "ScoutPresenceDebug") -- remove or disable
+    // once A32 testing confirms the behavior. Deduped so an unchanged reason
+    // doesn't repeat on every throttled check.
+    private var lastPresenceDebugMsg = ""
+    private fun logPresenceDebug(msg: String) {
+        if (msg == lastPresenceDebugMsg) return
+        lastPresenceDebugMsg = msg
+        Log.d("ScoutPresenceDebug", msg)
+    }
+
     // Called from the face-tracking loop. Throttled internally, so it's safe to
     // call on every frame. Speaks only when every guard passes: not speaking,
     // not actively hearing a user utterance, not thinking/processing a request,
@@ -4240,12 +4267,22 @@ Respond only with Scout's next reply.
         if (now - lastPresenceCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
         lastPresenceCheckMs = now
 
-        if (isSpeaking || isCapturingSpeech || isThinking) return
-        if (!bootFinishedSpeaking) return
-        if (!isForeground || currentMode != Mode.PRESENCE) return
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            logPresenceDebug("Idle remark blocked: $blockReason")
+            return
+        }
 
         if (!presenceDecider.canMakeIdleSilenceRemark(currentTolerantPresenceMs())) return
 
+        logPresenceDebug("Presence remark was spoken")
         presenceDecider.onIdleSilenceRemarkMade()
         respond(voice.say("PRESENCE_IDLE_SILENCE"), isPresenceInitiated = true)
     }
