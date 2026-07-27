@@ -3019,8 +3019,37 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        // "who is Diana?" / "who's Diana?" -- answered by direct lookup instead of
+        // asking TinyLlama to connect the dots itself. Confirmed on-device: even
+        // with "wife's name: Diana" right there in its facts, a small model asked
+        // "who is Diana" doesn't reliably infer "she's your wife" -- it talked
+        // about the name Diana in general instead. This makes that one specific,
+        // common question shape deterministic, the same way ASK_WIFE_NAME etc.
+        // already answer "who is my wife" by direct lookup rather than guessing.
+        Regex("""\bwho(?:'s|\s+is)\s+([a-z]+)\b""").find(qNorm.lowercase())?.let { m ->
+            val name = m.groupValues[1]
+            findRelationForName(name)?.let { relation ->
+                respond("${name.replaceFirstChar { it.uppercase() }} is your $relation.")
+                return
+            }
+        }
+
         tryTinyLlamaOrFallback(qNorm)
 
+    }
+
+    // Reverse lookup: does this name (or one of its aliases) belong to the wife,
+    // son, or dog? Checks aliases too, so "who is Nick" resolves the same way as
+    // "who is Nicolas" once Nick is taught as a nickname.
+    private fun findRelationForName(name: String): String? {
+        val n = name.trim().lowercase()
+        val relations = listOf(FactKey.WIFE_NAME to "wife", FactKey.SON_NAME to "son", FactKey.DOG_NAME to "dog")
+        for ((key, label) in relations) {
+            val stored = truthDb.getFactValue(ENTITY_USER_PRIMARY, key)?.trim()?.lowercase() ?: continue
+            if (stored == n) return label
+            if (truthDb.getAliases(stored).any { it.trim().lowercase() == n }) return label
+        }
+        return null
     }
 
     private fun tryTinyLlamaOrFallback(qNorm: String) {
