@@ -328,6 +328,52 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
 
+    // ── A32 startup stabilization (staggered init) ──────────────────────────
+    // A controlled stabilization measure, not a final architecture -- see
+    // requestCameraStartup()/requestSpeechStartup(). On a real Galaxy A32, camera
+    // + ML Kit + SpeechRecognizer all starting in the same instant collided with a
+    // one-time, multi-second ART bytecode-verification stall for Google Play
+    // Services' ML Kit classes (11.1s and 3.5s verification events observed in a
+    // real capture), triggering system-wide low-memory pressure severe enough
+    // that Android killed Scout as a side effect of Google Play Services' own
+    // persistent process dying -- not a Scout crash. These are TEST/stabilization
+    // values; tune from the ScoutStartupTiming log once real A32 timing data
+    // comes back from a clean run.
+    private val CAMERA_STARTUP_STAGGER_MS = 3_000L
+    private val SPEECH_STARTUP_STAGGER_MS = 4_500L
+    private val STARTUP_SETTLE_MS = 6_000L
+
+    // Idempotency guards for the camera/speech startup stagger. checkPermissionsAndStart(),
+    // the permission-result callback, and resumeSystems() can all reach startup logic --
+    // *Scheduled flags reset to false the instant the delayed callback runs (whether it
+    // actually starts anything or bails out), so they only ever prevent two pending
+    // callbacks stacking, never a legitimate later restart. *EverStarted flags are one-way
+    // (false -> true, never back) and mean "the initial stagger has already happened once" --
+    // once true, further requests behave exactly like the pre-existing unstaggered code,
+    // since the stagger only exists to protect the cold-start collision, not steady-state
+    // camera/mic restarts (e.g. returning from Settings).
+    private var cameraStartupScheduled = false
+    @Volatile private var cameraEverStarted = false
+    private var speechStartupScheduled = false
+    @Volatile private var speechEverStarted = false
+
+    // True STARTUP_SETTLE_MS after the camera actually starts -- gates face embedding
+    // (see the embedExecutor.submit condition) so embedding never runs during the startup
+    // stagger window even if a face is detected in the very first analyzed frame.
+    @Volatile private var startupSettled = false
+
+    // Wall-clock startup timing diagnostics. Logged via logStartupTiming(), tag
+    // "ScoutStartupTiming" -- lets a real-device logcat capture pinpoint exactly which
+    // init step is blocking/starving the device instead of requiring manual reconstruction
+    // from unrelated system log lines, as the previous crash investigation needed.
+    private var startupTimingBaseMs = 0L
+
+    // Dedupes logListenAttempt() calls so a tight restart loop can't flood the bounded
+    // diagnostic report with hundreds of repeats of the same reason -- only actual
+    // transitions are recorded, matching the logPresenceDebug()/logIdleDebug() dedup
+    // pattern already used elsewhere in this file.
+    private var lastListenAttemptReason: DiagLog.ListenAttemptReason? = null
+
     private val TRY_MUTE_BEEP = true
 
     private var savedSystemVolume: Int? = null
@@ -654,6 +700,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
+        logStartupTiming("onCreate_start")
 
         // Show onboarding on first install; skip on every subsequent launch.
         val scoutPrefsEarly = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
@@ -672,6 +719,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupBrainServices()
 
         setupViews()
+        logStartupTiming("ui_ready")
 
         setupVision()
 
@@ -683,8 +731,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // until the offline brain is confirmed ready. The loading screen always shows
         // first; startSystems() only ever runs once it returns (see modelDownloadLauncher).
         if (LlamaEngine.isReady) {
+            logStartupTiming("brain_already_ready")
             startSystems()
         } else {
+            logStartupTiming("brain_not_ready_launching_loading_gate")
             launchLoadingGate()
         }
 
@@ -798,6 +848,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         stopListeningSafe()
         handler.removeCallbacks(recognizerWatchdog)
 
+        // A pending requestCameraStartup()/requestSpeechStartup() delayed callback (or the
+        // startupSettled timer chained after it) is deliberately NOT cancelled here -- each
+        // one re-checks isForeground/isFinishing/isDestroyed for itself the moment it fires,
+        // so it's simply ignored if the Activity is no longer in a valid state by then. Not
+        // cancelling also means cameraStartupScheduled/speechStartupScheduled correctly reset
+        // to false when that ignored callback runs, so a later resume schedules a fresh
+        // stagger rather than being permanently stuck thinking one is still pending.
+        // onDestroy() -> shutdownSystems() still purges every pending callback outright via
+        // handler.removeCallbacksAndMessages(null), for the case where the Activity is gone
+        // for good rather than just backgrounded.
+
     }
 
     override fun onResume() {
@@ -827,8 +888,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // The activity is going away for good — cancel every pending Handler callback
         // (recognizerWatchdog's reschedule chain, the 90s tryLoadOfflineBrain() load,
-        // captionHideRunnable, etc.) so nothing fires against state that's about to be
-        // torn down below.
+        // captionHideRunnable, the requestCameraStartup()/requestSpeechStartup() staggers
+        // and the startupSettled timer chained after them, etc.) so nothing fires against
+        // state that's about to be torn down below.
         try {
             handler.removeCallbacksAndMessages(null)
         } catch (_: Exception) {
@@ -1045,6 +1107,106 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // Wall-clock elapsed time since the first call, one line per major startup boundary.
+    // Tag "ScoutStartupTiming" -- pull this from a real-device logcat to see exactly
+    // which init step is slow, instead of reconstructing it from unrelated system lines.
+    private fun logStartupTiming(event: String) {
+        if (startupTimingBaseMs == 0L) startupTimingBaseMs = System.currentTimeMillis()
+        val elapsed = System.currentTimeMillis() - startupTimingBaseMs
+        android.util.Log.i("ScoutStartupTiming", "+${elapsed}ms $event")
+    }
+
+    // Dedupes consecutive identical reasons before writing to the bounded diagnostic
+    // report -- see lastListenAttemptReason's declaration for why.
+    private fun logListenAttemptOnce(reason: DiagLog.ListenAttemptReason) {
+        if (reason == lastListenAttemptReason) return
+        lastListenAttemptReason = reason
+        diagLog.logListenAttempt(reason)
+    }
+
+    // Idempotent, lifecycle-safe staggered camera/ML Kit startup. Safe to call from every
+    // entry point that might want the camera running (checkPermissionsAndStart(), the
+    // permission-result callback, resumeSystems()) -- only the first call during the
+    // startup window actually schedules a delayed start; concurrent later calls are
+    // no-ops. The delayed callback re-checks that the Activity is still in a valid,
+    // foregrounded, permitted state before touching the camera, so a pause/resume or
+    // permission-result race can never start a second camera pipeline or start one after
+    // the Activity should no longer be doing camera work -- it's simply ignored, which is
+    // sufficient since nothing here needs to be actively cancelled on pause (see onPause()).
+    // Once the camera has started once, this stops staggering entirely and behaves exactly
+    // like the pre-existing direct safeStartCamera() call -- the stagger only exists to
+    // protect the cold-start collision, not steady-state restarts (e.g. returning from
+    // Settings), which is why cameraEverStarted short-circuits to the original behavior.
+    private fun requestCameraStartup(from: String) {
+        if (!LlamaEngine.isReady) return
+        if (cameraEverStarted) {
+            safeStartCamera(from)
+            return
+        }
+        if (cameraStartupScheduled) return
+        cameraStartupScheduled = true
+        logStartupTiming("camera_startup_scheduled from=$from delay=${CAMERA_STARTUP_STAGGER_MS}ms")
+        handler.postDelayed({
+            cameraStartupScheduled = false
+            if (isFinishing || isDestroyed) {
+                logStartupTiming("camera_startup_skipped from=$from reason=activity_gone")
+                return@postDelayed
+            }
+            if (!isForeground) {
+                logStartupTiming("camera_startup_skipped from=$from reason=not_foreground")
+                return@postDelayed
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                logStartupTiming("camera_startup_skipped from=$from reason=no_permission")
+                return@postDelayed
+            }
+            logStartupTiming("camera_startup_firing from=$from")
+            safeStartCamera(from)
+            cameraEverStarted = true
+            handler.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
+                startupSettled = true
+                logStartupTiming("startup_settled")
+            }, STARTUP_SETTLE_MS)
+        }, CAMERA_STARTUP_STAGGER_MS)
+    }
+
+    // Mirrors requestCameraStartup() for SpeechRecognizer setup -- same idempotency and
+    // lifecycle-safety reasoning applies. Deliberately does NOT cover the recognizer
+    // watchdog's own safeSetupSpeech("watchdog") call (that's an ongoing health-check
+    // recovery path for after startup, not a startup path -- see its speechEverStarted
+    // guard instead, so it doesn't fight this stagger by "fixing" a recognizer that's
+    // simply not started yet by design).
+    private fun requestSpeechStartup(from: String) {
+        if (!LlamaEngine.isReady) return
+        if (speechEverStarted) {
+            safeSetupSpeech(from)
+            return
+        }
+        if (speechStartupScheduled) return
+        speechStartupScheduled = true
+        logStartupTiming("speech_startup_scheduled from=$from delay=${SPEECH_STARTUP_STAGGER_MS}ms")
+        handler.postDelayed({
+            speechStartupScheduled = false
+            if (isFinishing || isDestroyed) {
+                logStartupTiming("speech_startup_skipped from=$from reason=activity_gone")
+                return@postDelayed
+            }
+            if (!isForeground) {
+                logStartupTiming("speech_startup_skipped from=$from reason=not_foreground")
+                return@postDelayed
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                logStartupTiming("speech_startup_skipped from=$from reason=no_permission")
+                return@postDelayed
+            }
+            logStartupTiming("speech_startup_firing from=$from")
+            safeSetupSpeech(from)
+            speechEverStarted = true
+            scheduleListenRestart(immediate = true)
+        }, SPEECH_STARTUP_STAGGER_MS)
+    }
+
     private fun setupRecognizerWatchdog() {
 
         handler.removeCallbacks(recognizerWatchdog)
@@ -1196,6 +1358,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Delay 90 seconds so startup memory spike (camera, ML Kit, Gemini) settles
         // before we add ~800MB for TinyLlama. Immediate load was killing Scout on A32.
+        // NOTE: this delay/value is untouched by the A32 startup-stagger work -- not
+        // being re-tuned here, per explicit instruction not to touch TinyLlama loading.
+        logStartupTiming("tinyllama_load_scheduled delay=90000ms")
         handler.postDelayed({ tryLoadOfflineBrain() }, 90_000L)
         android.util.Log.i("ScoutBrain", "Offline brain load scheduled for 90s after startup")
 
@@ -1235,6 +1400,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val loadMs = System.currentTimeMillis() - llamaLoadStart
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
+            logStartupTiming("tinyllama_load_done success=$success ms=$loadMs")
 
             // The first-time/again announcement now lives in modelDownloadLauncher's
             // callback, which is the only place that reliably knows a real download
@@ -1277,8 +1443,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         ) {
 
-            safeStartCamera("onResume")
+            requestCameraStartup("onResume")
 
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            requestSpeechStartup("onResume")
         }
 
         scheduleListenRestart(immediate = false)
@@ -1379,8 +1549,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // Gated the same as resumeSystems() -- onBrainReady() starts these once
             // the offline brain is actually ready, not immediately on every launch.
             if (LlamaEngine.isReady) {
-                if (camOk) safeStartCamera("permissionCallback")
-                if (micOk) safeSetupSpeech("permissionCallback")
+                if (camOk) requestCameraStartup("permissionCallback")
+                if (micOk) requestSpeechStartup("permissionCallback")
             }
 
             // Deferred from startSystems() so the download screen never races the permission
@@ -1567,8 +1737,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // Gated the same as resumeSystems() -- onBrainReady() starts these once
             // the offline brain is actually ready, not immediately on every launch.
             if (LlamaEngine.isReady) {
-                safeStartCamera("alreadyGranted")
-                safeSetupSpeech("alreadyGranted")
+                requestCameraStartup("alreadyGranted")
+                requestSpeechStartup("alreadyGranted")
             }
 
             return false
@@ -1917,7 +2087,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 val embedNowMs = System.currentTimeMillis()
 
-                                if (embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS &&
+                                // startupSettled (see requestCameraStartup()) withholds embedding
+                                // entirely until STARTUP_SETTLE_MS after the camera actually starts,
+                                // even if a face is detected in the very first analyzed frame --
+                                // face detection/gaze-tracking above this point is unaffected, only
+                                // the expensive embedding model + DB lookup is deferred.
+                                if (startupSettled &&
+                                        embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS &&
                                         largest != null &&
                                         embedRunning.compareAndSet(false, true)) {
 
@@ -2710,22 +2886,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun maybeStartListening() {
 
-        if (!isForeground) return
+        // Every early-return branch below logs a controlled reason code (see
+        // DiagLog.ListenAttemptReason) so a real-device diagnostic report can answer
+        // "why didn't the mic start" precisely instead of requiring manual log
+        // reconstruction. Order matches the original guard order; the RECORD_AUDIO
+        // permission check and the isThinking/startupSettled checks are new additions
+        // (all strictly more conservative -- they can only ever block startListening()
+        // more, never less).
 
-        if (!wantListening) return
+        if (!isForeground) { logListenAttemptOnce(DiagLog.ListenAttemptReason.ACTIVITY_NOT_RESUMED); return }
 
-        if (currentMode != Mode.PRESENCE) return
+        if (!wantListening) { logListenAttemptOnce(DiagLog.ListenAttemptReason.LISTENING_DISABLED); return }
 
-        if (isSpeaking) return
+        if (currentMode != Mode.PRESENCE) { logListenAttemptOnce(DiagLog.ListenAttemptReason.CONVERSATION_GATE); return }
 
-        if (isListening) return
+        if (isSpeaking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.SCOUT_SPEAKING); return }
+
+        if (isThinking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.SCOUT_THINKING); return }
+
+        if (isListening) { logListenAttemptOnce(DiagLog.ListenAttemptReason.ALREADY_LISTENING); return }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.PERMISSIONS_MISSING)
+            return
+        }
+
+        // Before the staggered initial speech setup has run once (see
+        // requestSpeechStartup()), speechRecognizer is expected to be null by design --
+        // this stops that from being (mis)treated as "not ready yet, set it up now,"
+        // which is exactly what silently defeated the stagger before this guard existed.
+        if (!speechEverStarted) { logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTUP_NOT_SETTLED); return }
 
         val now = System.currentTimeMillis()
 
-        if (!bootFinishedSpeaking) return
+        if (!bootFinishedSpeaking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.BOOT_NOT_FINISHED); return }
 
         if (now - lastSpeechDoneMs < BOOT_LISTEN_EXTRA_DELAY_MS) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
@@ -2734,6 +2932,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (now < ttsLockoutUntilMs) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
@@ -2742,6 +2941,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (now - lastSpeechDoneMs < MIC_RESUME_COOLDOWN_MS) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
@@ -2749,6 +2949,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         if (speechRecognizer == null || !::recognizerIntent.isInitialized) {
+
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.SPEECH_RECOGNIZER_NOT_READY)
 
             try {
 
@@ -2769,17 +2971,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 tryMuteSystemBeep()
 
                 speechRecognizer?.startListening(recognizerIntent)
+                logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
                 handler.postDelayed({ restoreSystemBeep() }, 380L)
 
             } else {
 
                 speechRecognizer?.startListening(recognizerIntent)
+                logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
             }
 
         } catch (_: Exception) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_EXCEPTION)
             restoreSystemBeep()
 
             scheduleListenRestart()
@@ -2880,7 +3085,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     (lastRecognizerEventMs != 0L && (now - lastRecognizerEventMs) > RECOGNIZER_WATCHDOG_MS)
 
-                val missing = (speechRecognizer == null)
+                // speechEverStarted-gated: before the staggered initial speech setup
+                // has fired (see requestSpeechStartup()), speechRecognizer == null is
+                // expected by design, not a fault to "fix" -- without this guard the
+                // watchdog would call safeSetupSpeech() on its very first 4s tick and
+                // defeat the stagger entirely.
+                val missing = speechEverStarted && (speechRecognizer == null)
 
                 if (missing || stale) {
 
@@ -2923,6 +3133,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // =======================
 
     override fun onInit(status: Int) {
+
+        logStartupTiming("tts_oninit status=$status")
 
         if (status == TextToSpeech.SUCCESS) {
 

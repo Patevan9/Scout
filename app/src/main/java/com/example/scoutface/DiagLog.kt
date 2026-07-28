@@ -53,6 +53,20 @@ class DiagLog(private val db: DiagnosticDb) {
     /** Why a listening session ended without producing a usable result. */
     enum class StopReason { ERROR, TTS_LOCKOUT, COOLDOWN, WATCHDOG_RESET }
 
+    /**
+     * Every controlled reason maybeStartListening() can stop at, in the order
+     * they're checked, plus the two terminal outcomes (STARTLISTENING_CALLED /
+     * STARTLISTENING_EXCEPTION). Lets a real-device logcat/diagnostic-report
+     * capture answer "why didn't the mic start" precisely, without free text.
+     */
+    enum class ListenAttemptReason {
+        ACTIVITY_NOT_RESUMED, LISTENING_DISABLED, CONVERSATION_GATE,
+        SCOUT_SPEAKING, SCOUT_THINKING, ALREADY_LISTENING,
+        PERMISSIONS_MISSING, STARTUP_NOT_SETTLED, BOOT_NOT_FINISHED,
+        COOLDOWN, SPEECH_RECOGNIZER_NOT_READY,
+        STARTLISTENING_CALLED, STARTLISTENING_EXCEPTION
+    }
+
     /** Why a received speech result was discarded after receipt. */
     enum class DiscardReason {
         TOO_SHORT, TTS_ACTIVE, COOLDOWN, NULL_RESULT, STALE_GENERATION
@@ -140,6 +154,19 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logListenStop(reason: StopReason) = safe("LISTEN") {
         "stopped reason=${reason.name.lowercase()}"
+    }
+
+    /**
+     * Recorded from maybeStartListening() -- every controlled reason it
+     * stopped at, or its two terminal outcomes. Callers dedupe consecutive
+     * identical reasons before calling this (see MainActivity's
+     * logListenAttemptOnce()) so a tight restart loop doesn't flood the
+     * diagnostic report with repeats of the same reason; a real transition
+     * (including two consecutive STARTLISTENING_CALLED restarts, since
+     * something else always logs in between in practice) still gets recorded.
+     */
+    fun logListenAttempt(reason: ListenAttemptReason) = safe("LISTEN_ATTEMPT") {
+        "reason=${reason.name.lowercase()}"
     }
 
     /**
