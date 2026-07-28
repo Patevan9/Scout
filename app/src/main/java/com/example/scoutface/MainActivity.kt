@@ -437,6 +437,31 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val FACE_LOST_HOLD_MS = 650L
 
+    // Vision-led direct-address gate for the "say my name first" listening
+    // reminder -- replaces a stale "any face within the last 3s" test that
+    // couldn't distinguish someone actually facing Scout from a side
+    // conversation or a person briefly crossing the room. Requires a
+    // *sustained* qualifying face, not a single frame, so a passing glance or a
+    // face mid-turn doesn't count.
+    /** headEulerAngleY (yaw) tolerance -- how far the head can turn from facing
+     *  the camera and still count as "oriented toward Scout." Starting estimate. */
+    private val LISTENING_REMINDER_MAX_YAW_DEGREES = 25f
+
+    /** Face box height as a fraction of frame height -- filters out someone
+     *  distant/crossing the room rather than actually addressing Scout. */
+    private val LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION = 0.12f
+
+    /** How far off-center (normalized, same -1..1 scale as the existing gaze
+     *  dx/dy) the face box can be and still qualify. */
+    private val LISTENING_REMINDER_MAX_OFFSET = 0.55f
+
+    /** How long the qualifying state above must hold continuously before it
+     *  counts as sustained visual attention, not a passing glance. */
+    private val DIRECT_ADDRESS_SUSTAIN_MS = 1_500L
+
+    @Volatile
+    private var directAddressStreakStartMs = 0L // 0 = not currently facing Scout
+
     @Volatile
 
     private var faceAppearanceMs = 0L
@@ -1774,6 +1799,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     lastGoodFaceSeenMs = now
 
+                                    // Vision-led direct-address gate: does the current largest
+                                    // face look like it's actually facing Scout? Extends the
+                                    // streak while true, resets it the moment any condition
+                                    // fails -- a single disqualifying frame ends the streak, so
+                                    // only genuinely sustained attention counts.
+                                    val yaw = largest.headEulerAngleY
+                                    val faceHeightFraction = b.height().toFloat() / imgH
+                                    val facingScout = abs(yaw) <= LISTENING_REMINDER_MAX_YAW_DEGREES &&
+                                        faceHeightFraction >= LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION &&
+                                        abs(dx) <= LISTENING_REMINDER_MAX_OFFSET &&
+                                        abs(dy) <= LISTENING_REMINDER_MAX_OFFSET
+                                    if (facingScout) {
+                                        if (directAddressStreakStartMs == 0L) directAddressStreakStartMs = now
+                                    } else {
+                                        directAddressStreakStartMs = 0L
+                                    }
+
                                     if (gazeEnabled && !isSpeaking && !isThinking) {
 
                                         val movedEnough =
@@ -2144,6 +2186,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 // "welcome back" -- this first-contact greeting stays separate.
                                 faceAppearanceMs = 0L
 
+                                // No face at all -- definitely not sustaining direct address.
+                                directAddressStreakStartMs = 0L
+
                                 // Layer 1 return greeting: absence tracking, reusing
                                 // presenceLastSeenMs (untouched in this branch) as the single
                                 // source of truth for "how long has no face been seen" -- no
@@ -2498,12 +2543,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 )
                 if (!hearsHisName && !inConvoWindow) {
                     val now = System.currentTimeMillis()
-                    val faceVisible = (now - lastGoodFaceSeenMs) < 3_000L
+
+                    // Vision-led direct-address gate (see directAddressStreakStartMs, updated
+                    // per-frame in the face-analysis callback) -- replaces the old "any face
+                    // within the last 3 seconds" test, which couldn't tell a side conversation
+                    // or a person crossing the room from someone actually facing Scout.
+                    val sustained = directAddressStreakStartMs != 0L &&
+                        (now - directAddressStreakStartMs) >= DIRECT_ADDRESS_SUSTAIN_MS
                     val reminderDue = (now - lastListeningReminderMs) > LISTENING_REMINDER_COOLDOWN_MS
-                    if (faceVisible && reminderDue && !isSpeaking && !isThinking) {
+
+                    val reminderBlockReason = when {
+                        lastFaceCount == 0 -> "no current face"
+                        directAddressStreakStartMs == 0L -> "face not oriented toward Scout"
+                        !sustained -> "visual attention not sustained"
+                        !reminderDue -> "cooldown"
+                        else -> null
+                    }
+
+                    if (reminderBlockReason == null && !isSpeaking && !isThinking) {
+                        logPresenceDebug("Listening reminder eligible -- spoken")
                         lastListeningReminderMs = now
                         respond("I'm sorry. If you're talking to me, just say $scoutName first.")
                     } else {
+                        logPresenceDebug("Listening reminder blocked: ${reminderBlockReason ?: "Scout busy"}")
                         scheduleListenRestart()
                     }
                     return
