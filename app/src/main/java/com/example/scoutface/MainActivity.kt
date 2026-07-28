@@ -443,24 +443,40 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // conversation or a person briefly crossing the room. Requires a
     // *sustained* qualifying face, not a single frame, so a passing glance or a
     // face mid-turn doesn't count.
+    // TEST VALUES -- deliberately conservative for the first smoke test (a false
+    // interruption is worse than a missed reminder). Tune from the diagnostic
+    // values logged below once Diana's real-world testing gives us evidence.
     /** headEulerAngleY (yaw) tolerance -- how far the head can turn from facing
-     *  the camera and still count as "oriented toward Scout." Starting estimate. */
-    private val LISTENING_REMINDER_MAX_YAW_DEGREES = 25f
+     *  the camera and still count as "oriented toward Scout." */
+    private val LISTENING_REMINDER_MAX_YAW_DEGREES = 18f
 
     /** Face box height as a fraction of frame height -- filters out someone
      *  distant/crossing the room rather than actually addressing Scout. */
-    private val LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION = 0.12f
+    private val LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION = 0.18f
 
     /** How far off-center (normalized, same -1..1 scale as the existing gaze
      *  dx/dy) the face box can be and still qualify. */
-    private val LISTENING_REMINDER_MAX_OFFSET = 0.55f
+    private val LISTENING_REMINDER_MAX_OFFSET = 0.40f
 
     /** How long the qualifying state above must hold continuously before it
      *  counts as sustained visual attention, not a passing glance. */
     private val DIRECT_ADDRESS_SUSTAIN_MS = 1_500L
 
+    /** TEST VALUE. How recently the vision pipeline must have actually processed
+     *  a frame for the streak to be trusted at reminder-decision time -- if
+     *  frame processing has stalled, the last-known streak state could be stale
+     *  rather than continuously reconfirmed. */
+    private val VISION_FRESHNESS_MS = 1_000L
+
     @Volatile
     private var directAddressStreakStartMs = 0L // 0 = not currently facing Scout
+
+    // Most recently measured values, cached for reminder-decision diagnostics --
+    // the speech-recognition callback that decides whether to speak the reminder
+    // runs separately from the vision callback that measures these.
+    @Volatile private var lastYawDegrees = 0f
+    @Volatile private var lastFaceHeightFraction = 0f
+    @Volatile private var lastCenterOffset = 0f
 
     @Volatile
 
@@ -1801,18 +1817,37 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     // Vision-led direct-address gate: does the current largest
                                     // face look like it's actually facing Scout? Extends the
-                                    // streak while true, resets it the moment any condition
-                                    // fails -- a single disqualifying frame ends the streak, so
-                                    // only genuinely sustained attention counts.
+                                    // streak while true, resets it the moment any single
+                                    // condition fails -- every frame is re-evaluated from
+                                    // scratch, so there's no accumulating qualifying moments
+                                    // across a gap; one disqualifying frame ends the streak.
                                     val yaw = largest.headEulerAngleY
                                     val faceHeightFraction = b.height().toFloat() / imgH
-                                    val facingScout = abs(yaw) <= LISTENING_REMINDER_MAX_YAW_DEGREES &&
-                                        faceHeightFraction >= LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION &&
-                                        abs(dx) <= LISTENING_REMINDER_MAX_OFFSET &&
-                                        abs(dy) <= LISTENING_REMINDER_MAX_OFFSET
-                                    if (facingScout) {
-                                        if (directAddressStreakStartMs == 0L) directAddressStreakStartMs = now
+                                    val centerOffset = maxOf(abs(dx), abs(dy))
+                                    lastYawDegrees = yaw
+                                    lastFaceHeightFraction = faceHeightFraction
+                                    lastCenterOffset = centerOffset
+
+                                    val disqualifyReason = when {
+                                        abs(yaw) > LISTENING_REMINDER_MAX_YAW_DEGREES ->
+                                            "yaw=$yaw beyond ±$LISTENING_REMINDER_MAX_YAW_DEGREES"
+                                        faceHeightFraction < LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION ->
+                                            "faceHeight=$faceHeightFraction below $LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION"
+                                        centerOffset > LISTENING_REMINDER_MAX_OFFSET ->
+                                            "centerOffset=$centerOffset beyond $LISTENING_REMINDER_MAX_OFFSET"
+                                        else -> null
+                                    }
+
+                                    if (disqualifyReason == null) {
+                                        if (directAddressStreakStartMs == 0L) {
+                                            directAddressStreakStartMs = now
+                                            logPresenceDebug("Direct-address streak started " +
+                                                "(yaw=$yaw height=$faceHeightFraction offset=$centerOffset)")
+                                        }
                                     } else {
+                                        if (directAddressStreakStartMs != 0L) {
+                                            logPresenceDebug("Direct-address streak reset: $disqualifyReason")
+                                        }
                                         directAddressStreakStartMs = 0L
                                     }
 
@@ -2187,7 +2222,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 faceAppearanceMs = 0L
 
                                 // No face at all -- definitely not sustaining direct address.
+                                if (directAddressStreakStartMs != 0L) {
+                                    logPresenceDebug("Direct-address streak reset: no face detected")
+                                }
                                 directAddressStreakStartMs = 0L
+                                lastYawDegrees = 0f
+                                lastFaceHeightFraction = 0f
+                                lastCenterOffset = 0f
 
                                 // Layer 1 return greeting: absence tracking, reusing
                                 // presenceLastSeenMs (untouched in this branch) as the single
@@ -2548,11 +2589,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     // per-frame in the face-analysis callback) -- replaces the old "any face
                     // within the last 3 seconds" test, which couldn't tell a side conversation
                     // or a person crossing the room from someone actually facing Scout.
-                    val sustained = directAddressStreakStartMs != 0L &&
-                        (now - directAddressStreakStartMs) >= DIRECT_ADDRESS_SUSTAIN_MS
+                    //
+                    // Even with vision gating, Scout still can't prove the visible person is
+                    // the one speaking -- Diana could be talking off-camera while Elijah just
+                    // happens to be looking at Scout. Vision gating narrows false positives, it
+                    // doesn't eliminate them, which is exactly why the cooldown below stays as
+                    // a second, independent layer of protection rather than being loosened.
+                    val visionStale = (now - lastFaceUpdatedMs) >= VISION_FRESHNESS_MS
+                    val sustainedMs = if (directAddressStreakStartMs != 0L) now - directAddressStreakStartMs else 0L
+                    val sustained = directAddressStreakStartMs != 0L && sustainedMs >= DIRECT_ADDRESS_SUSTAIN_MS
                     val reminderDue = (now - lastListeningReminderMs) > LISTENING_REMINDER_COOLDOWN_MS
 
                     val reminderBlockReason = when {
+                        visionStale -> "vision data stale"
                         lastFaceCount == 0 -> "no current face"
                         directAddressStreakStartMs == 0L -> "face not oriented toward Scout"
                         !sustained -> "visual attention not sustained"
@@ -2560,12 +2609,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         else -> null
                     }
 
+                    logPresenceDebug("Listening reminder check: yaw=$lastYawDegrees " +
+                        "height=$lastFaceHeightFraction offset=$lastCenterOffset " +
+                        "sustainedMs=$sustainedMs reason=${reminderBlockReason ?: "eligible"}")
+
                     if (reminderBlockReason == null && !isSpeaking && !isThinking) {
-                        logPresenceDebug("Listening reminder eligible -- spoken")
                         lastListeningReminderMs = now
                         respond("I'm sorry. If you're talking to me, just say $scoutName first.")
                     } else {
-                        logPresenceDebug("Listening reminder blocked: ${reminderBlockReason ?: "Scout busy"}")
                         scheduleListenRestart()
                     }
                     return
