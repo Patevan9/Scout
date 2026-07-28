@@ -2606,6 +2606,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         directAddressStreakStartMs == 0L -> "face not oriented toward Scout"
                         !sustained -> "visual attention not sustained"
                         !reminderDue -> "cooldown"
+                        isSpeaking -> "Scout speaking"
+                        isThinking -> "Scout thinking"
                         else -> null
                     }
 
@@ -2613,8 +2615,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         "height=$lastFaceHeightFraction offset=$lastCenterOffset " +
                         "sustainedMs=$sustainedMs reason=${reminderBlockReason ?: "eligible"}")
 
-                    if (reminderBlockReason == null && !isSpeaking && !isThinking) {
+                    if (reminderBlockReason == null) {
                         lastListeningReminderMs = now
+                        logPresenceDebug("Listening reminder spoken")
                         respond("I'm sorry. If you're talking to me, just say $scoutName first.")
                     } else {
                         scheduleListenRestart()
