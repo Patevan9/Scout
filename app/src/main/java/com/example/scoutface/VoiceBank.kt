@@ -49,6 +49,11 @@ class VoiceBank(private val prefs: SharedPreferences) {
                 "I hope your day is going okay.",
                 "It’s good to have some company."
             )
+            "PRESENCE_RETURN_GREETING" -> listOf(
+                "Welcome back.",
+                "Good to see you again.",
+                "Welcome back. Good to have you around again."
+            )
             else -> listOf("Okay.")
         }
 

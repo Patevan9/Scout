@@ -67,14 +67,8 @@ class ScoutPresenceDecider(
     private var lastSpontaneousCommentMs = 0L
     private var knownFaceNearby          = false
 
-    /** 30 minutes of silence triggers a warm return greeting. */
-    private val LONG_ABSENCE_THRESHOLD_MS = 30L * 60L * 1_000L
-
     /** Minimum gap between spontaneous comments — 8 minutes. */
     private val MIN_SPONTANEOUS_GAP_MS = 8L * 60L * 1_000L
-
-    /** Set to true when a long absence is detected. Cleared after greeting is consumed. */
-    private var pendingLongAbsenceGreeting = false
 
 
     // =======================
@@ -140,16 +134,17 @@ class ScoutPresenceDecider(
 
     /**
      * Call this after every conversation exchange (in respond()).
-     * Updates the social battery and checks for long absences.
+     * Updates the social battery. lastConversationTurnMs is also read by
+     * canMakeIdleSilenceRemark() to know how recently anyone actually talked to
+     * Scout, so it stays updated here even though the old absence-flagging that
+     * used to live in this function (pendingLongAbsenceGreeting) is gone --
+     * removed because it never actually detected a physical absence, only a gap
+     * in conversation, and only fired if the very next thing said matched the
+     * exact GREET intent. The real, face-based return greeting is
+     * canMakeReturnGreeting() below.
      */
     fun onConversationTurn() {
         val now = System.currentTimeMillis()
-
-        if (lastConversationTurnMs > 0L &&
-            now - lastConversationTurnMs > LONG_ABSENCE_THRESHOLD_MS) {
-            pendingLongAbsenceGreeting = true
-            Log.e("ScoutPresence", "Long absence detected — return greeting queued")
-        }
 
         lastConversationTurnMs = now
         depleteBattery()
@@ -170,25 +165,6 @@ class ScoutPresenceDecider(
      */
     fun onFaceLost() {
         knownFaceNearby = false
-    }
-
-    /**
-     * Returns a warm return greeting if Scout is coming back from
-     * a long absence, then clears the flag so it only plays once.
-     * Returns null if no greeting is pending.
-     *
-     * Call this at the start of handleQuery() before routing.
-     */
-    fun consumeLongAbsenceGreeting(): String? {
-        if (!pendingLongAbsenceGreeting) return null
-        pendingLongAbsenceGreeting = false
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        return when {
-            hour < 12 -> "Good morning. It is good to hear from you."
-            hour < 17 -> "Welcome back."
-            hour < 21 -> "Good evening."
-            else      -> "You are up late."
-        }
     }
 
     /**
@@ -355,5 +331,62 @@ class ScoutPresenceDecider(
         val now = System.currentTimeMillis()
         lastPresenceRemarkMs = now
         lastIdleSilenceRemarkMs = now
+    }
+
+
+    // =======================
+    // PRESENCE LAYER -- PROACTIVE RETURN GREETING (Layer 1)
+    //
+    // Replaces the old, broken conversation-gap "long absence greeting." This
+    // one is driven entirely by MainActivity's face-based genuine-absence +
+    // stabilized-return detection (this class still deliberately never touches
+    // the camera itself) -- by the time canMakeReturnGreeting() is even called,
+    // a real absence and a stable return have already been confirmed. This
+    // function only applies the same mode/setting/cooldown gates every presence
+    // moment respects, reusing lastPresenceRemarkMs -- the same shared clock
+    // canMakeIdleSilenceRemark() uses -- so the two moments can't stack close
+    // together.
+    // =======================
+
+    /** Minimum time between return greetings specifically. */
+    private val RETURN_GREETING_CATEGORY_COOLDOWN_MS = 30L * 60L * 1_000L // 30 min
+
+    private var lastReturnGreetingMs = 0L
+
+    fun canMakeReturnGreeting(): Boolean {
+        if (!isSpontaneousCommentsEnabled()) {
+            logIdleDebug("Return greeting blocked: spontaneous comments setting is off")
+            return false
+        }
+        if (!isPresenceModeEnabled()) {
+            logIdleDebug("Return greeting blocked: presence mode is off")
+            return false
+        }
+
+        val mode = getCurrentMode()
+        if (mode == PresenceMode.QUIET || mode == PresenceMode.SLEEP) {
+            logIdleDebug("Return greeting blocked: quiet hours ($mode)")
+            return false
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastPresenceRemarkMs < PRESENCE_GLOBAL_COOLDOWN_MS) {
+            logIdleDebug("Return greeting blocked: global presence cooldown")
+            return false
+        }
+        if (now - lastReturnGreetingMs < RETURN_GREETING_CATEGORY_COOLDOWN_MS) {
+            logIdleDebug("Return greeting blocked: return-greeting category cooldown")
+            return false
+        }
+
+        logIdleDebug("Return greeting is eligible")
+        return true
+    }
+
+    /** Call after Scout actually speaks the return greeting. */
+    fun onReturnGreetingMade() {
+        val now = System.currentTimeMillis()
+        lastPresenceRemarkMs = now
+        lastReturnGreetingMs = now
     }
 }

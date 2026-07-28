@@ -473,6 +473,38 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @Volatile
     private var presenceReplyWindowUntilMs = 0L
 
+    // =======================
+    // PRESENCE LAYER -- PROACTIVE RETURN GREETING (Layer 1)
+    //
+    // Genuine-absence + stabilized-return tracking, driven by face presence
+    // (reusing presenceLastSeenMs above, already updated every face-visible
+    // frame -- no separate "last seen" timestamp needed). Deliberately separate
+    // from both faceAppearanceMs (the once-per-launch first-contact greeting,
+    // left untouched) and presencePresentSinceMs (the idle-silence streak,
+    // which measures the opposite thing -- how long someone's been *present*).
+    // =======================
+
+    /** How long a face must be undetected before a gap is even acknowledged as a
+     *  candidate absence -- absorbs single missed frames or a brief head-turn. */
+    private val CAMERA_GAP_TOLERANCE_MS = 15_000L // 15 sec
+
+    /** How much longer, past the tolerance above, an absence must continue before
+     *  it's confirmed genuine -- worth a "welcome back" on return.
+     *
+     *  TEMPORARY SMOKE-TEST VALUE -- restore to 10L * 60L * 1_000L (~10 min)
+     *  once A32 testing confirms the behavior. */
+    private val MIN_GENUINE_ABSENCE_MS = 60_000L // ~1 min (TEMP, was ~10 min)
+
+    /** How long a face must be continuously visible again, after a genuine
+     *  absence, before Scout actually speaks. Its own named constant even though
+     *  it starts at the same value as GREET_STABILIZE_MS, so the two can be
+     *  tuned independently later. */
+    private val RETURN_STABILIZATION_MS = 3_000L // 3 sec
+
+    private var candidateAbsenceLogged = false  // avoids re-logging "absence started" every frame
+    private var genuineAbsenceMarked = false    // true once the current absence crossed MIN_GENUINE_ABSENCE_MS
+    private var returnStabilizingSinceMs = 0L   // 0 = not currently in a post-absence stabilization window
+
     @Volatile
 
     private var faceLastSeenForGreetMs = 0L
@@ -2052,6 +2084,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 }
                                 presenceLastSeenMs = now
 
+                                // Layer 1 return greeting: face is back. If we were tracking a
+                                // genuine absence, this is a real return -- start/continue the
+                                // stabilization window before actually speaking. If it was only
+                                // a candidate (brief) absence, quietly cancel it; no greeting for
+                                // a non-event.
+                                if (genuineAbsenceMarked) {
+                                    if (returnStabilizingSinceMs == 0L) {
+                                        returnStabilizingSinceMs = now
+                                        logPresenceDebug("Return face detected")
+                                    }
+                                    if (now - returnStabilizingSinceMs >= RETURN_STABILIZATION_MS) {
+                                        logPresenceDebug("Return stabilized")
+                                        maybeMakeReturnGreeting()
+                                    }
+                                } else if (candidateAbsenceLogged) {
+                                    logPresenceDebug("Absence cancelled -- brief gap")
+                                    candidateAbsenceLogged = false
+                                }
+
                                 maybeMakeIdleSilencePresenceRemark()
 
                                 if (!greetedThisSession &&
@@ -2089,8 +2140,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 // greetedThisSession intentionally NOT reset here.
                                 // Scout greets once per app launch when he first sees a face.
-                                // ScoutPresenceDecider handles the 30-min absence greeting separately.
+                                // The proactive return greeting (Layer 1, below) handles a real
+                                // "welcome back" -- this first-contact greeting stays separate.
                                 faceAppearanceMs = 0L
+
+                                // Layer 1 return greeting: absence tracking, reusing
+                                // presenceLastSeenMs (untouched in this branch) as the single
+                                // source of truth for "how long has no face been seen" -- no
+                                // separate timestamp to keep in sync. Doesn't restart the clock
+                                // if an absence is already running: an intermittent flicker of
+                                // return before stabilization completes shouldn't reset how long
+                                // they've actually been gone.
+                                val absenceGapMs = if (presenceLastSeenMs == 0L) 0L else now - presenceLastSeenMs
+                                if (absenceGapMs >= CAMERA_GAP_TOLERANCE_MS) {
+                                    if (!candidateAbsenceLogged) {
+                                        candidateAbsenceLogged = true
+                                        logPresenceDebug("Absence started")
+                                    }
+                                    if (!genuineAbsenceMarked && absenceGapMs >= MIN_GENUINE_ABSENCE_MS) {
+                                        genuineAbsenceMarked = true
+                                        logPresenceDebug("Genuine absence confirmed")
+                                    }
+                                }
+                                returnStabilizingSinceMs = 0L // cancel any in-progress return stabilization
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
@@ -3919,17 +3991,12 @@ Respond only with Scout's next reply.
         }
         if (isDirect) diagLog.logBrainStarted(DiagLog.BrainSource.DIRECT)
 
-        // Long absence greeting — fires on GREET after 30+ minutes away, silent otherwise
-
-        val absenceGreeting = presenceDecider.consumeLongAbsenceGreeting()
-
-        if (absenceGreeting != null && intent == IntentType.GREET) {
-
-            respond(absenceGreeting)
-
-            return
-
-        }
+        // Removed: the old conversation-gap-based "long absence greeting" here.
+        // It never actually detected physical absence (only a gap between Scout's
+        // own responses), and only fired if the very next thing said matched the
+        // exact GREET intent -- confirmed broken in real use. The real, face-
+        // based proactive return greeting lives in maybeMakeReturnGreeting(),
+        // triggered from the face-tracking loop, not from here.
 
         when (intent) {
 
@@ -4285,6 +4352,42 @@ Respond only with Scout's next reply.
         logPresenceDebug("Presence remark was spoken")
         presenceDecider.onIdleSilenceRemarkMade()
         respond(voice.say("PRESENCE_IDLE_SILENCE"), isPresenceInitiated = true)
+    }
+
+    // Own throttle, separate from the idle-silence check above -- this one is
+    // only called once a stabilized return has already been detected (not on
+    // every frame regardless of state), but stays throttled the same way so it
+    // doesn't re-evaluate/re-log every single frame while blocked.
+    private var lastReturnGreetingCheckMs = 0L
+
+    private fun maybeMakeReturnGreeting() {
+        val now = System.currentTimeMillis()
+        if (now - lastReturnGreetingCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
+        lastReturnGreetingCheckMs = now
+
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            logPresenceDebug("Return greeting blocked: $blockReason")
+            return
+        }
+
+        if (!presenceDecider.canMakeReturnGreeting()) return
+
+        logPresenceDebug("Greeting spoken (return)")
+        presenceDecider.onReturnGreetingMade()
+        respond(voice.say("PRESENCE_RETURN_GREETING"), isPresenceInitiated = true)
+
+        // This absence/return cycle is fully resolved -- ready to detect the next one.
+        candidateAbsenceLogged = false
+        genuineAbsenceMarked = false
+        returnStabilizingSinceMs = 0L
     }
 
     private fun isGeminiEnabled(): Boolean =
