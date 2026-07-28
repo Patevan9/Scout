@@ -34,7 +34,18 @@ import androidx.appcompat.app.AppCompatActivity
  * is measured against literally the same input, which is what makes the
  * comparison across combinations meaningful. They're modeled on production's
  * prompt shape (system preamble + few-shot pairs + facts/history + question)
- * but are not textually identical to MainActivity's real prompt builder.
+ * but are NOT textually identical to MainActivity's real prompt builder --
+ * this harness tells you which thread settings perform best on these
+ * controlled prompt shapes, not how much of Scout's real-world delay comes
+ * from the actual production prompt. Both the on-screen text and the final
+ * summary say this explicitly so the numbers aren't over-read.
+ *
+ * Run order is a deterministic rotation (see buildRunPlan()), not grouped by
+ * thread combo -- every combo gets an even mix of early/late (cooler/warmer)
+ * positions across the session instead of low-thread combos always running
+ * first while the device is coolest and high-thread combos always running
+ * last after sustained load, which would bias the comparison toward
+ * low-thread combos looking artificially fast.
  */
 class LlamaBenchmarkActivity : AppCompatActivity() {
 
@@ -83,13 +94,25 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
         root.addView(TextView(this).apply {
             text = "Developer diagnostic tool. Runs 4 fixed test prompts across " +
                 "${threadCombos.size} thread-count combinations (${fixedPromptCountLabel()} " +
-                "runs total) and logs measured performance to Scout's diagnostic log. " +
-                "Camera and voice keep running normally during the test -- nothing about " +
-                "Scout's normal settings is changed. When finished, use Settings > Extras " +
-                "& Support > Share Diagnostic Report to send the results."
+                "runs total, in a rotating order so no combo is unfairly favored by " +
+                "device temperature) and logs measured performance to Scout's diagnostic " +
+                "log. Camera and voice keep running normally during the test -- nothing " +
+                "about Scout's normal settings is changed. When finished, use Settings > " +
+                "Extras & Support > Share Diagnostic Report to send the results."
             textSize = 13f
             setTextColor(txtSec)
             setPadding(0, dp(8), 0, dp(16))
+            setLineSpacing(0f, 1.3f)
+        })
+        root.addView(TextView(this).apply {
+            text = "Note: these 4 prompts are fixed test strings modeled on Scout's real " +
+                "prompt shape, not copies of the actual production prompt. This tool can " +
+                "tell you which thread settings perform best on these controlled prompts -- " +
+                "it cannot by itself prove how much of Scout's real-world delay comes from " +
+                "the full production prompt."
+            textSize = 12f
+            setTextColor(Color.parseColor("#F0B84A"))
+            setPadding(0, 0, 0, dp(16))
             setLineSpacing(0f, 1.3f)
         })
 
@@ -119,9 +142,36 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
         setContentView(root)
     }
 
-    private fun fixedPromptCountLabel(): Int = threadCombos.size * 4
+    private fun fixedPromptCountLabel(): Int = threadCombos.size * fixedPrompts.size
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    // Short pause between runs so the device gets a brief chance to cool between calls
+    // rather than every run stacking directly on the last one's heat -- deliberately
+    // kept short (not a real cooldown-to-baseline wait) so the session doesn't drag on
+    // for no measurable benefit. TEST value.
+    private val RUN_COOLDOWN_MS = 1_500L
+
+    // Deterministic rotating (Latin-square) run order: for round r (0 until
+    // threadCombos.size) and prompt index p, the combo used is
+    // threadCombos[(r + p) % threadCombos.size]. Every (prompt, combo) pair still runs
+    // exactly once -- this only changes *when* each pair runs, so low-thread combos are
+    // no longer always grouped at the start (coolest device) and high-thread combos
+    // always grouped at the end (after sustained load, likely throttled). Round 0 alone
+    // already starts each prompt on a different combo (prompt 0 -> combo 0, prompt 1 ->
+    // combo 1, ...), and every combo appears across the full spread of early/late
+    // positions by the time all rounds finish. Fully deterministic, so a rerun with the
+    // same prompts/combos reproduces the identical sequence.
+    private fun buildRunPlan(): List<Pair<BenchPrompt, ThreadCombo>> {
+        val n = threadCombos.size
+        val plan = mutableListOf<Pair<BenchPrompt, ThreadCombo>>()
+        for (round in 0 until n) {
+            for ((p, prompt) in fixedPrompts.withIndex()) {
+                plan.add(prompt to threadCombos[(round + p) % n])
+            }
+        }
+        return plan
+    }
 
     private fun startBenchmark() {
         if (running) return
@@ -132,54 +182,62 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
 
         running = true
         runButton.isEnabled = false
+        val plan = buildRunPlan()
         val lines = mutableListOf<String>()
-        lines.add("Starting ${fixedPromptCountLabel()} run(s)...")
+        lines.add("Starting ${plan.size} run(s) in rotating order (see run= index in each line)...")
         resultsView.text = lines.joinToString("\n")
 
         Thread {
-            var completed = 0
-            for (combo in threadCombos) {
-                for (prompt in fixedPrompts) {
-                    val result = LlamaEngine.generateBenchmark(
-                        prompt = prompt.text,
-                        nPredict = 100,
-                        nThreads = combo.nThreads,
-                        nThreadsBatch = combo.nThreadsBatch
+            for ((index, step) in plan.withIndex()) {
+                val (prompt, combo) = step
+                val runIndex = index + 1
+
+                val result = LlamaEngine.generateBenchmark(
+                    prompt = prompt.text,
+                    nPredict = 100,
+                    nThreads = combo.nThreads,
+                    nThreadsBatch = combo.nThreadsBatch
+                )
+
+                val line = if (result == null) {
+                    "[run=$runIndex/${plan.size}] ${prompt.label} threads=${combo.nThreads}/${combo.nThreadsBatch}: FAILED"
+                } else {
+                    diagLog.logLlamaBenchmark(
+                        promptId = prompt.id,
+                        nThreads = result.nThreads,
+                        nThreadsBatch = result.nThreadsBatch,
+                        nCtx = result.nCtx,
+                        ctxReused = result.ctxReused,
+                        nPromptTokens = result.nPromptTokens,
+                        prefillMs = result.prefillMs,
+                        prefillTokensPerSec = result.prefillTokensPerSec,
+                        ttftMs = result.ttftMs,
+                        nGeneratedTokens = result.nGeneratedTokens,
+                        genMs = result.genMs,
+                        genTokensPerSec = result.genTokensPerSec,
+                        totalMs = result.totalMs,
+                        runIndex = runIndex
                     )
-                    completed++
+                    "[run=$runIndex/${plan.size}] ${prompt.label} threads=${result.nThreads}/${result.nThreadsBatch} ctx=${result.nCtx}: " +
+                        "prompt=${result.nPromptTokens}tok prefill=${result.prefillMs}ms(${"%.1f".format(result.prefillTokensPerSec)}tok/s) " +
+                        "ttft=${result.ttftMs}ms gen=${result.nGeneratedTokens}tok/${result.genMs}ms(${"%.1f".format(result.genTokensPerSec)}tok/s) " +
+                        "total=${result.totalMs}ms"
+                }
 
-                    val line = if (result == null) {
-                        "[$completed/${fixedPromptCountLabel()}] ${prompt.label} threads=${combo.nThreads}/${combo.nThreadsBatch}: FAILED"
-                    } else {
-                        diagLog.logLlamaBenchmark(
-                            promptId = prompt.id,
-                            nThreads = result.nThreads,
-                            nThreadsBatch = result.nThreadsBatch,
-                            nCtx = result.nCtx,
-                            ctxReused = result.ctxReused,
-                            nPromptTokens = result.nPromptTokens,
-                            prefillMs = result.prefillMs,
-                            prefillTokensPerSec = result.prefillTokensPerSec,
-                            ttftMs = result.ttftMs,
-                            nGeneratedTokens = result.nGeneratedTokens,
-                            genMs = result.genMs,
-                            genTokensPerSec = result.genTokensPerSec,
-                            totalMs = result.totalMs
-                        )
-                        "[$completed/${fixedPromptCountLabel()}] ${prompt.label} threads=${result.nThreads}/${result.nThreadsBatch} ctx=${result.nCtx}: " +
-                            "prompt=${result.nPromptTokens}tok prefill=${result.prefillMs}ms(${"%.1f".format(result.prefillTokensPerSec)}tok/s) " +
-                            "ttft=${result.ttftMs}ms gen=${result.nGeneratedTokens}tok/${result.genMs}ms(${"%.1f".format(result.genTokensPerSec)}tok/s) " +
-                            "total=${result.totalMs}ms"
-                    }
+                lines.add(line)
+                mainHandler.post { resultsView.text = lines.joinToString("\n") }
 
-                    lines.add(line)
-                    mainHandler.post { resultsView.text = lines.joinToString("\n") }
+                if (index < plan.size - 1) {
+                    try { Thread.sleep(RUN_COOLDOWN_MS) } catch (_: InterruptedException) {}
                 }
             }
 
             mainHandler.post {
                 lines.add("")
-                lines.add("Done. Share via Settings > Extras & Support > Share Diagnostic Report.")
+                lines.add("Done. Reminder: these are 4 fixed test prompts, not the actual production " +
+                    "prompt -- use these results to compare thread settings against each other, not " +
+                    "as an absolute measure of Scout's real reply latency.")
+                lines.add("Share via Settings > Extras & Support > Share Diagnostic Report.")
                 resultsView.text = lines.joinToString("\n")
                 running = false
                 runButton.isEnabled = true

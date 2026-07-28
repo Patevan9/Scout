@@ -249,6 +249,13 @@ class DiagLog(private val db: DiagnosticDb) {
      * genMs             — generation-loop duration.
      * genTokensPerSec   — nGeneratedTokens / genMs, precomputed by the caller.
      * totalMs           — total wall-clock duration of the whole call.
+     * runIndex          — this run's 1-based position in the whole benchmark
+     *                      session's chronological execution order (not grouped
+     *                      by thread combo -- see LlamaBenchmarkActivity's
+     *                      rotating run order). Lets a later reader reconstruct
+     *                      how much sustained load preceded any given run, since
+     *                      thermal state depends on execution order, not on
+     *                      which combo/prompt a run happens to be.
      * All numeric fields are clamped to >= 0.
      */
     fun logLlamaBenchmark(
@@ -264,8 +271,10 @@ class DiagLog(private val db: DiagnosticDb) {
         nGeneratedTokens: Int,
         genMs: Long,
         genTokensPerSec: Float,
-        totalMs: Long
+        totalMs: Long,
+        runIndex: Int
     ) = safe("LLAMA_BENCH") {
+        "run=${runIndex.coerceAtLeast(0)} " +
         "prompt=${promptId.name.lowercase()} " +
         "threads=${nThreads.coerceAtLeast(0)} " +
         "threads_batch=${nThreadsBatch.coerceAtLeast(0)} " +
