@@ -42,6 +42,15 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var swipeDetector: GestureDetector
 
+    // Hidden developer-tools unlock: 7 taps on "About Scout" within ABOUT_TAP_WINDOW_MS,
+    // mirroring Android's own "tap build number 7 times" convention. Persisted once
+    // unlocked so the Performance Benchmark row stays visible on later visits without
+    // re-tapping. Ordinary users are never shown this row or told it exists.
+    private var aboutTapCount = 0
+    private var aboutTapWindowStartMs = 0L
+    private val ABOUT_TAPS_TO_UNLOCK = 7
+    private val ABOUT_TAP_WINDOW_MS = 4_000L
+
     private val BG           = Color.parseColor("#0D1728")
     private val CARD         = Color.parseColor("#19293F")
     private val ACCENT       = Color.parseColor("#4A8EFF")
@@ -429,17 +438,25 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(sectionLabel("SUPPORT"))
         body.addView(cardGroup(
             navRow("Support", "", "Get help and connect to support") { showSupport() },
-            navRow("About Scout", "", "Version and info") { showAbout() },
+            navRow("About Scout", "", "Version and info") { onAboutScoutTapped() },
             navRow("Licenses", "", "Open source licenses") { showLicenses() }
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("DIAGNOSTICS"))
-        body.addView(cardGroup(
+        val diagRows = mutableListOf(
             navRow("View Diagnostic Report",  "", "Review the technical information in Scout's diagnostic report.") { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, false)) },
             navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it")                  { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true)) },
             navRow("Clear Diagnostic History", "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
-        ))
+        )
+        // Hidden until unlocked via 7 taps on "About Scout" -- see onAboutScoutTapped().
+        // Ordinary users never see this row.
+        if (scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
+            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run TinyLlama thread-count benchmarks") {
+                startActivity(Intent(this, LlamaBenchmarkActivity::class.java))
+            })
+        }
+        body.addView(cardGroup(*diagRows.toTypedArray()))
 
         body.addView(footerNote("Thank you for supporting Scout!"))
         scroll.addView(body)
@@ -878,6 +895,29 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // Counts rapid taps on "About Scout" to unlock the hidden developer
+    // Performance Benchmark row -- see ABOUT_TAPS_TO_UNLOCK/ABOUT_TAP_WINDOW_MS.
+    // Always shows the normal About dialog too, so nothing about the row's
+    // ordinary behavior changes for users who aren't trying to unlock it.
+    private fun onAboutScoutTapped() {
+        val now = System.currentTimeMillis()
+        if (now - aboutTapWindowStartMs > ABOUT_TAP_WINDOW_MS) {
+            aboutTapCount = 0
+            aboutTapWindowStartMs = now
+        }
+        aboutTapCount++
+        if (aboutTapCount >= ABOUT_TAPS_TO_UNLOCK) {
+            aboutTapCount = 0
+            if (!scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
+                scoutPrefs.edit().putBoolean("dev_benchmark_unlocked", true).apply()
+                toast("Developer benchmark unlocked.")
+                refreshCurrentScreen()
+                return
+            }
+        }
+        showAbout()
     }
 
     private fun showAbout() {

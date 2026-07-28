@@ -40,6 +40,13 @@ class DiagLog(private val db: DiagnosticDb) {
         GENERATION_DISCARDED, GENERATION_FAILED
     }
 
+    /**
+     * Identifies which fixed benchmark prompt a LLAMA_BENCH entry belongs to.
+     * The prompt text itself is never logged -- only this label -- consistent
+     * with every other DiagLog method never accepting free text.
+     */
+    enum class BenchPromptId { SHORT_FACTUAL, PERSONAL_MEMORY, CONVERSATIONAL, LONG_HISTORY }
+
     /** Which outbound network subsystem made a request. */
     enum class NetworkArea { WEATHER_POINTS, WEATHER_FORECAST, GEMINI }
 
@@ -219,6 +226,59 @@ class DiagLog(private val db: DiagnosticDb) {
             append("event=${event.name.lowercase()}")
             if (durationMs != null) append(" ms=${durationMs.coerceAtLeast(0L)}")
         }
+    }
+
+    /**
+     * Recorded once per dev-only performance benchmark run (see
+     * LlamaBenchmarkActivity — not reachable by ordinary users). All fields
+     * are numeric or controlled enums; the benchmark prompt text and the
+     * generated reply are never accepted here or anywhere upstream of this
+     * call (nativeGenerateBenchmark() never returns the reply text at all).
+     *
+     * promptId          — which of the four fixed benchmark prompts this run used.
+     * nThreads          — generation thread count actually granted by llama.cpp.
+     * nThreadsBatch     — prompt-processing thread count actually granted.
+     * nCtx              — context size actually granted.
+     * ctxReused         — whether the KV-cache context was reused rather than
+     *                      recreated. Always false today; reuse isn't implemented.
+     * nPromptTokens     — prompt token count for this run.
+     * prefillMs         — prompt-processing (prefill) duration.
+     * prefillTokensPerSec — nPromptTokens / prefillMs, precomputed by the caller.
+     * ttftMs            — wall-clock time to the first generated token.
+     * nGeneratedTokens  — number of tokens generated.
+     * genMs             — generation-loop duration.
+     * genTokensPerSec   — nGeneratedTokens / genMs, precomputed by the caller.
+     * totalMs           — total wall-clock duration of the whole call.
+     * All numeric fields are clamped to >= 0.
+     */
+    fun logLlamaBenchmark(
+        promptId: BenchPromptId,
+        nThreads: Int,
+        nThreadsBatch: Int,
+        nCtx: Int,
+        ctxReused: Boolean,
+        nPromptTokens: Int,
+        prefillMs: Long,
+        prefillTokensPerSec: Float,
+        ttftMs: Long,
+        nGeneratedTokens: Int,
+        genMs: Long,
+        genTokensPerSec: Float,
+        totalMs: Long
+    ) = safe("LLAMA_BENCH") {
+        "prompt=${promptId.name.lowercase()} " +
+        "threads=${nThreads.coerceAtLeast(0)} " +
+        "threads_batch=${nThreadsBatch.coerceAtLeast(0)} " +
+        "ctx=${nCtx.coerceAtLeast(0)} " +
+        "ctx_reused=${flag(ctxReused)} " +
+        "prompt_tokens=${nPromptTokens.coerceAtLeast(0)} " +
+        "prefill_ms=${prefillMs.coerceAtLeast(0L)} " +
+        "prefill_tps=${"%.1f".format(prefillTokensPerSec.coerceAtLeast(0f))} " +
+        "ttft_ms=${ttftMs.coerceAtLeast(0L)} " +
+        "gen_tokens=${nGeneratedTokens.coerceAtLeast(0)} " +
+        "gen_ms=${genMs.coerceAtLeast(0L)} " +
+        "gen_tps=${"%.1f".format(genTokensPerSec.coerceAtLeast(0f))} " +
+        "total_ms=${totalMs.coerceAtLeast(0L)}"
     }
 
     /**

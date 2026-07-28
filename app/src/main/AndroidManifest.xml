@@ -77,6 +77,14 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
 
+        <!-- Developer-only; not linked from anywhere ordinary users can reach --
+             see SettingsActivity's hidden 7-tap unlock on "About Scout." -->
+        <activity
+            android:name=".LlamaBenchmarkActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
+
         <!-- REQUIRED for "export brain" sharing -->
         <provider
             android:name="androidx.core.content.FileProvider"

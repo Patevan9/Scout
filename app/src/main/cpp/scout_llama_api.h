@@ -38,16 +38,31 @@ struct llama_model_params {
 };
 
 /* ── Context params ──────────────────────────────────────────── */
-/* n_ctx/n_batch/n_ubatch/n_seq_max/n_threads are stable at
-   offsets 0–16 across all llama.cpp versions.
-   The 508-byte opaque tail makes the struct safely larger.         */
+/* n_ctx/n_batch/n_ubatch/n_seq_max/n_threads/n_threads_batch are stable
+   at offsets 0–20 across all llama.cpp versions (confirmed against the
+   upstream llama.h struct ordering: n_ctx, n_batch, n_ubatch, n_seq_max,
+   n_threads, n_threads_batch, then RoPE/YaRN/callback fields we never
+   touch). The 504-byte opaque tail makes the struct safely larger.     */
 struct llama_context_params {
-    uint32_t n_ctx;         /* offset 0  — we set this */
-    uint32_t n_batch;       /* offset 4  — we set this */
-    uint32_t n_ubatch;      /* offset 8                */
-    uint32_t n_seq_max;     /* offset 12               */
-    int32_t  n_threads;     /* offset 16 — we set this */
-    char     _pad[508];     /* oversized safe tail     */
+    uint32_t n_ctx;            /* offset 0  — we set this */
+    uint32_t n_batch;          /* offset 4  — we set this */
+    uint32_t n_ubatch;         /* offset 8                */
+    uint32_t n_seq_max;        /* offset 12               */
+    int32_t  n_threads;        /* offset 16 — we set this */
+    int32_t  n_threads_batch;  /* offset 20 — we set this */
+    char     _pad[504];        /* oversized safe tail     */
+};
+
+/* ── Perf data (plain flat struct, returned by value — layout is part
+   of the public API contract, not opaque like the handle structs above) */
+struct llama_perf_context_data {
+    double  t_start_ms;
+    double  t_load_ms;
+    double  t_p_eval_ms;   /* time spent processing the prompt (prefill) */
+    double  t_eval_ms;     /* time spent generating tokens               */
+    int32_t n_p_eval;      /* number of prompt tokens processed          */
+    int32_t n_eval;        /* number of tokens generated                 */
+    int32_t n_reused;
 };
 
 /* ── Batch ───────────────────────────────────────────────────── */
@@ -109,6 +124,13 @@ void llama_log_set(llama_log_callback_t log_callback, void* user_data);
 int  ggml_backend_load_all(void);
 int  ggml_backend_load_all_from_path(const char* path);
 int  ggml_backend_load(const char* path);
+
+/* Benchmark-instrumentation additions. All confirmed present in the prebuilt
+   libllama.so via `nm -D` before adding these declarations. */
+int32_t  llama_n_threads(struct llama_context* ctx);
+int32_t  llama_n_threads_batch(struct llama_context* ctx);
+uint32_t llama_n_ctx(const struct llama_context* ctx);
+struct llama_perf_context_data llama_perf_context(const struct llama_context* ctx);
 
 #ifdef __cplusplus
 }

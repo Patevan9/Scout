@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <dlfcn.h>
 #include <algorithm>
+#include <chrono>
 
 #include "scout_llama_api.h"
 
@@ -49,6 +50,225 @@ static std::string jstringToStd(JNIEnv* env, jstring jstr) {
     std::string result(cstr ? cstr : "");
     env->ReleaseStringUTFChars(jstr, cstr);
     return result;
+}
+
+// ── Shared generation core ──────────────────────────────────────────────
+// Used by both the production nativeGenerate() path and the dev-only
+// benchmark path below, so the two can never silently drift apart. Every
+// numeric value (n_ctx, n_batch, n_threads) is supplied explicitly by the
+// caller -- the production call site passes the exact literals it has
+// always used (2048/512/2), so extracting this changes nothing about
+// production behavior. nThreadsBatchOverride of 0 means "leave
+// n_threads_batch at whatever llama_context_default_params() fills in",
+// which is what production does; only the benchmark path passes a
+// non-zero override.
+struct GenResult {
+    std::string text;
+    int    n_prompt      = 0;
+    int    n_generated   = 0;
+    double prefill_ms    = 0.0;
+    double ttft_ms       = 0.0;
+    double gen_ms        = 0.0;
+    double total_ms      = 0.0;
+    int    n_threads       = 0;
+    int    n_threads_batch = 0;
+    int    n_ctx            = 0;
+    // Every call below frees and recreates the context from scratch --
+    // there is no KV-cache reuse across calls yet, so this is always false.
+    // The field exists so a future reuse change has somewhere honest to
+    // report it, rather than instrumentation having to be added at the
+    // same time as the reuse logic itself.
+    bool   ctx_reused = false;
+    bool   ok = false;
+};
+
+static GenResult runGeneration(
+        ScoutModel* sm, const std::string& prompt,
+        int nPredict, float temp,
+        int nCtx, int nBatch, int nThreads, int nThreadsBatchOverride)
+{
+    using clock = std::chrono::steady_clock;
+    GenResult r;
+    auto t_call_start = clock::now();
+
+    const int kNBatch = nBatch;   // must match cparams.n_batch below -- llama_decode()
+                                   // aborts (ggml_abort/SIGABRT) if a batch exceeds this,
+                                   // so every llama_decode() call here is kept at or
+                                   // under kNBatch tokens, never just n_ctx.
+
+    llama_free(sm->ctx);
+    llama_context_params cparams = llama_context_default_params();
+    cparams.n_ctx     = (uint32_t)nCtx;
+    cparams.n_batch   = (uint32_t)kNBatch;
+    cparams.n_threads = nThreads;
+    if (nThreadsBatchOverride > 0) cparams.n_threads_batch = nThreadsBatchOverride;
+    sm->ctx = llama_new_context_with_model(sm->model, cparams);
+    if (!sm->ctx) {
+        LOGE("runGeneration: failed to recreate context");
+        return r;
+    }
+
+    // Read back the values llama.cpp actually granted, rather than assuming
+    // our request was honored verbatim -- more accurate for a benchmark log.
+    r.n_threads       = llama_n_threads(sm->ctx);
+    r.n_threads_batch = llama_n_threads_batch(sm->ctx);
+    r.n_ctx           = (int)llama_n_ctx(sm->ctx);
+
+    int n_vocab = 32000;   // TinyLlama 1.1B — confirmed in model metadata
+    std::vector<llama_token> prompt_tokens(nCtx);
+    const struct llama_vocab* vocab = llama_model_get_vocab(sm->model);
+
+    int n_prompt = llama_tokenize(
+            vocab, prompt.c_str(), (int32_t)prompt.size(),
+            prompt_tokens.data(), (int32_t)prompt_tokens.size(),
+            true, true);
+    if (n_prompt < 0) {
+        LOGE("runGeneration: tokenize failed (%d)", n_prompt);
+        return r;
+    }
+    prompt_tokens.resize(n_prompt);
+    r.n_prompt = n_prompt;
+
+    // Prefill in chunks of at most kNBatch tokens instead of one llama_batch_init(n_prompt)
+    // covering the whole prompt -- a prompt over 512 tokens used to build one oversized
+    // batch and crash llama_decode() with SIGABRT. Positions stay absolute across chunks
+    // so the model sees the same token sequence it would have in a single batch; only the
+    // true final token of the whole prompt requests logits, since that's the only one
+    // needed to start the generation loop below.
+    int n_done = 0;
+    int lastPromptLogitsIdx = 0;
+    while (n_done < n_prompt) {
+        int chunk = std::min(kNBatch, n_prompt - n_done);
+
+        llama_batch batch = llama_batch_init(chunk, 0, 1);
+        for (int i = 0; i < chunk; i++) {
+            int idx = n_done + i;
+            batch.token[i]     = prompt_tokens[idx];
+            batch.pos[i]       = idx;
+            batch.n_seq_id[i]  = 1;
+            batch.seq_id[i][0] = 0;
+            bool isLastPromptToken = (idx == n_prompt - 1);
+            batch.logits[i]    = isLastPromptToken ? 1 : 0;
+            if (isLastPromptToken) lastPromptLogitsIdx = i;
+        }
+        batch.n_tokens = chunk;
+
+        if (batch.n_tokens > kNBatch) {
+            LOGE("runGeneration: refusing oversized prefill batch n_tokens=%d > kNBatch=%d",
+                 batch.n_tokens, kNBatch);
+            llama_batch_free(batch);
+            return r;
+        }
+
+        int rc = llama_decode(sm->ctx, batch);
+        llama_batch_free(batch);
+
+        if (rc != 0) {
+            LOGE("runGeneration: prefill decode failed at chunk starting %d (rc=%d)", n_done, rc);
+            return r;
+        }
+        n_done += chunk;
+    }
+
+    auto t_prefill_end = clock::now();
+
+    llama_token eos = 2;   // TinyLlama EOS = </s> — confirmed in model metadata
+    llama_token eot = 2;   // TinyLlama has no separate EOT, same as EOS
+
+    std::string output;
+    output.reserve(512);
+    char piece[256];
+    int  cur_pos = n_prompt;
+    bool haveFirstToken = false;
+
+    for (int step = 0; step < nPredict; step++) {
+        int logits_idx = (step == 0) ? lastPromptLogitsIdx : 0;
+        float* logits = llama_get_logits_ith(sm->ctx, logits_idx);
+        if (!logits) { LOGE("runGeneration: null logits step %d", step); break; }
+
+        llama_token next_token = 0;
+        if (temp <= 0.0f) {
+            float best = logits[0];
+            for (int v = 1; v < n_vocab; v++)
+                if (logits[v] > best) { best = logits[v]; next_token = v; }
+        } else {
+            float max_l = logits[0];
+            for (int v = 1; v < n_vocab; v++)
+                if (logits[v] > max_l) max_l = logits[v];
+            std::vector<float> probs(n_vocab);
+            float sum = 0.0f;
+            for (int v = 0; v < n_vocab; v++) {
+                probs[v] = expf((logits[v] - max_l) / temp);
+                sum += probs[v];
+            }
+            float rnd = ((float)rand() / (float)RAND_MAX) * sum;
+            float acc = 0.0f;
+            for (int v = 0; v < n_vocab; v++) {
+                acc += probs[v];
+                if (acc >= rnd) { next_token = v; break; }
+            }
+        }
+
+        if (next_token == eos || next_token == eot) break;
+
+        int len = llama_token_to_piece(
+                vocab, next_token, piece, sizeof(piece)-1, 0, false);
+        if (len > 0) { piece[len] = '\0'; output += piece; }
+        r.n_generated++;
+
+        // Time-to-first-token: this fires right after the very first token is
+        // sampled, which needs no extra llama_decode() call -- its logits came
+        // from the last prefill chunk's lookahead (see lastPromptLogitsIdx
+        // above). The llama_decode() call below is only feeding this token
+        // back in to produce logits for step+1, so TTFT here is genuinely
+        // "prefill + sampling," not "prefill + one full decode."
+        if (!haveFirstToken) {
+            haveFirstToken = true;
+            r.ttft_ms = std::chrono::duration<double, std::milli>(clock::now() - t_call_start).count();
+        }
+
+        llama_batch next = llama_batch_init(1, 0, 1);
+        next.token[0]     = next_token;
+        next.pos[0]       = cur_pos++;
+        next.n_seq_id[0]  = 1;
+        next.seq_id[0][0] = 0;
+        next.logits[0]    = 1;
+        next.n_tokens     = 1;
+        if (next.n_tokens > kNBatch) {
+            // Always 1 token here, so this can't actually fire -- kept for the
+            // same reason as the prefill guard above.
+            LOGE("runGeneration: refusing oversized step batch n_tokens=%d > kNBatch=%d",
+                 next.n_tokens, kNBatch);
+            llama_batch_free(next); break;
+        }
+        int rc = llama_decode(sm->ctx, next);
+        if (rc != 0) {
+            LOGE("runGeneration: decode failed step %d rc=%d", step, rc);
+            llama_batch_free(next); break;
+        }
+        llama_batch_free(next);
+    }
+
+    auto t_gen_end = clock::now();
+
+    // Prefer llama.cpp's own perf accounting (per-decode-call timing it already
+    // does internally) over our own chrono wrapper where it reports anything --
+    // more accurate, and avoids per-token instrumentation. Falls back to our
+    // wall-clock measurement only if the library reports nothing (e.g. if
+    // no_perf ends up true from whatever llama_context_default_params() set --
+    // we don't override that field; see scout_llama_api.h for why).
+    llama_perf_context_data pd = llama_perf_context(sm->ctx);
+    r.prefill_ms = (pd.t_p_eval_ms > 0.0 || pd.n_p_eval > 0)
+        ? pd.t_p_eval_ms
+        : std::chrono::duration<double, std::milli>(t_prefill_end - t_call_start).count();
+    r.gen_ms = (pd.t_eval_ms > 0.0 || pd.n_eval > 0)
+        ? pd.t_eval_ms
+        : std::chrono::duration<double, std::milli>(t_gen_end - t_prefill_end).count();
+
+    r.total_ms = std::chrono::duration<double, std::milli>(clock::now() - t_call_start).count();
+    r.text = output;
+    r.ok = true;
+    return r;
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -140,166 +360,69 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerate(
     LOGI("nativeGenerate: START prompt_len=%zu nPredict=%d temp=%.2f",
          prompt.size(), (int)nPredict, (double)temp);
 
-    const int kNBatch = 512;   // must match cparams.n_batch below -- llama_decode()
-                               // aborts (ggml_abort/SIGABRT) if a batch exceeds this,
-                               // so every llama_decode() call in this function is kept
-                               // at or under kNBatch tokens, never just n_ctx.
+    // Exact same literals production has always used (n_ctx=2048, n_batch=512,
+    // n_threads=2). nThreadsBatchOverride=0 means "don't touch n_threads_batch",
+    // matching prior behavior exactly -- only the benchmark path below overrides it.
+    GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
+                                 /*nCtx=*/2048, /*nBatch=*/512,
+                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0);
 
-    llama_free(sm->ctx);
-    llama_context_params cparams = llama_context_default_params();
-    cparams.n_ctx = 2048;
-    cparams.n_batch = kNBatch;
-    cparams.n_threads = 2;
-    sm->ctx = llama_new_context_with_model(sm->model, cparams);
-    if (!sm->ctx) {
-        LOGE("nativeGenerate: failed to recreate context");
-        return env->NewStringUTF("");
-    }
-    LOGI("nativeGenerate: step A — using hardcoded vocab/ctx sizes");
-    int n_vocab = 32000;   // TinyLlama 1.1B — confirmed in model metadata
-    int n_ctx   = 2048;    // matches our requested context size
-    LOGI("nativeGenerate: step C — n_vocab=%d n_ctx=%d", n_vocab, n_ctx);
-    std::vector<llama_token> prompt_tokens(n_ctx);
-    LOGI("nativeGenerate: step D — model_ptr=0x%016llx calling llama_tokenize", (unsigned long long)(uintptr_t)sm->model);
-    const struct llama_vocab* vocab = llama_model_get_vocab(sm->model);
+    LOGI("nativeGenerate: DONE ok=%d output_len=%zu n_prompt=%d prefill_ms=%.0f "
+         "ttft_ms=%.0f n_gen=%d gen_ms=%.0f total_ms=%.0f threads=%d threads_batch=%d",
+         r.ok ? 1 : 0, r.text.size(), r.n_prompt, r.prefill_ms,
+         r.ttft_ms, r.n_generated, r.gen_ms, r.total_ms, r.n_threads, r.n_threads_batch);
 
-    int n_prompt = llama_tokenize(
-vocab,
-            prompt.c_str(), (int32_t)prompt.size(),
-            prompt_tokens.data(), (int32_t)prompt_tokens.size(),
-            true, true);
-    LOGI("nativeGenerate: step E — n_prompt=%d", n_prompt);
+    return env->NewStringUTF(r.text.c_str());
+}
 
-    if (n_prompt < 0) {
-        LOGE("nativeGenerate: tokenize failed (%d)", n_prompt);
-        return env->NewStringUTF("");
-    }
-    prompt_tokens.resize(n_prompt);
-
-    // Prefill in chunks of at most kNBatch tokens instead of one llama_batch_init(n_prompt)
-    // covering the whole prompt -- a prompt over 512 tokens (easily reached now that the
-    // personal-memory/general fact grounding can inject a dozen facts plus conversation
-    // history) used to build one oversized batch and crash llama_decode() with SIGABRT.
-    // Positions stay absolute across chunks (idx, not the chunk-local loop index i) so the
-    // model sees the same token sequence it would have in a single batch; only the true
-    // final token of the whole prompt requests logits, since that's the only one needed to
-    // start the generation loop below.
-    LOGI("nativeGenerate: step F — prefilling %d prompt token(s) in chunks of %d", n_prompt, kNBatch);
-
-    // llama_get_logits_ith(ctx, i) indexes into the batch from the *most recent*
-    // llama_decode() call, not a global position across every decode ever made --
-    // so once prefill is chunked, the final prompt token's logits live at its
-    // local index within the *last* chunk's batch, not at n_prompt-1. Captured
-    // below as lastPromptLogitsIdx and used instead of n_prompt-1 for step 0.
-    int n_done = 0;
-    int lastPromptLogitsIdx = 0;
-    while (n_done < n_prompt) {
-        int chunk = std::min(kNBatch, n_prompt - n_done);
-
-        llama_batch batch = llama_batch_init(chunk, 0, 1);
-        for (int i = 0; i < chunk; i++) {
-            int idx = n_done + i;
-            batch.token[i]     = prompt_tokens[idx];
-            batch.pos[i]       = idx;
-            batch.n_seq_id[i]  = 1;
-            batch.seq_id[i][0] = 0;
-            bool isLastPromptToken = (idx == n_prompt - 1);
-            batch.logits[i]    = isLastPromptToken ? 1 : 0;
-            if (isLastPromptToken) lastPromptLogitsIdx = i;
-        }
-        batch.n_tokens = chunk;
-
-        if (batch.n_tokens > kNBatch) {
-            LOGE("nativeGenerate: refusing oversized prefill batch n_tokens=%d > kNBatch=%d",
-                 batch.n_tokens, kNBatch);
-            llama_batch_free(batch);
-            return env->NewStringUTF("");
-        }
-
-        LOGI("nativeGenerate: step G — prefill chunk [%d, %d) n_tokens=%d calling llama_decode",
-             n_done, n_done + chunk, batch.n_tokens);
-        int rc = llama_decode(sm->ctx, batch);
-        LOGI("nativeGenerate: step H — prefill chunk decode rc=%d", rc);
-        llama_batch_free(batch);
-
-        if (rc != 0) {
-            LOGE("nativeGenerate: prefill decode failed at chunk starting %d (rc=%d)", n_done, rc);
-            return env->NewStringUTF("");
-        }
-
-        n_done += chunk;
-    }
-    LOGI("nativeGenerate: step I — prefill done, starting generation loop");
-
-    llama_token eos = 2;   // TinyLlama EOS = </s> — confirmed in model metadata
-    llama_token eot = 2;   // TinyLlama has no separate EOT, same as EOS
-
-    std::string output;
-    output.reserve(512);
-    char piece[256];
-    int  cur_pos = n_prompt;
-
-    for (int step = 0; step < (int)nPredict; step++) {
-        int logits_idx = (step == 0) ? lastPromptLogitsIdx : 0;
-        float* logits = llama_get_logits_ith(sm->ctx, logits_idx);
-        if (!logits) { LOGE("nativeGenerate: null logits step %d", step); break; }
-
-        llama_token next_token = 0;
-        if (temp <= 0.0f) {
-            float best = logits[0];
-            for (int v = 1; v < n_vocab; v++)
-                if (logits[v] > best) { best = logits[v]; next_token = v; }
-        } else {
-            float max_l = logits[0];
-            for (int v = 1; v < n_vocab; v++)
-                if (logits[v] > max_l) max_l = logits[v];
-            std::vector<float> probs(n_vocab);
-            float sum = 0.0f;
-            for (int v = 0; v < n_vocab; v++) {
-                probs[v] = expf((logits[v] - max_l) / temp);
-                sum += probs[v];
-            }
-            float r = ((float)rand() / (float)RAND_MAX) * sum;
-            float acc = 0.0f;
-            for (int v = 0; v < n_vocab; v++) {
-                acc += probs[v];
-                if (acc >= r) { next_token = v; break; }
-            }
-        }
-
-        if (next_token == eos || next_token == eot) {
-            LOGI("nativeGenerate: stop token at step %d", step); break;
-        }
-
-        int len = llama_token_to_piece(
-                vocab, next_token, piece, sizeof(piece)-1, 0, false);
-        if (len > 0) { piece[len] = '\0'; output += piece; }
-
-        llama_batch next = llama_batch_init(1, 0, 1);
-        next.token[0]     = next_token;
-        next.pos[0]       = cur_pos++;
-        next.n_seq_id[0]  = 1;
-        next.seq_id[0][0] = 0;
-        next.logits[0]    = 1;
-        next.n_tokens     = 1;
-        if (next.n_tokens > kNBatch) {
-            // Always 1 token here, so this can't actually fire -- kept for the same
-            // reason as the prefill guard: no llama_decode() call in this function
-            // should ever be able to exceed kNBatch without being caught explicitly.
-            LOGE("nativeGenerate: refusing oversized step batch n_tokens=%d > kNBatch=%d",
-                 next.n_tokens, kNBatch);
-            llama_batch_free(next); break;
-        }
-        int rc = llama_decode(sm->ctx, next);
-        if (rc != 0) {
-            LOGE("nativeGenerate: decode failed step %d rc=%d", step, rc);
-            llama_batch_free(next); break;
-        }
-        llama_batch_free(next);
+// Dev-only benchmark entry point -- gated behind a hidden developer unlock in
+// SettingsActivity, never reachable by ordinary users. Runs the exact same
+// runGeneration() core as production (so results are representative of real
+// behavior) but with caller-supplied thread counts, and returns performance
+// metrics only -- never the generated reply text, matching DiagnosticDb's
+// existing privacy invariant that response content is never logged.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_scoutface_LlamaEngine_nativeGenerateBenchmark(
+        JNIEnv* env, jobject,
+        jlong handle, jstring jPrompt,
+        jint nPredict, jfloat temp,
+        jint nThreads, jint nThreadsBatch)
+{
+    ScoutModel* sm = (ScoutModel*)(uintptr_t)handle;
+    if (!sm || !sm->model || !sm->ctx) {
+        LOGE("nativeGenerateBenchmark: invalid handle");
+        return env->NewStringUTF("ok=0");
     }
 
-    LOGI("nativeGenerate: DONE output_len=%zu", output.size());
-    return env->NewStringUTF(output.c_str());
+    std::string prompt = jstringToStd(env, jPrompt);
+    if (prompt.empty()) {
+        LOGE("nativeGenerateBenchmark: empty prompt");
+        return env->NewStringUTF("ok=0");
+    }
+
+    LOGI("nativeGenerateBenchmark: START nThreads=%d nThreadsBatch=%d prompt_len=%zu",
+         (int)nThreads, (int)nThreadsBatch, prompt.size());
+
+    // Same n_ctx/n_batch as production (2048/512) -- only thread counts vary --
+    // so these numbers reflect the context size Scout actually runs with today.
+    GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
+                                 /*nCtx=*/2048, /*nBatch=*/512,
+                                 (int)nThreads, (int)nThreadsBatch);
+
+    if (!r.ok) {
+        LOGE("nativeGenerateBenchmark: generation failed");
+        return env->NewStringUTF("ok=0");
+    }
+
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "ok=1;n_prompt=%d;prefill_ms=%.1f;ttft_ms=%.1f;n_gen=%d;gen_ms=%.1f;"
+        "total_ms=%.1f;n_threads=%d;n_threads_batch=%d;n_ctx=%d;ctx_reused=%d",
+        r.n_prompt, r.prefill_ms, r.ttft_ms, r.n_generated, r.gen_ms,
+        r.total_ms, r.n_threads, r.n_threads_batch, r.n_ctx, r.ctx_reused ? 1 : 0);
+
+    LOGI("nativeGenerateBenchmark: DONE %s", buf);
+    return env->NewStringUTF(buf);
 }
 
 extern "C" JNIEXPORT void JNICALL
