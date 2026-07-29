@@ -640,10 +640,13 @@ object ScoutApiKeyHelper {
             // encryption was added. Encrypt it now and overwrite the stored value;
             // still returns the plaintext value for this call since re-decrypting
             // what was just encrypted would be redundant. Uses commit() (not
-            // apply()) so success/failure of the overwrite is known synchronously
-            // -- if it fails, the plaintext pref is left as-is and migration is
-            // simply retried on the next read, rather than considering it done
-            // when it may not have actually persisted.
+            // apply()) so the outcome is known synchronously rather than assumed.
+            // A false result does NOT guarantee the plaintext pref is still in
+            // place -- SharedPreferences.commit() can return false even when the
+            // in-memory write already landed, so durable persistence of the
+            // encrypted replacement simply could not be confirmed. Either way,
+            // the current call may continue using the already-loaded key, and
+            // migration will be evaluated again on a later read.
             when (val encrypted = ScoutSecureKeyStore.encrypt(stored)) {
                 is ScoutSecureKeyStore.EncryptResult.Available -> {
                     val committed = prefs.edit().putString(provider.prefKey, encrypted.stored).commit()
