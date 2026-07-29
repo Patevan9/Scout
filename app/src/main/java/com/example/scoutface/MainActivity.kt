@@ -745,8 +745,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
         } catch (e: Throwable) {
             android.util.Log.e("ScoutBrain", "modelDownloadLauncher.launch() threw", e)
-            startSystems() // fall back rather than leaving Scout stuck forever
+            showLoadingGateFailure()
         }
+    }
+
+    // The hard offline-brain gate exists so camera, mic, greeting, and conversation
+    // systems never come alive before LlamaEngine.isReady is genuinely true (see
+    // resumeSystems()/checkPermissionsAndStart()). startSystems() must never run
+    // except either directly when the brain is already ready (onCreate()) or from
+    // modelDownloadLauncher's own RESULT_OK callback, which never fires until the
+    // brain genuinely is ready. Calling startSystems() here as a fallback would have
+    // broken that guarantee the moment launch() itself failed to even show the
+    // loading screen. Retrying is honest instead -- Scout stays visibly inert rather
+    // than silently starting without its offline brain ready.
+    private fun showLoadingGateFailure() {
+        if (isFinishing || isDestroyed) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Scout couldn't start setup")
+            .setMessage("Something went wrong starting Scout's setup screen. Please try again.")
+            .setCancelable(false)
+            .setPositiveButton("Try Again") { _, _ -> launchLoadingGate() }
+            .show()
     }
 
     private fun setupBrainServices() {
@@ -998,19 +1017,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Stop accepting new generations and wait briefly for any in-flight
         // LlamaEngine.generate() call to return before freeing the native engine.
-        // Freeing while a generation is still running is a native-crash risk.
+        // Freeing while a generation is still running is a native-crash risk --
+        // awaitTermination()'s return value MUST be checked, not just called for its
+        // blocking side effect. On a slower device (A32), a single generation can
+        // legitimately take longer than 5 seconds, so a false "it must be done by now"
+        // assumption here was a real use-after-free risk against the native
+        // llama_context. If it hasn't terminated, skip free() entirely rather than
+        // freeing under an active generation -- the Activity/process is already being
+        // torn down at this point, so there's no safe "later" to retry the free from;
+        // leaking the native engine until process death is the safe trade-off.
         try {
 
             llamaExecutor.shutdown()
-            llamaExecutor.awaitTermination(5, TimeUnit.SECONDS)
+            val terminated = llamaExecutor.awaitTermination(5, TimeUnit.SECONDS)
 
-        } catch (_: Exception) {
-
-        }
-
-        try {
-
-            LlamaEngine.free()
+            if (terminated) {
+                try {
+                    LlamaEngine.free()
+                } catch (_: Exception) {
+                }
+            } else {
+                android.util.Log.w("ScoutBrain",
+                    "llamaExecutor did not terminate within 5s -- skipping LlamaEngine.free() " +
+                    "to avoid freeing a native context an in-flight generation may still be using.")
+            }
 
         } catch (_: Exception) {
 

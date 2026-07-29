@@ -1,19 +1,39 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cloud-backup: nothing that could contain an API key, a personal fact, a
+    face-recognition embedding, or a conversation/diagnostic record should ever
+    leave this device via Android's Auto Backup to Google Drive, since that
+    would contradict Scout's own privacy promise that this data stays local.
+    The TinyLlama model file, crash log, and diagnostic report are excluded
+    too, purely because they're large/regenerable, not because they're
+    sensitive.
+
+    Device-transfer (moving to a new phone the same user owns) is deliberately
+    less strict: personal facts and conversation/journal history are allowed to
+    transfer, so a user upgrading phones doesn't have to re-teach Scout
+    everything about their family from scratch. API keys and face-recognition
+    data still never transfer automatically, since a new phone shouldn't
+    silently inherit a paid API key or biometric data without the user
+    re-confirming it.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="scout_prefs.xml"/>
+        <exclude domain="database" path="scout_truth.db"/>
+        <exclude domain="database" path="scout_people.db"/>
+        <exclude domain="database" path="scout_convo.db"/>
+        <exclude domain="database" path="scout_journal.db"/>
+        <exclude domain="database" path="scout_diagnostic.db"/>
+        <exclude domain="file" path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"/>
+        <exclude domain="file" path="scout_crash.txt"/>
+        <exclude domain="file" path="diag/diag_report.txt"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="scout_prefs.xml"/>
+        <exclude domain="database" path="scout_people.db"/>
+        <exclude domain="database" path="scout_diagnostic.db"/>
+        <exclude domain="file" path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"/>
+        <exclude domain="file" path="scout_crash.txt"/>
+        <exclude domain="file" path="diag/diag_report.txt"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

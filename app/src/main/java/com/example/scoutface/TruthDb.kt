@@ -34,7 +34,9 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
         writableDatabase.execSQL(
             "INSERT INTO entity_memory(entity, fact_key, value, confidence, source, last_confirmed, created_at, updated_at) " +
                     "VALUES(?, ?, ?, ?, ?, ?, ?, ?) " +
-                    "ON CONFLICT(entity, fact_key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;",
+                    "ON CONFLICT(entity, fact_key) DO UPDATE SET " +
+                    "value=excluded.value, confidence=excluded.confidence, source=excluded.source, " +
+                    "last_confirmed=excluded.last_confirmed, updated_at=excluded.updated_at;",
             arrayOf(
                 entity.lowercase(),
                 factKey.lowercase(),

@@ -92,4 +92,16 @@ class ScoutMemoryGateTest {
         assertTrue(gate("where is Nick", withAlias))
         assertFalse(gate("I need a mechanic", withAlias))
     }
+
+    // TruthDb actually stores nicknames under the plural "aliases" key, as one
+    // comma-joined value (see TruthDb.addAlias()/getAliases()) -- this is the real
+    // shape "an alias fact" above doesn't cover, and was the actual reported bug:
+    // a nickname-only query like "when is Nick's birthday" fell through this gate
+    // because "aliases" wasn't recognized as name-like at all.
+    @Test fun `an aliases fact (plural, comma-joined) matches each nickname individually`() {
+        val withAliases = listOf("aliases" to "Nick, Nicky")
+        assertTrue(gate("where is Nick", withAliases))
+        assertTrue(gate("where is Nicky", withAliases))
+        assertFalse(gate("I need a mechanic", withAliases))
+    }
 }

@@ -40,7 +40,16 @@ private enum class Provider(
     val displayName: String,
     val prefKey: String,
     val badge: String,
-    val steps: List<SetupStep>
+    val steps: List<SetupStep>,
+    // Whether this provider is actually wired up end-to-end. MainActivity's
+    // GeminiClient/ScoutGeminiManager currently only ever read the Gemini key
+    // (ScoutApiKeyHelper.Provider.GEMINI) -- OpenAI/Claude keys can be saved here
+    // but nothing in Scout uses them yet, so a user who set one up would see
+    // "We're connected!" and then have Scout keep talking to Gemini or TinyLlama
+    // regardless. Hidden from the picker (see renderPick()) until real clients
+    // and routing exist for them -- not deleted, so re-enabling later is just
+    // flipping this flag once that work is done.
+    val isAvailable: Boolean = true
 ) {
     GEMINI(
         displayName = "Google Gemini",
@@ -102,7 +111,8 @@ private enum class Provider(
                 hasInput = true,
                 actionLabel = "Connect OpenAI!"
             )
-        )
+        ),
+        isAvailable = false
     ),
     CLAUDE(
         displayName = "Claude (Anthropic)",
@@ -140,7 +150,8 @@ private enum class Provider(
                 hasInput = true,
                 actionLabel = "Connect Claude!"
             )
-        )
+        ),
+        isAvailable = false
     )
 }
 
@@ -251,7 +262,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         providerContainer.visibility = View.VISIBLE
 
         providerContainer.removeAllViews()
-        Provider.values().forEach { p ->
+        Provider.values().filter { it.isAvailable }.forEach { p ->
             val card = buildProviderCard(p)
             providerContainer.addView(card)
         }

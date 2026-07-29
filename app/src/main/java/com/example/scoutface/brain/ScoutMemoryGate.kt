@@ -40,6 +40,21 @@ object ScoutMemoryGate {
     private fun mentionsKnownName(clean: String, knownFacts: List<Pair<String, String>>): Boolean {
         for ((key, value) in knownFacts) {
             if (value.isBlank()) continue
+
+            // "aliases" (plural) is how TruthDb actually stores nicknames -- one
+            // comma-joined fact value, e.g. "Nick, Nicky" (see TruthDb.addAlias()).
+            // Matched as a set of individual names, not "alias == the whole joined
+            // string," since the joined string as one phrase would never appear
+            // verbatim in a real query.
+            if (key == "aliases") {
+                val hasAliasMatch = value.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .any { containsWord(clean, it) }
+                if (hasAliasMatch) return true
+                continue
+            }
+
             val isNameLike = key == "name" || key == "alias" || key == "nickname" ||
                 key.endsWith("_name") || key.endsWith("_nickname")
             if (!isNameLike) continue
