@@ -115,8 +115,6 @@ import java.util.concurrent.ExecutorService
 
 import java.util.concurrent.Executors
 
-import java.util.concurrent.TimeUnit
-
 import java.util.concurrent.atomic.AtomicBoolean
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -314,17 +312,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // say "warming up" once per session — the user doesn't need a reminder every question.
     private var warmingUpSaidThisSession = false
 
-    // Incremented at the start of every new question. TinyLlama threads capture this
-    // value when they launch and discard their reply if it no longer matches — prevents
-    // a slow generation from firing after a newer question has already been answered.
-    private var llamaQueryGeneration = 0L
-
-    // Single-thread executor for LlamaEngine.generate() calls. A raw Thread per call let
-    // two generations run concurrently against the native engine (the generation counter
-    // above only discarded the stale *reply*, it never stopped the stale *inference*).
-    // Routing through one executor serializes calls, and shutdownSystems() can await its
-    // termination before LlamaEngine.free() so free() can't race an in-flight generate().
-    private val llamaExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    // Generation/owner token and executor both moved to ScoutLlamaController -- a
+    // process-wide singleton, not a MainActivity instance field. A per-instance
+    // executor meant a configuration-change recreation either had to permanently
+    // shut it down (leaking whatever generation was still in flight, or blocking
+    // teardown waiting for it) or leave it running forever with no way to reclaim
+    // its thread (ExecutorService.shutdown() is required for that, and skipping it
+    // was exactly the point). ScoutLlamaController.registerOwner() (called from
+    // onCreate()) and .newGeneration() (called per-question) both bump the same
+    // token; ScoutLlamaController.generateAsync() only delivers a result while
+    // that token is still current, so a stale generation from a since-destroyed
+    // instance can never touch this instance's (or a prior instance's) UI.
 
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
 
@@ -722,6 +720,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        // Claims this instance as the current valid owner of TinyLlama generation --
+        // see ScoutLlamaController. Any result from a previous (now-destroyed)
+        // instance's still-in-flight generation is discarded the moment it
+        // completes, since it was captured under an older token.
+        ScoutLlamaController.registerOwner()
+
         setContentView(R.layout.activity_main)
 
         setupWindow()
@@ -1027,35 +1031,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
-        // Stop accepting new generations and wait briefly for any in-flight
-        // LlamaEngine.generate() call to return before freeing the native engine.
-        // Freeing while a generation is still running is a native-crash risk --
-        // awaitTermination()'s return value MUST be checked, not just called for its
-        // blocking side effect. On a slower device (A32), a single generation can
-        // legitimately take longer than 5 seconds, so a false "it must be done by now"
-        // assumption here was a real use-after-free risk against the native
-        // llama_context. If it hasn't terminated, skip free() entirely rather than
-        // freeing under an active generation -- the Activity/process is already being
-        // torn down at this point, so there's no safe "later" to retry the free from;
-        // leaking the native engine until process death is the safe trade-off.
-        try {
-
-            llamaExecutor.shutdown()
-            val terminated = llamaExecutor.awaitTermination(5, TimeUnit.SECONDS)
-
-            if (terminated) {
-                try {
-                    LlamaEngine.free()
-                } catch (_: Exception) {
-                }
-            } else {
-                android.util.Log.w("ScoutBrain",
-                    "llamaExecutor did not terminate within 5s -- skipping LlamaEngine.free() " +
-                    "to avoid freeing a native context an in-flight generation may still be using.")
+        // TinyLlama's executor and native engine are owned by ScoutLlamaController
+        // (process-wide), not by this Activity instance -- see its class doc. Only
+        // tear the engine down on a genuine close, never on a configuration-change
+        // recreation, where isChangingConfigurations() is true and a new instance
+        // is about to call ScoutLlamaController.registerOwner() and keep using the
+        // same, already-loaded ~800MB model. shutdownForRealClose() itself only
+        // frees if nothing is actively generating right now (bounded wait, not an
+        // unconditional block) -- see LlamaEngine.freeIfIdle().
+        if (isChangingConfigurations) {
+            android.util.Log.i("ScoutBrain",
+                "onDestroy() during a configuration change -- leaving the offline brain " +
+                "loaded for the recreated Activity instance.")
+        } else {
+            try {
+                ScoutLlamaController.shutdownForRealClose()
+            } catch (_: Exception) {
             }
-
-        } catch (_: Exception) {
-
         }
 
     }
@@ -3746,34 +3738,31 @@ Respond only with Scout's next reply.
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
-            val myGeneration = llamaQueryGeneration
+            val myGeneration = ScoutLlamaController.currentToken
             diagLog.logBrainStarted(DiagLog.BrainSource.TINYLLAMA)
             diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
             val llamaGenStart = System.currentTimeMillis()
 
-            // Runs on llamaExecutor (single-thread) instead of a raw Thread — serializes
-            // back-to-back generations against the native engine instead of letting two
-            // run concurrently, and lets shutdownSystems() wait for this to finish before
-            // freeing the engine.
-            llamaExecutor.execute {
+            // ScoutLlamaController runs this on its own process-wide single-thread
+            // executor and already only invokes this callback (on the main thread) if
+            // myGeneration is still current -- covers both "a newer question arrived"
+            // and "this Activity instance was destroyed and replaced" with the same
+            // check, so there's no separate staleness check needed here anymore.
+            ScoutLlamaController.generateAsync(
+                token = myGeneration,
+                prompt = sb.toString(),
+                nPredict = 100,
+                onDiscarded = { diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED) }
+            ) { reply ->
 
-                val reply = LlamaEngine.generate(sb.toString(), nPredict = 100)
-
-                runOnUiThread {
-                    val genMs = System.currentTimeMillis() - llamaGenStart
-                    // Discard if a newer question arrived while we were generating.
-                    if (llamaQueryGeneration != myGeneration) {
-                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED)
-                        return@runOnUiThread
-                    }
-                    if (!reply.isNullOrBlank()) {
-                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
-                        pendingBrainSource = "TinyLlama (offline)"
-                        respond(cleanOfflineReply(reply.trim()))
-                    } else {
-                        diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
-                        respond("I'm not sure about that one.")
-                    }
+                val genMs = System.currentTimeMillis() - llamaGenStart
+                if (!reply.isNullOrBlank()) {
+                    diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
+                    pendingBrainSource = "TinyLlama (offline)"
+                    respond(cleanOfflineReply(reply.trim()))
+                } else {
+                    diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
+                    respond("I'm not sure about that one.")
                 }
 
             }
@@ -4404,7 +4393,7 @@ Respond only with Scout's next reply.
         val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
         if (!presenceDecider.shouldRespondToInput(qNorm, currentScoutName)) return
 
-        llamaQueryGeneration++
+        ScoutLlamaController.newGeneration()
         isThinking = true
         thinkingStartedMs = System.currentTimeMillis()
 

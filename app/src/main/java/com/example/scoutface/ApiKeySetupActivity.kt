@@ -386,9 +386,12 @@ class ApiKeySetupActivity : AppCompatActivity() {
     }
 
     private fun saveKey(prefKey: String, value: String) {
+        // Encrypted at rest via ScoutSecureKeyStore (Android Keystore-backed) --
+        // never stored as a plain string. See ScoutApiKeyHelper.getKey() for the
+        // read side and the one-time migration for any key saved before this.
         getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
             .edit()
-            .putString(prefKey, value)
+            .putString(prefKey, ScoutSecureKeyStore.encrypt(value))
             .apply()
     }
 
@@ -615,10 +618,23 @@ object ScoutApiKeyHelper {
     }
 
     fun getKey(context: Context, provider: Provider): String? {
-        return context
-            .getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
-            .getString(provider.prefKey, null)
-            ?.takeIf { it.isNotBlank() }
+        val prefs = context.getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+        val stored = prefs.getString(provider.prefKey, null)?.takeIf { it.isNotBlank() } ?: return null
+
+        if (!ScoutSecureKeyStore.isEncryptedFormat(stored)) {
+            // One-time migration: an existing plaintext beta key saved before
+            // encryption was added. Encrypt it now and overwrite the stored value;
+            // still returns the plaintext value for this call since re-decrypting
+            // what was just encrypted would be redundant.
+            val migrated = ScoutSecureKeyStore.encrypt(stored)
+            prefs.edit().putString(provider.prefKey, migrated).apply()
+            return stored
+        }
+
+        return when (val result = ScoutSecureKeyStore.decrypt(stored)) {
+            is ScoutSecureKeyStore.DecryptResult.Available -> result.value
+            ScoutSecureKeyStore.DecryptResult.Unavailable -> null
+        }
     }
 
     fun hasAnyKey(context: Context): Boolean {

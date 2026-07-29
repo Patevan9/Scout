@@ -2,6 +2,9 @@ package com.example.scoutface
 
 import android.util.Log
 import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 object LlamaEngine {
 
@@ -17,7 +20,13 @@ object LlamaEngine {
 
     @Volatile private var isGenerating: Boolean = false
 
-    private val nativeLock = Any()
+    // ReentrantLock instead of a plain synchronized(Any()) monitor specifically so
+    // freeIfIdle() can use tryLock(timeout) -- a bounded wait for "is anything
+    // currently using the native engine," which a plain monitor can't express
+    // without either blocking indefinitely or polling. Every other method here
+    // still just needs ordinary mutual exclusion (withLock{} is the direct
+    // equivalent of synchronized{} for a ReentrantLock).
+    private val nativeLock = ReentrantLock()
 
     private external fun nativeLoad(modelPath: String, nCtx: Int, nThreads: Int): Long
     private external fun nativeGenerate(
@@ -92,7 +101,7 @@ object LlamaEngine {
     }
 
     fun load(modelFile: File, nCtx: Int = 2048, nThreads: Int = 4): Boolean {
-        synchronized(nativeLock) {
+        nativeLock.withLock {
             if (isReady) return true
             if (!modelFile.exists()) {
                 Log.e(TAG, "Model file not found: ${modelFile.absolutePath}")
@@ -123,7 +132,7 @@ object LlamaEngine {
         temp: Float = 0.6f,
         repeatPenalty: Float = 1.12f
     ): String? {
-        synchronized(nativeLock) {
+        nativeLock.withLock {
             if (isGenerating) {
                 Log.w(TAG, "generate() blocked because another generation is already running.")
                 return null
@@ -170,7 +179,7 @@ object LlamaEngine {
         nThreads: Int,
         nThreadsBatch: Int
     ): BenchmarkResult? {
-        synchronized(nativeLock) {
+        nativeLock.withLock {
             if (isGenerating) {
                 Log.w(TAG, "generateBenchmark() blocked because a generation is already running.")
                 return null
@@ -222,8 +231,24 @@ object LlamaEngine {
         }
     }
 
-    fun free() {
-        synchronized(nativeLock) {
+    /**
+     * Frees the native engine, but only if the lock can be acquired within
+     * [maxWaitMs] -- i.e., only if no load()/generate()/generateBenchmark() call is
+     * currently in progress, or the in-progress one finishes within the wait
+     * window. Bounded specifically so a caller on the main thread (e.g. Activity
+     * teardown) can't be blocked indefinitely by a long-running generation; an
+     * unbounded synchronized/lock() here would risk an ANR instead. Returns true
+     * if actually freed, false if skipped because something was still using the
+     * engine -- callers should treat false as "leave it loaded," not as an error.
+     */
+    fun freeIfIdle(maxWaitMs: Long): Boolean {
+        val acquired = nativeLock.tryLock(maxWaitMs, TimeUnit.MILLISECONDS)
+        if (!acquired) {
+            Log.w(TAG, "freeIfIdle(): could not acquire lock within ${maxWaitMs}ms -- " +
+                "an in-flight call is still using the engine, skipping free().")
+            return false
+        }
+        try {
             val h = nativeHandle
             if (h != 0L) {
                 try {
@@ -235,6 +260,9 @@ object LlamaEngine {
                 isReady = false
                 Log.i(TAG, "Offline brain freed.")
             }
+            return true
+        } finally {
+            nativeLock.unlock()
         }
     }
 
