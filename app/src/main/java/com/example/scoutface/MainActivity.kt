@@ -467,6 +467,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val ANALYSIS_MIN_INTERVAL_MS = 150L
 
+    // Scene labeling ("dog," "chair," "person") changes far more slowly than face
+    // position, which drives Scout's gaze and needs the full ~7fps analysis cadence
+    // above. Throttled separately so the labeler doesn't run on every accepted frame --
+    // only face detection does. 1.5s is a reasonable starting interval, not something
+    // that needed real-device tuning the way the vision-gating thresholds did.
+    @Volatile
+    private var lastLabelMs = 0L
+    private val LABEL_MIN_INTERVAL_MS = 1_500L
+
     // Gaze hold to prevent snap-back on brief face detector drops
 
     @Volatile
@@ -618,7 +627,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
 
-    private lateinit var recognizerIntent: Intent
+    // See setupSpeech()/buildRecognizerIntent() -- separate silence-timing variants
+    // for idle/wake-word listening vs. an active conversation follow-up.
+    private lateinit var recognizerIntentWake: Intent
+    private lateinit var recognizerIntentConvo: Intent
 
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var modelDownloadLauncher: ActivityResultLauncher<Intent>
@@ -1137,6 +1149,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // Whole-word match, not a bare substring check -- "out" must not match inside
+    // "about," "without," "outside," "shout," etc, and a short configured name (e.g.
+    // "Al," "Sam") must not match inside an unrelated word either. Used for wake-word
+    // detection below.
+    private fun containsWholeWord(text: String, word: String): Boolean {
+        if (word.isBlank()) return false
+        return Regex("""\b${Regex.escape(word)}\b""").containsMatchIn(text)
+    }
+
     // Wall-clock elapsed time since the first call, one line per major startup boundary.
     // Tag "ScoutStartupTiming" -- pull this from a real-device logcat to see exactly
     // which init step is slow, instead of reconstructing it from unrelated system lines.
@@ -1191,13 +1212,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@postDelayed
             }
             logStartupTiming("camera_startup_firing from=$from")
-            safeStartCamera(from)
-            cameraEverStarted = true
-            handler.postDelayed({
-                if (isFinishing || isDestroyed) return@postDelayed
-                startupSettled = true
-                logStartupTiming("startup_settled")
-            }, STARTUP_SETTLE_MS)
+            // cameraEverStarted/startupSettled are only set once bindToLifecycle()
+            // actually succeeds (see the onBound callback threaded through
+            // safeStartCamera()/startCamera()) -- not merely once startup was
+            // requested, since startCamera()'s provider lookup and binding are
+            // asynchronous and can still fail after this point returns.
+            safeStartCamera(from) {
+                logStartupTiming("camera_bind_succeeded from=$from")
+                cameraEverStarted = true
+                handler.postDelayed({
+                    if (isFinishing || isDestroyed) return@postDelayed
+                    startupSettled = true
+                    logStartupTiming("startup_settled")
+                }, STARTUP_SETTLE_MS)
+            }
         }, CAMERA_STARTUP_STAGGER_MS)
     }
 
@@ -1783,11 +1811,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
-    private fun safeStartCamera(from: String) {
+    // onBound fires only once bindToLifecycle() actually succeeds (see startCamera()) --
+    // never on a synchronous startCamera() failure, and never if the async provider
+    // lookup/binding fails afterward. Defaults to a no-op for callers (like the
+    // post-startup steady-state restarts) that don't need to know.
+    private fun safeStartCamera(from: String, onBound: () -> Unit = {}) {
 
         try {
 
-            startCamera()
+            startCamera(onBound)
 
             Log.i("ScoutCamera", "startCamera ok ($from)")
 
@@ -1803,7 +1835,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun startCamera() {
+    private fun startCamera(onBound: () -> Unit = {}) {
 
         val providerFuture = ProcessCameraProvider.getInstance(this)
 
@@ -1828,6 +1860,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+
+                    // Without an explicit target, CameraX picks its own default
+                    // resolution, which can be considerably larger than needed for face
+                    // detection/labeling -- every frame that passes the throttle below
+                    // allocates a full ARGB bitmap (plus, if row-padded, a matching
+                    // direct ByteBuffer) sized to whatever this resolution is. 640x480
+                    // is more than enough for both ML Kit tasks and keeps that
+                    // per-frame allocation small on the A32. setTargetResolution() is
+                    // deprecated in favor of ResolutionSelector in newer CameraX
+                    // versions but still fully supported -- kept for now since it's the
+                    // simpler, longer-established API surface.
+                    .setTargetResolution(android.util.Size(640, 480))
 
                     .build()
 
@@ -1865,8 +1909,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     val bitmap = Bitmap.createBitmap(bitmapW, bitmapH, Bitmap.Config.ARGB_8888)
 
-                    // Track async users of this bitmap; recycle when all are done.
-                    val bitmapRefs = AtomicInteger(2)  // labeler + faceDetector
+                    // Scene labels change far more slowly than face position, so the
+                    // labeler doesn't need to run on every accepted (~7fps) frame the way
+                    // face detection does -- throttled separately via lastLabelMs.
+                    val runLabelerThisFrame = analysisNow - lastLabelMs >= LABEL_MIN_INTERVAL_MS
+
+                    // Track async users of this bitmap; recycle when all are done. Only
+                    // faceDetector holds a ref on a frame where the labeler is skipped --
+                    // starting the count at 2 regardless would leak a ref and the bitmap
+                    // would never recycle on those frames.
+                    val bitmapRefs = AtomicInteger(if (runLabelerThisFrame) 2 else 1)
                     val maybeRecycleBitmap = {
                         if (bitmapRefs.decrementAndGet() == 0) bitmap.recycle()
                     }
@@ -1901,39 +1953,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     val input = InputImage.fromBitmap(bitmap, rotation)
 
-                    labeler.process(input)
+                    if (runLabelerThisFrame) {
 
-                        .addOnSuccessListener { labels ->
+                        lastLabelMs = analysisNow
 
-                            val now = System.currentTimeMillis()
+                        labeler.process(input)
 
-                            val cleaned = labels
+                            .addOnSuccessListener { labels ->
 
-                                .sortedByDescending { it.confidence }
+                                val now = System.currentTimeMillis()
 
-                                .map { it.text.lowercase(Locale.US).trim() to it.confidence }
+                                val cleaned = labels
 
-                                .filter { VisionUtils.keepVisionLabel(it.first) }
+                                    .sortedByDescending { it.confidence }
 
-                                .distinctBy { it.first }
+                                    .map { it.text.lowercase(Locale.US).trim() to it.confidence }
 
-                                .take(6)
+                                    .filter { VisionUtils.keepVisionLabel(it.first) }
 
-                            lastSceneLabels = cleaned
+                                    .distinctBy { it.first }
 
-                            lastSceneUpdatedMs = now
+                                    .take(6)
 
-                            maybeRecycleBitmap()
+                                lastSceneLabels = cleaned
 
-                        }
+                                lastSceneUpdatedMs = now
 
-                        .addOnFailureListener { e ->
+                                maybeRecycleBitmap()
 
-                            Log.e("ScoutCamera", "labeler failure", e)
+                            }
 
-                            maybeRecycleBitmap()
+                            .addOnFailureListener { e ->
 
-                        }
+                                Log.e("ScoutCamera", "labeler failure", e)
+
+                                maybeRecycleBitmap()
+
+                            }
+
+                    }
 
                     faceDetector.process(input)
 
@@ -2508,6 +2566,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 handler.postDelayed({ gazeEnabled = true }, BOOT_GAZE_LOCK_MS)
 
+                onBound()
+
             } catch (e: Exception) {
 
                 Log.e("ScoutCamera", "startCamera bind failed", e)
@@ -2544,6 +2604,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    private fun buildRecognizerIntent(silenceMs: Long, possiblySilenceMs: Long): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            // Prefer offline recognition so a brief network hiccup does not
+            // cause silent failures — Samsung has offline models available.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", silenceMs)
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", possiblySilenceMs)
+        }
+
     private fun setupSpeech() {
 
         try {
@@ -2556,30 +2628,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-
-            putExtra(
-
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-
-            )
-
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
-
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-
-            // Prefer offline recognition so a brief network hiccup does not
-            // cause silent failures — Samsung has offline models available.
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-
-            // Keep listening for up to 10 seconds of silence before giving up.
-            // Default is ~5s which cuts sessions too short on a quiet room.
-            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 10_000L)
-            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 7_000L)
-
-        }
+        // Two variants so idle/wake-word listening doesn't have to hold a
+        // SpeechRecognizer session open as long as an active back-and-forth does.
+        // maybeStartListening() picks between them per-session using the same
+        // "are we in a conversation window" check onReadyForSpeech() already uses for
+        // diagnostic logging. Active-conversation values are unchanged from before this
+        // split; only idle/wake-word listening got shorter.
+        recognizerIntentWake = buildRecognizerIntent(silenceMs = 5_000L, possiblySilenceMs = 4_000L)
+        recognizerIntentConvo = buildRecognizerIntent(silenceMs = 10_000L, possiblySilenceMs = 7_000L)
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
 
@@ -2641,6 +2697,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onEndOfSpeech() {
 
+                // Deliberately does NOT call scheduleListenRestart(). onEndOfSpeech()
+                // means the recognizer stopped hearing audio, not that it's done --
+                // Android still has to deliver onResults()/onError() afterward, which can
+                // take longer than LISTEN_RESTART_DELAY_MS (150ms). Restarting from here
+                // risked calling startListening() again before the current session had
+                // actually finished closing out, which is the classic
+                // ERROR_RECOGNIZER_BUSY (error 8) overlap Scout already has special
+                // handling for below -- a sign this was very likely already happening in
+                // real use. onResults() and onError() each already call
+                // scheduleListenRestart() on every one of their own paths, so restart
+                // still always happens -- just from the event that actually means the
+                // session is over. lastRecognizerEventMs is still updated here so the
+                // watchdog's staleness check has an accurate timestamp if neither
+                // onResults() nor onError() ever arrives.
                 lastRecognizerEventMs = System.currentTimeMillis()
 
                 isListening = false
@@ -2650,8 +2720,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 faceView.setListening(false)
 
                 faceView.setMicLevel(0f)
-
-                scheduleListenRestart()
 
             }
 
@@ -2770,11 +2838,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
                 val nameLower = scoutName.lowercase()
-                val hearsHisName = normalized.contains(nameLower) ||
+                // Whole-word match -- a bare substring check let ordinary speech
+                // containing "out" anywhere ("about," "without," "outside," "figure it
+                // out") trip the wake word, and made short custom names vulnerable to
+                // matching inside unrelated words. "out" itself is dropped entirely
+                // (not just whole-worded) since it's still an extremely common standalone
+                // word in ordinary sentences ("watch out," "I'm out of milk") -- "gal" and
+                // "scott" are kept as genuine mishearing alternatives for "Scout."
+                val hearsHisName = containsWholeWord(normalized, nameLower) ||
                     (nameLower == "scout" && (
-                        normalized.contains("gal") ||
-                        normalized.contains("scott") ||
-                        normalized.contains("out")
+                        containsWholeWord(normalized, "gal") ||
+                        containsWholeWord(normalized, "scott")
                     ))
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS ||
@@ -2978,7 +3052,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
-        if (speechRecognizer == null || !::recognizerIntent.isInitialized) {
+        if (speechRecognizer == null || !::recognizerIntentWake.isInitialized || !::recognizerIntentConvo.isInitialized) {
 
             logListenAttemptOnce(DiagLog.ListenAttemptReason.SPEECH_RECOGNIZER_NOT_READY)
 
@@ -2994,20 +3068,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
+        // Same "are we in a conversation window" check onReadyForSpeech() uses for
+        // diagnostic logging, computed here so the shorter/longer-silence variant can
+        // actually be chosen before the session starts.
+        val inConvoWindowForListen = (now - lastScoutResponseMs) < CONVO_WINDOW_MS ||
+            now < presenceReplyWindowUntilMs
+        val intentForThisSession = if (inConvoWindowForListen) recognizerIntentConvo else recognizerIntentWake
+
         try {
 
             if (TRY_MUTE_BEEP) {
 
                 tryMuteSystemBeep()
 
-                speechRecognizer?.startListening(recognizerIntent)
+                speechRecognizer?.startListening(intentForThisSession)
                 logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
                 handler.postDelayed({ restoreSystemBeep() }, 380L)
 
             } else {
 
-                speechRecognizer?.startListening(recognizerIntent)
+                speechRecognizer?.startListening(intentForThisSession)
                 logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
             }
