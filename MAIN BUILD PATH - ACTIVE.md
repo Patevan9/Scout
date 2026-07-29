@@ -1,5 +1,5 @@
 Last updated: July 29, 2026
-Based on commit: e6c2e829248035c5b01482e139bb1215549f381e
+Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
 Status: Current
 
 # Scout — Main Build Path (Active)
@@ -10,7 +10,7 @@ What's actually being worked on right now. Completed work is removed from this d
 
 ## Current Priorities
 
-1. **On-device regression pass before merging PR #1.** PR #1 (`claude/test-coverage-analysis-hsp9lt` → `main`, https://github.com/Patevan9/Scout/pull/1) carries the entire accumulated diff since `main` was last synced — 254 commits, 90 files, +10,400/−2,727 lines. Every individual commit has a confirmed-green CI build, but CI only compiles the app; it does not run it. Given the size of this diff (face recognition, presence layer, memory/entity system, security hardening, startup-gate rework, TinyLlama lifecycle rework all included), a real on-device pass on both test devices is the responsible next step before treating this as the new `main`.
+1. **On-device regression pass before merging PR #1.** PR #1 (`claude/test-coverage-analysis-hsp9lt` → `main`, https://github.com/Patevan9/Scout/pull/1) carries the entire accumulated diff since `main` was last synced — 255 commits, 93 files, +10,835/−2,729 lines. Every individual commit has a confirmed-green CI build, but CI only compiles the app; it does not run it. Given the size of this diff (face recognition, presence layer, memory/entity system, security hardening, startup-gate rework, TinyLlama lifecycle rework all included), a real on-device pass on both test devices is the responsible next step before treating this as the new `main`.
 2. **Restore presence-layer thresholds to production values.** Both presence moments currently ship with deliberately-lowered thresholds left over from A32 smoke-testing (see In Progress below) — they need to be confirmed working at those values on-device, then restored to their intended production numbers.
 3. **Fold 7 dedicated stability testing.** All recent testing (A32 crash root-causing, presence-layer smoke tests, startup-gate testing) has been on the Galaxy A32. The Fold 7 is Scout's primary target device but hasn't had its own dedicated validation session recently.
 

@@ -1,5 +1,5 @@
 Last updated: July 29, 2026
-Based on commit: e6c2e829248035c5b01482e139bb1215549f381e
+Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
 Status: Current
 
 # MainActivity Cleanup
@@ -49,7 +49,6 @@ Not bugs, but worth fixing since they actively mislead a reader about the curren
 
 - `DiagReportActivity.kt`'s class doc says *"Not yet registered in the manifest (Step 5)."* It is registered (`AndroidManifest.xml` has a `DiagReportActivity` `<activity>` entry) and has been reachable from Settings' Diagnostics section for some time.
 - `DiagLog.kt`'s class doc says *"Not wired into any existing file yet."* It's extensively wired throughout `MainActivity.kt` (boot, listen attempts, speech results, routing, brain-started events, Gemini decisions, TinyLlama lifecycle, network, errors) and into `ScoutGeminiManager`, `LlamaBenchmarkActivity`, and others.
-- `ModelDownloadActivity.kt`'s startup-gate comment history versus `Scout_Master_Summary.md` — already reconciled as of this update (see the Master Summary's new July 19(cont.)–25 entry); flagging here only so a future pass double-checks no other file's comments still describe the pre-gate, single-purpose version of `ModelDownloadActivity`.
 
 ---
 
@@ -62,7 +61,4 @@ Not bugs, but worth fixing since they actively mislead a reader about the curren
 
 ## 6. Temporary/smoke-test values still in production code
 
-These aren't cleanup targets in the traditional sense (they're deliberate, labeled temporary values from recent on-device testing), but they represent code that is *known* to need a follow-up change before it's considered finished. Tracked in full in `MAIN BUILD PATH - ACTIVE.md`; flagged here because they live inside `MainActivity.kt`/`ScoutPresenceDecider.kt` and a future contributor cleaning up either file should not "fix" them without checking that document first — they're intentional, not oversights:
-- `MainActivity.MIN_GENUINE_ABSENCE_MS` — currently ~1 minute (smoke-test value), production value is ~10 minutes.
-- `ScoutPresenceDecider.IDLE_SILENCE_PRESENCE_THRESHOLD_MS` — currently ~3 minutes (smoke-test value), production value is ~75 minutes.
-- Listening-reminder yaw/face-height/center-offset thresholds — explicitly labeled "conservative test values, not final" pending real-world tuning evidence.
+`MainActivity.kt` and `ScoutPresenceDecider.kt` currently hold several deliberately-lowered, explicitly-labeled temporary values from recent on-device smoke-testing (presence/absence thresholds, listening-reminder tuning). These are intentional, not oversights — a future contributor touching either file should not "fix" them without checking first. The current list, exact values, and production restore targets are tracked as active work in `MAIN BUILD PATH - ACTIVE.md` → **In Progress**, not repeated here, so there's a single place this list can drift out of date rather than two.

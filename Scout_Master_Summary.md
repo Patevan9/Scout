@@ -1,13 +1,33 @@
 # Project Scout — Master Project Summary
 
 Last updated: July 29, 2026
-Based on commit: e6c2e829248035c5b01482e139bb1215549f381e
+Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
 Status: Current
 
-**Version 52**
+**Version 53**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 29, 2026 (Documentation Consistency Pass) — Four-Document System Cross-Checked
+
+Per Patrick's request, a final pass across all four documents (`Scout_Master_Summary.md`, `MAIN BUILD PATH - ACTIVE.md`, `MainActivity Cleanup.md`, `Architecture.md`) before treating them as the new source of truth. No code changed — documentation only. Findings:
+
+✓ **Fixed a real factual error in `Architecture.md`** — it claimed "six SQLite databases" in two places; a direct repo-wide check found exactly five `SQLiteOpenHelper` subclasses (`TruthDb`, `PeopleDb`, `JournalDb`, `ConversationDb`, `DiagnosticDb`). Corrected both occurrences. Also aligned its `MainActivity.kt` line-count figure with `MainActivity Cleanup.md`'s exact count (4,923) instead of a rounded approximation.
+
+✓ **Removed cross-document duplication of the presence-layer temporary-value TODO** — the exact same three smoke-test values (with the same restore targets) were independently listed in both `MAIN BUILD PATH - ACTIVE.md` and `MainActivity Cleanup.md`, risking the two silently drifting apart. `MainActivity Cleanup.md` §6 now points to `MAIN BUILD PATH - ACTIVE.md` instead of restating the values.
+
+✓ **Removed an unverified, non-actionable item from `MainActivity Cleanup.md`** — a bullet speculating that "some other file might still have a stale startup-gate comment" without pointing to an actual file, cut since it wasn't a concrete finding.
+
+✓ **Refreshed `MAIN BUILD PATH - ACTIVE.md`'s PR #1 statistics** — they were captured before this documentation pass's own commits landed on the PR's branch and were already one commit stale (254→255 commits, 90→93 files, +10,400→+10,835/−2,727→−2,729 lines).
+
+✓ **Addressed a structural duplication between this document and `MAIN BUILD PATH - ACTIVE.md`** — this document's own "Pending — Launch Blockers" list (§7) and "Known Issues" table (§7c) were tracking several of the same still-open items `MAIN BUILD PATH - ACTIVE.md` now also tracks (Fold 7 testing, Play Asset Delivery, Open Source Credits, Barge-in, Scout news feed, `ScoutFaceView` dead code, and others). Rather than delete this document's history (against its own stated policy), added a note at the top of each section: both are now frozen as historical snapshots going forward, with `MAIN BUILD PATH - ACTIVE.md` (behavioral/product) and `MainActivity Cleanup.md` (code-level) as the live trackers for any still-open item. New "DONE"/"RESOLVED" annotations can still be added here when something ships; new open items should not be added to §7/§7c anymore.
+
+✓ **Verified all header commit hashes** — updated across all four documents to `5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f`, the commit whose source tree every specific claim in all four documents was checked against (this pass changes only documentation, so the underlying Kotlin/Gradle/manifest source is unchanged from that commit).
+
+**Not changed**: no contradictions were found in `Architecture.md`'s §19 "Future Architecture Notes" (already correctly distinguishes built-today from planned/proposed throughout); no duplicate active tasks were found between `Architecture.md` and either `MAIN BUILD PATH - ACTIVE.md` or `MainActivity Cleanup.md` (`Architecture.md` consistently cross-references rather than restates, e.g. §11's presence-threshold mention).
 
 ---
 
@@ -513,6 +533,8 @@ Support Scout screen designed and ready. Message: 'You’re not just supporting 
 
 ### Pending — Launch Blockers:
 
+*As of Version 52 (July 29, 2026), the still-open items in this list are tracked live in `MAIN BUILD PATH - ACTIVE.md` instead — that document is now the single current source for priorities/blockers/in-progress/parked work, so the same open item is never independently tracked in two places that could drift apart. This list is frozen from here forward as the historical record of what was pending as of each version; new "DONE" entries should still be added here when something ships, but new open items belong in `MAIN BUILD PATH - ACTIVE.md`, not here.*
+
 ✓ **Startup diagnostics** — DONE July 4. TTS failure Toast + STT unavailability spoken warning at boot.
 ✓ **Onboarding flow** — DONE July 4. OnboardingActivity.kt, 5 screens, first-boot redirect in MainActivity.
 ■ **Fold 7 dedicated stability testing** — testing has been on A32. Fold 7 needs its own validation session.
@@ -575,6 +597,8 @@ Do not act on this area without his input. His expertise is the right lens for t
 
 ## 7c. Known Issues — Do Not Touch Without Discussion
 
+*As of Version 52, still-open rows below are now tracked live in `MAIN BUILD PATH - ACTIVE.md` (behavioral/product issues) or `MainActivity Cleanup.md` (code-level issues — e.g. the `ScoutFaceView dead code` row is covered there, currently verified as one confirmed item, `browAsym`, not necessarily both originally listed). This table is preserved as the historical record and still gets new "RESOLVED" annotations when something ships, but new open issues should be added to those two documents instead.*
+
 | Issue | Notes |
 |-------|-------|
 | TinyLlama A32 real-world confirmation needed | Re-enabled June 28 with delayed load + RAM guard. Not yet confirmed that LMKD crash does not return under memory pressure. |
@@ -594,6 +618,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 
 ## 7d. Session Log
 
+- July 29 (documentation): Established the four-document system (Scout_Master_Summary.md, Architecture.md, MainActivity Cleanup.md, MAIN BUILD PATH - ACTIVE.md), all verified against the codebase directly and header-versioned (date/commit/status). Follow-up consistency pass found and fixed a real factual error in Architecture.md ("six" vs. the actual five SQLite databases), removed cross-document duplication of the presence-layer temporary-value TODO, and added redirect notes so this document's own Pending/Known-Issues lists stop being independently tracked in parallel with MAIN BUILD PATH - ACTIVE.md going forward.
 - July 29: Two rounds of ChatGPT-reviewed fixes (7 privacy/reliability, 7 mic/camera performance) — offline-brain gate bypass, LlamaEngine.free() race, misleading OpenAI/Claude setup, plaintext API keys + untouched backup templates, ScoutMemoryGate alias mismatch, TruthDb upsert staleness, onEndOfSpeech() restart risk, wake-word "out" false positive, fixed silence timeout, per-frame bitmap allocation, label/face cadence coupling, cameraEverStarted timing. Then: API keys encrypted via Android Keystore (ScoutSecureKeyStore, versioned format, typed encrypt/decrypt results, one-time plaintext migration via commit()); ScoutLlamaController introduced as a process-wide singleton owning TinyLlama's generation executor and owner/generation token, replacing per-Activity-instance state that could leak threads or deliver stale results across a configuration-change recreation; two follow-up corrections after a second review pass (invalidateOwner() on every onDestroy(), discard logging moved off an Activity-owned callback). Commits a348425, 0b3e9bc, 7d030e3, f856bb2, 2ac932e.
 - July 28: Listening reminder made vision-led (ML Kit head-yaw gate, sustained-facing streak, reason-based diagnostics), then tightened to conservative thresholds with a vision-staleness check and real measured values logged. Dev-only TinyLlama benchmark harness added (native runGeneration() extraction, perf_context bindings, hidden 7-tap unlock screen), then fixed for thermal run-order bias (Latin-square rotation) and an XML manifest comment bug that had silently broken the previous commit's build. A32 crash fully root-caused via full logcat capture — a camera/ML Kit/SpeechRecognizer startup collision with GMS's one-time ART verification pass, not a Scout or benchmark bug — fixed via staggered camera/speech startup, a startup-settled gate for face embedding, and full startup timing diagnostics. Real proactive return greeting (Presence Layer moment 2) landed at production thresholds after a temporary A32 smoke-test build.
 - July 27: "Who is Diana?" now answered by direct TruthDb lookup instead of unreliable TinyLlama inference. Presence Layer moment 1 shipped — idle-silence acknowledgment after long uninterrupted presence with no conversation, plus the return-greeting design that replaced Scout's previously-broken "welcome back" mechanism (shipped as a temporary smoke-test build first).
@@ -1053,4 +1078,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 29, 2026 | Version 52 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 29, 2026 | Version 53 | Single source of truth — upload every session*

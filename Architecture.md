@@ -1,5 +1,5 @@
 Last updated: July 29, 2026
-Based on commit: e6c2e829248035c5b01482e139bb1215549f381e
+Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
 Status: Current
 
 # Scout — Architecture
@@ -22,13 +22,13 @@ Two things are true process-wide singletons, not `MainActivity` instance fields,
 - `LlamaEngine` (`object`) — owns the native TinyLlama context.
 - `ScoutLlamaController` (`object`) — owns the single generation executor and the "is this caller still valid" token that gates delivering a TinyLlama result back to the UI.
 
-Everything else — the six SQLite databases, `GeminiClient`, `ScoutPresenceDecider`, `HabitLayer`, etc. — is constructed fresh in `MainActivity.onCreate()` on every Activity instance (including on a configuration-change recreation). That's cheap for the SQLite wrappers (`SQLiteOpenHelper` handles connection reuse internally) but is a real, current architectural gap for `HabitLayer` and `ScoutPresenceDecider`, whose in-memory state (social battery, presence timers) resets on every rotation — see `MAIN BUILD PATH - ACTIVE.md`.
+Everything else — the five SQLite databases, `GeminiClient`, `ScoutPresenceDecider`, `HabitLayer`, etc. — is constructed fresh in `MainActivity.onCreate()` on every Activity instance (including on a configuration-change recreation). That's cheap for the SQLite wrappers (`SQLiteOpenHelper` handles connection reuse internally) but is a real, current architectural gap for `HabitLayer` and `ScoutPresenceDecider`, whose in-memory state (social battery, presence timers) resets on every rotation — see `MAIN BUILD PATH - ACTIVE.md`.
 
 ---
 
 ## 2. MainActivity Responsibilities
 
-`MainActivity.kt` (≈4,900 lines) is Scout's coordinator. It owns:
+`MainActivity.kt` (~4,923 lines) is Scout's coordinator. It owns:
 - The face animation view (`ScoutFaceView`) and the "Mode" (`PRESENCE`/`REST`) driving it.
 - Speech recognition lifecycle (`SpeechRecognizer`, wake-word detection, listening windows).
 - Text-to-speech (`TextToSpeech`) output.
@@ -36,7 +36,7 @@ Everything else — the six SQLite databases, `GeminiClient`, `ScoutPresenceDeci
 - Intent routing and response dispatch (`handleQuery()` and the many `handleXxxIntent()` methods).
 - Teaching/fact storage (`handleTeaching()`).
 - The presence/proactive-greeting logic (idle-silence remark, return greeting).
-- Wiring every other subsystem together (constructing all six databases, `GeminiClient`, `ScoutPromptBuilder`, `HabitLayer`, `VisionAnswerBuilder`, etc. in `setupBrainServices()`/`setupMemory()`).
+- Wiring every other subsystem together (constructing all five SQLite databases, `GeminiClient`, `ScoutPromptBuilder`, `HabitLayer`, `VisionAnswerBuilder`, etc. in `setupBrainServices()`/`setupMemory()`).
 
 It does **not** own: TinyLlama's native lifecycle (that's `LlamaEngine`/`ScoutLlamaController`), Gemini's HTTP details (`GeminiClient`) or its request-discipline/quota logic (`ScoutGeminiManager`), weather fetching (`ScoutWeatherManager`), or calendar reading (`CalendarReader`). `MainActivity` calls into all of these but the actual work lives in dedicated classes.
 
