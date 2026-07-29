@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -331,7 +332,10 @@ class ApiKeySetupActivity : AppCompatActivity() {
                         inputField.error = "Please paste your key first."
                         return@setOnClickListener
                     }
-                    saveKey(provider.prefKey, key)
+                    if (!saveKey(provider.prefKey, key)) {
+                        inputField.error = "Couldn't save the key securely. Please try again."
+                        return@setOnClickListener
+                    }
                     phase = Phase.DONE
                     renderPhase()
                 }
@@ -385,14 +389,22 @@ class ApiKeySetupActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveKey(prefKey: String, value: String) {
+    // Returns false (and stores nothing) if encryption failed -- callers must
+    // not fall back to storing the plaintext key, and should surface a save
+    // failure to the user instead.
+    private fun saveKey(prefKey: String, value: String): Boolean {
         // Encrypted at rest via ScoutSecureKeyStore (Android Keystore-backed) --
         // never stored as a plain string. See ScoutApiKeyHelper.getKey() for the
         // read side and the one-time migration for any key saved before this.
+        val stored = when (val result = ScoutSecureKeyStore.encrypt(value)) {
+            is ScoutSecureKeyStore.EncryptResult.Available -> result.stored
+            ScoutSecureKeyStore.EncryptResult.Unavailable -> return false
+        }
         getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
             .edit()
-            .putString(prefKey, ScoutSecureKeyStore.encrypt(value))
+            .putString(prefKey, stored)
             .apply()
+        return true
     }
 
     private fun buildProviderCard(provider: Provider): View {
@@ -611,6 +623,8 @@ class ApiKeySetupActivity : AppCompatActivity() {
 // ── Static helper to read saved keys elsewhere in Scout ─────
 object ScoutApiKeyHelper {
 
+    private const val TAG = "ScoutApiKeyHelper"
+
     enum class Provider(val prefKey: String) {
         GEMINI("gemini_api_key"),
         OPENAI("openai_api_key"),
@@ -625,9 +639,22 @@ object ScoutApiKeyHelper {
             // One-time migration: an existing plaintext beta key saved before
             // encryption was added. Encrypt it now and overwrite the stored value;
             // still returns the plaintext value for this call since re-decrypting
-            // what was just encrypted would be redundant.
-            val migrated = ScoutSecureKeyStore.encrypt(stored)
-            prefs.edit().putString(provider.prefKey, migrated).apply()
+            // what was just encrypted would be redundant. Uses commit() (not
+            // apply()) so success/failure of the overwrite is known synchronously
+            // -- if it fails, the plaintext pref is left as-is and migration is
+            // simply retried on the next read, rather than considering it done
+            // when it may not have actually persisted.
+            when (val encrypted = ScoutSecureKeyStore.encrypt(stored)) {
+                is ScoutSecureKeyStore.EncryptResult.Available -> {
+                    val committed = prefs.edit().putString(provider.prefKey, encrypted.stored).commit()
+                    if (!committed) {
+                        Log.w(TAG, "failed to persist encrypted key migration for ${provider.name}")
+                    }
+                }
+                ScoutSecureKeyStore.EncryptResult.Unavailable -> {
+                    Log.w(TAG, "encryption unavailable during key migration for ${provider.name}")
+                }
+            }
             return stored
         }
 

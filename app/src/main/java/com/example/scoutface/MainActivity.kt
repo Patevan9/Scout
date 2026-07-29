@@ -724,7 +724,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // see ScoutLlamaController. Any result from a previous (now-destroyed)
         // instance's still-in-flight generation is discarded the moment it
         // completes, since it was captured under an older token.
-        ScoutLlamaController.registerOwner()
+        ScoutLlamaController.registerOwner(applicationContext)
 
         setContentView(R.layout.activity_main)
 
@@ -1030,6 +1030,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (_: Exception) {
 
         }
+
+        // Invalidates this instance's owner token on every onDestroy() -- a real
+        // close AND a configuration-change recreation alike. This is unconditional,
+        // unlike the isChangingConfigurations() branch below: regardless of why
+        // this instance is being destroyed, its UI/TTS are going away, so a
+        // generation that finishes after this point must never be delivered to it.
+        // A recreated instance's onCreate() calls registerOwner() moments later and
+        // bumps the token again anyway.
+        ScoutLlamaController.invalidateOwner()
 
         // TinyLlama's executor and native engine are owned by ScoutLlamaController
         // (process-wide), not by this Activity instance -- see its class doc. Only
@@ -3747,12 +3756,15 @@ Respond only with Scout's next reply.
             // executor and already only invokes this callback (on the main thread) if
             // myGeneration is still current -- covers both "a newer question arrived"
             // and "this Activity instance was destroyed and replaced" with the same
-            // check, so there's no separate staleness check needed here anymore.
+            // check, so there's no separate staleness check needed here anymore. A
+            // discard (stale token) is logged internally by ScoutLlamaController
+            // itself, not via a callback here -- this callback is Activity-owned
+            // (captures diagLog) and could otherwise run after this Activity was
+            // destroyed, purely to log a diagnostic event.
             ScoutLlamaController.generateAsync(
                 token = myGeneration,
                 prompt = sb.toString(),
-                nPredict = 100,
-                onDiscarded = { diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED) }
+                nPredict = 100
             ) { reply ->
 
                 val genMs = System.currentTimeMillis() - llamaGenStart

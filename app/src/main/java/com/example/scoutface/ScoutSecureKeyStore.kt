@@ -3,6 +3,7 @@ package com.example.scoutface
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -27,6 +28,7 @@ import javax.crypto.spec.GCMParameterSpec
  */
 object ScoutSecureKeyStore {
 
+    private const val TAG = "ScoutSecureKeyStore"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "scout_api_key_wrapper"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
@@ -46,6 +48,16 @@ object ScoutSecureKeyStore {
         // user to reconnect rather than guess, and must never surface the raw
         // stored value in this case.
         object Unavailable : DecryptResult()
+    }
+
+    sealed class EncryptResult {
+        data class Available(val stored: String) : EncryptResult()
+
+        // Keystore/crypto operation failed (e.g. the Keystore is unavailable,
+        // key generation was rejected, or the cipher threw for any other
+        // reason). Callers must not fall back to storing the plaintext value
+        // in this case -- they should treat it as a save failure instead.
+        object Unavailable : EncryptResult()
     }
 
     private fun getExistingSecretKey(): SecretKey? = synchronized(keyLock) {
@@ -73,14 +85,22 @@ object ScoutSecureKeyStore {
             .generateKey()
     }
 
-    fun encrypt(plaintext: String): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
+    fun encrypt(plaintext: String): EncryptResult {
+        return try {
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply {
+                init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())
+            }
+            val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+            val ivB64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+            val ctB64 = Base64.encodeToString(ciphertext, Base64.NO_WRAP)
+            EncryptResult.Available("$FORMAT_VERSION:$ivB64:$ctB64")
+        } catch (e: Exception) {
+            // Never log plaintext or key material here -- only that encryption
+            // failed, so the caller can surface a save failure instead of
+            // crashing or silently falling back to plaintext storage.
+            Log.e(TAG, "encrypt() failed", e)
+            EncryptResult.Unavailable
         }
-        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
-        val ivB64 = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
-        val ctB64 = Base64.encodeToString(ciphertext, Base64.NO_WRAP)
-        return "$FORMAT_VERSION:$ivB64:$ctB64"
     }
 
     fun decrypt(stored: String): DecryptResult {

@@ -1,5 +1,6 @@
 package com.example.scoutface
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -38,6 +39,16 @@ object ScoutLlamaController {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // Lazily constructed from an application Context the first time an owner
+    // registers, then reused for the process's lifetime. Deliberately NOT the
+    // caller's own (Activity-scoped) DiagLog: a discard is detected and logged
+    // from inside a queued executor task that can run after the Activity that
+    // submitted the generation has been destroyed, so logging through that
+    // Activity's diagLog would mean invoking an Activity-owned object (and
+    // keeping it reachable) after the Activity is gone. This one is scoped to
+    // the process instead, so it stays valid regardless of Activity lifecycle.
+    private var appDiagLog: DiagLog? = null
+
     // Bumped once per new MainActivity instance (registerOwner(), called from
     // onCreate()) and once per new question (newGeneration()) -- either kind of
     // change invalidates every in-flight generation started under an older value.
@@ -48,7 +59,14 @@ object ScoutLlamaController {
         private set
 
     /** Call once, at the very start of a new MainActivity instance's onCreate(). */
-    fun registerOwner(): Long {
+    fun registerOwner(context: Context): Long {
+        if (appDiagLog == null) {
+            try {
+                appDiagLog = DiagLog(DiagnosticDb(context.applicationContext))
+            } catch (e: Exception) {
+                Log.e(TAG, "failed to initialize diagnostic logging", e)
+            }
+        }
         currentToken += 1
         return currentToken
     }
@@ -60,20 +78,37 @@ object ScoutLlamaController {
     }
 
     /**
+     * Call from onDestroy(), for every kind of Activity destruction -- a real
+     * close AND a configuration-change recreation alike. Unlike
+     * shutdownForRealClose() (which only tears down the native engine on a
+     * genuine close), invalidating the token here is correct regardless of why
+     * the Activity is being destroyed: its UI/TTS are gone either way, so a
+     * generation that finishes after this point must never be delivered to it.
+     * A recreated instance's onCreate() calls registerOwner() moments later and
+     * bumps the token again anyway -- this just closes the short window where a
+     * generation could finish and be delivered between the old instance's
+     * onDestroy() and the new instance's onCreate().
+     */
+    fun invalidateOwner(): Long {
+        currentToken += 1
+        return currentToken
+    }
+
+    /**
      * Runs LlamaEngine.generate() on the shared process-wide executor and delivers
      * the result on the main thread via [onResult] -- but only if [token] (captured
      * by the caller from newGeneration()/currentToken at submission time) is still
      * the current token once the generation finishes. If a newer question or a new
-     * Activity instance has superseded it by then, [onResult] is never invoked;
-     * [onDiscarded] fires instead (also on the main thread) so a caller that wants
-     * to log the discard (e.g. a diagnostic event) still can, without needing its
-     * own separate staleness check.
+     * Activity instance has superseded it by then, [onResult] is never invoked --
+     * the discard is logged internally (see [appDiagLog]) instead of calling back
+     * into caller-supplied code, since that caller may be a since-destroyed
+     * Activity and its callback would otherwise be invoked (and kept reachable)
+     * after destruction purely to log a diagnostic event.
      */
     fun generateAsync(
         token: Long,
         prompt: String,
         nPredict: Int = 150,
-        onDiscarded: () -> Unit = {},
         onResult: (String?) -> Unit
     ) {
         executor.execute {
@@ -85,7 +120,11 @@ object ScoutLlamaController {
             }
             mainHandler.post {
                 if (token != currentToken) {
-                    onDiscarded()
+                    try {
+                        appDiagLog?.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "failed to log GENERATION_DISCARDED", e)
+                    }
                     return@post
                 }
                 onResult(reply)
