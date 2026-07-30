@@ -83,6 +83,8 @@ import com.example.scoutface.brain.ScoutWeatherManager
 
 import com.example.scoutface.brain.ScoutPresenceDecider
 
+import com.example.scoutface.brain.FuzzyNameMatcher
+
 import com.example.scoutface.brain.TextNormalizer
 
 import com.google.mlkit.vision.common.InputImage
@@ -2844,18 +2846,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
                 val nameLower = scoutName.lowercase()
-                // Whole-word match -- a bare substring check let ordinary speech
-                // containing "out" anywhere ("about," "without," "outside," "figure it
-                // out") trip the wake word, and made short custom names vulnerable to
-                // matching inside unrelated words. "out" itself is dropped entirely
-                // (not just whole-worded) since it's still an extremely common standalone
-                // word in ordinary sentences ("watch out," "I'm out of milk") -- "gal" and
-                // "scott" are kept as genuine mishearing alternatives for "Scout."
-                val hearsHisName = containsWholeWord(normalized, nameLower) ||
-                    (nameLower == "scout" && (
-                        containsWholeWord(normalized, "gal") ||
-                        containsWholeWord(normalized, "scott")
-                    ))
+                // FuzzyNameMatcher gives any configured name (not just the default
+                // "Scout") the same class of mishearing tolerance, via bounded
+                // edit-distance whole-word matching rather than a hand-written list of
+                // alternate spellings -- see its own doc comment for the exact
+                // thresholds and why "out" alone can never match "scout" this way
+                // (length difference alone rules it out). "Gal" is kept as its own
+                // explicit exception below: a real STT mishearing observed for the
+                // literal default name specifically, but not spelling-close enough for
+                // any generic distance-based matcher to catch, so it can't be folded
+                // into FuzzyNameMatcher without hardcoding a device-specific quirk into
+                // an otherwise name-agnostic class. "Scott" no longer needs its own
+                // entry -- it's exactly edit-distance 1 from "Scout" (5 letters, so
+                // within FuzzyNameMatcher's own distance-1 tier) and is now caught
+                // generically.
+                val hearsHisName = FuzzyNameMatcher.matchesName(normalized, scoutName) ||
+                    (nameLower == "scout" && containsWholeWord(normalized, "gal"))
                 val inConvoWindow =
                     (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS ||
                     System.currentTimeMillis() < presenceReplyWindowUntilMs
