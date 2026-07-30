@@ -1,13 +1,18 @@
 name: Android Debug Build
 
-# Compile-check only -- confirms the app builds, does not install or test on
-# a device. Runs automatically so a broken commit is caught immediately
-# instead of only being discovered the next time someone builds locally.
+# Confirms the app compiles AND that JVM unit tests actually pass -- does not
+# install or test on a device. Runs on every push to main/claude/** and on
+# every pull request targeting main, so a broken commit or a failing test is
+# caught immediately instead of only being discovered the next time someone
+# builds locally.
 on:
   push:
     branches:
       - main
       - 'claude/**'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -31,3 +36,14 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
+
+      - name: Run JVM unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/test-results/testDebugUnitTest/
+          retention-days: 14

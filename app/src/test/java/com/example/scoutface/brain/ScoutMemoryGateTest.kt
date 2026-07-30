@@ -31,6 +31,31 @@ class ScoutMemoryGateTest {
         assertFalse(gate("what is the weather like"))
     }
 
+    // --- "you"/"your" addressing Scout directly is a self-reference too --
+    // a personal-memory question can be about the speaker or about what
+    // Scout himself holds/remembers, and both need the gate to catch them.
+
+    @Test fun `what do you remember about me -- self plus topic, both directions`() {
+        assertTrue(gate("what do you remember about me"))
+    }
+
+    @Test fun `what have I taught you -- self plus topic, addressed at Scout`() {
+        assertTrue(gate("what have I taught you"))
+    }
+
+    // --- "you" alone, without a genuine topic word, must not over-trigger --
+    // "you" is an extremely common word, so ordinary Scout-directed commands
+    // that happen to contain it must still fall through to their normal
+    // handling rather than being swept into the memory gate.
+
+    @Test fun `do you know the weather -- you present but no topic word`() {
+        assertFalse(gate("do you know the weather"))
+    }
+
+    @Test fun `can you set a timer -- you present but no topic word`() {
+        assertFalse(gate("can you set a timer"))
+    }
+
     // --- "me"/"i"/"us" must be whole words, not substrings (regression) ---
 
     @Test fun `time and remember must not falsely trigger self word via substring`() {
