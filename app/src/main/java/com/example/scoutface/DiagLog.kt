@@ -116,6 +116,14 @@ class DiagLog(private val db: DiagnosticDb) {
         UNKNOWN
     }
 
+    /**
+     * Mirrors brain.MomentCategory (ScoutCompanionMomentsEngine) as a controlled
+     * diagnostic token, same convention as DiagIntent above -- kept as DiagLog's
+     * own enum rather than importing the brain-package type directly, so this
+     * file stays independently stable and doesn't need a cross-package import.
+     */
+    enum class DiagMomentCategory { ENVIRONMENT, MEMORY, OBSERVATION, CURIOSITY }
+
     // ── Public logging methods ────────────────────────────────────────────────
 
     /**
@@ -222,6 +230,22 @@ class DiagLog(private val db: DiagnosticDb) {
     fun logSpeechAvailabilityWarning(errorCount: Int) = safe("SPEECH_AVAILABILITY") {
         "warned=1 error_count=${errorCount.coerceAtLeast(0)}"
     }
+
+    /**
+     * Recorded when ScoutCompanionMomentsEngine's decision actually results in
+     * Scout speaking a companion moment -- never when a candidate is merely
+     * generated or scored. category — DiagMomentCategory enum; compiler-enforced.
+     * confidence — the winning candidate's score, clamped to [0, 1]. contributions
+     * — the named contribution keys the score was built from (e.g.
+     * "curiosity_no_conversation_yet_bonus"); this is always a small, fixed
+     * vocabulary of identifiers hardcoded in ScoutCompanionMomentsEngine's own
+     * source, never user speech, a taught fact, or a name, so it's safe to record
+     * as-is. No spoken text, no fact values, no names are ever passed here.
+     */
+    fun logCompanionMoment(category: DiagMomentCategory, confidence: Float, contributions: List<String>) =
+        safe("COMPANION_MOMENT") {
+            "category=${category.name.lowercase()} confidence=${confidence.coerceIn(0f, 1f)} contributions=${contributions.joinToString(",")}"
+        }
 
     /**
      * Recorded when an incoming utterance is dispatched to a handler.

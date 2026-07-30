@@ -72,6 +72,21 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
         return out
     }
 
+    // Same as getAllFacts() but also returns updated_at -- needed by
+    // ScoutCompanionMomentsEngine's Memory category, which needs to know when a
+    // fact was last taught/changed as one half of "days since last surfaced"
+    // (the other half, when Scout last spoke it, comes from JournalDb).
+    fun getAllFactsWithTimestamp(entity: String): List<Triple<String, String, Long>> {
+        val out = mutableListOf<Triple<String, String, Long>>()
+        readableDatabase.rawQuery(
+            "SELECT fact_key, value, updated_at FROM entity_memory WHERE entity=? ORDER BY updated_at ASC;",
+            arrayOf(entity.lowercase())
+        ).use { c ->
+            while (c.moveToNext()) out.add(Triple(c.getString(0), c.getString(1), c.getLong(2)))
+        }
+        return out
+    }
+
     // Every distinct entity that has ever had a fact stored -- "user_primary",
     // "scout", and any named person/pet (e.g. "diana", "nicolas") once something's
     // been taught about them directly. Lets callers discover and gather facts for
