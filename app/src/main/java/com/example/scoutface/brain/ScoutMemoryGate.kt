@@ -22,7 +22,14 @@ object ScoutMemoryGate {
         "learned", "learn", "taught", "told", "household", "lives with", "live with"
     )
 
-    private val SELF_WORDS = listOf("my", "me", "i", "i'm", "mine", "us", "we")
+    // A personal-memory question can be about the speaker ("my wife's name")
+    // or addressed directly at Scout ("what did you learn today") -- both
+    // involve a personal entity holding/receiving memory, so both belong
+    // here. "you"/"your" are extremely common words, but that's safe: they
+    // only ever matter paired with a genuine TOPIC_WORD below, and that list
+    // is deliberately narrow, so "can you set a timer" or "do you know the
+    // weather" (no topic word present) never trips this regardless.
+    private val SELF_WORDS = listOf("my", "me", "i", "i'm", "mine", "us", "we", "you", "your")
 
     fun isPossiblePersonalMemoryQuery(clean: String, knownFacts: List<Pair<String, String>>): Boolean {
 
