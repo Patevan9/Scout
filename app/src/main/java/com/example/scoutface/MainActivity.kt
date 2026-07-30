@@ -1260,9 +1260,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@postDelayed
             }
             logStartupTiming("speech_startup_firing from=$from")
+            // safeSetupSpeech() -> setupSpeech() already ends with its own
+            // scheduleListenRestart() call, which sets pendingListenStart -- an
+            // explicit scheduleListenRestart(immediate = true) here would always be a
+            // no-op (blocked by that same flag), so it's not called again. The actual
+            // first listen start still happens, just via setupSpeech()'s own restart
+            // rather than a second, redundant one.
             safeSetupSpeech(from)
             speechEverStarted = true
-            scheduleListenRestart(immediate = true)
         }, SPEECH_STARTUP_STAGGER_MS)
     }
 
