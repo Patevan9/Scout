@@ -1,17 +1,31 @@
 # Scout — Claude Session Notes
 
 ## Git branch
-All active development happens on: `claude/test-coverage-analysis-hsp9lt`
+`main` is the source of truth — current stable code always lives there.
 
-**Always give Patrick the full pull command — he finds it easy to forget the branch name:**
+Workflow:
+- **`main`** = current stable code.
+- **Feature branches** = temporary work only. Branch off `main`, do the work, open a PR, merge back into `main`.
+- **Delete branches after they're merged.** Don't let merged or stale branches accumulate — if in doubt whether a branch has unique commits left, check with `git log origin/main..origin/<branch> --oneline` before deleting (empty output = safe to delete).
+
+**Always give Patrick the full pull command:**
 ```
-git pull origin claude/test-coverage-analysis-hsp9lt
+git pull origin main
 ```
 
-When pushing, always use:
+Starting new work:
 ```
-git push -u origin claude/test-coverage-analysis-hsp9lt
+git checkout main
+git pull origin main
+git checkout -b <short-descriptive-branch-name>
 ```
+
+Pushing a feature branch:
+```
+git push -u origin <branch-name>
+```
+
+`claude/test-coverage-analysis-hsp9lt` was the long-lived active-development branch through the memory/entity system, presence layer, and security-hardening work — merged into `main` July 29, 2026 (PR #1) and deleted. Any reference to it elsewhere in older docs describes history, not the current branch to develop on.
 
 ## Building
 Android Studio only — Build → Clean Project, then Build → Assemble Project.
@@ -37,9 +51,14 @@ Android Studio only — Build → Clean Project, then Build → Assemble Project
 - Samsung Galaxy Fold 7 (listed as primary, less frequently used)
 
 ## Master docs
-- `Scout_Master_Summary.md` — full project history and architecture (upload to new sessions)
+- `Scout_Master_Summary.md` — full project history/changelog (upload to new sessions)
+- `Architecture.md` — how Scout is built today; read this to understand the system without reading the code first
+- `MAIN BUILD PATH - ACTIVE.md` — current priorities, blockers, in-progress work, parked ideas (live status, not history)
+- `MainActivity Cleanup.md` — known technical debt and refactoring targets
 - `Scout_Launch_Checklist.md` — what's done and what's next for Play Store launch
 - `Scout_Quick_Start.md` — quick reference
+
+The first four carry a header (`Last updated` / `Based on commit` / `Status`) — check it before trusting the content as current. `Scout_Master_Summary.md` is an append-only changelog (never delete history); the other three are live documents that get edited in place as things change or ship.
 
 ## Scout development philosophy — do not violate
 - **TinyLlama is the primary brain.** Scout works fully offline. Gemini is an optional enhancement.
