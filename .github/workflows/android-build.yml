@@ -6,6 +6,7 @@ name: Android Debug Build
 on:
   push:
     branches:
+      - main
       - 'claude/**'
   workflow_dispatch:
 
