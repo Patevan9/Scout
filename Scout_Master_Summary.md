@@ -1,13 +1,47 @@
 # Project Scout — Master Project Summary
 
-Last updated: July 29, 2026
-Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
+Last updated: July 30, 2026
+Based on commit: 1b5deb19dfced44529f571b30d27c622e8e12fb3
 Status: Current
 
-**Version 53**
+**Version 54**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 30, 2026 — Workflow Change to `main`; PRs #3–#6 Merged; Companion Moments Approved as a Major Priority
+
+**Workflow change — `main` is now Scout's single source of truth.** Documented in `CLAUDE.md`. New work uses short-lived feature branches (naming convention `claude/**`), merges into `main` via pull request, and the branch is deleted once merged — no more long-lived development branches. CI (`.github/workflows/android-build.yml`) triggers on push to `main` and `claude/**`, and — as of PR #6, merged — also on pull requests targeting `main`.
+
+✓ **PR #3 merged — speech-listening cleanup.** Removed a redundant no-op `scheduleListenRestart()` call in `requestSpeechStartup()`. Merge commit `ff26a367ef005213a36918ed789c8886fc79896c`.
+
+✓ **PR #4 merged — speech reliability designs** (branch `claude/speech-reliability-designs`, deleted after merge). Merge commit `c14671f2592e422c1f4cafe718ecfd3e8a5cfd7e`. Two independent pieces, both fully wired into `MainActivity` (confirmed via the merge diff: `MainActivity.kt` itself changed, not just new standalone files) — this is live behavior on `main` today, not just added-but-dormant code: (a) `FuzzyNameMatcher.kt` — generic edit-distance wake-word tolerance, so a renamed Scout gets the same mishearing tolerance the default name already had, replacing a hardcoded list of alternate spellings that only covered "Scout" itself; (b) `ScoutSpeechAvailabilityMonitor.kt` — Tier-1-only detection of a sustained pattern of network-dependent recognizer failures, so Scout can honestly warn about a possible speech-recognition-unavailable situation instead of silently retrying forever. Both ship with their own unit test suites, and — since CI now actually runs tests (see PR #6) — both suites are confirmed passing in CI, not just review-verified.
+
+✓ **PR #5 merged — Companion Moments decision engine** (branch `claude/companion-moments-engine`, deleted after merge). Merge commit `1b5deb19dfced44529f571b30d27c622e8e12fb3`. Adds `ScoutCompanionMomentsEngine.kt` and its test suite: the pure decision-logic engine for a new "Companion Moments" system (design detailed below). Confirmed via the merge diff that this PR touched only the two new engine/test files — **engine only, not wired in**: no `MainActivity` call site, no `VoiceBank` phrase pools, no `DiagLog` entries, no `JournalDb` reads/writes yet. Wiring is explicitly a separate, later PR (see design note below) — do not assume Companion Moments is live behavior.
+
+✓ **PR #6 merged — CI now runs unit tests, not just a compile check** (branch `claude/ci-run-unit-tests`, deleted after merge). Merge commit `d1a56ac8615fd8fa065790d1318bb953f9a79127`. Expanded `.github/workflows/android-build.yml` to run `./gradlew testDebugUnitTest` after `assembleDebug`, and added the `pull_request` → `main` trigger mentioned above. Running tests for the first time immediately exposed a real, pre-existing bug (not introduced by this PR) — see the `ScoutMemoryGate` item directly below, fixed and merged on this same branch.
+
+✓ **Real pre-existing bug found by CI actually running tests — `ScoutMemoryGate.SELF_WORDS` didn't recognize the user addressing Scout directly.** `ScoutMemoryGateTest`'s "what did you learn today" case was failing: `SELF_WORDS` only matched the user referring to *themselves* (`my`/`me`/`i`/`us`/`we`), not the user addressing *Scout* (`you`/`your`) — both are legitimate personal-memory phrasings. Fix (merged via PR #6): added `"you"`/`"your"` to `SELF_WORDS`. Kept deliberately narrow — `SELF_WORDS` only matters when paired with a real `TOPIC_WORD`, so ordinary commands like "can you set a timer" are unaffected. Confirmed deterministic intents (e.g. `WEATHER`) are matched before the memory gate is ever reached, so routing order is safe.
+
+**Companion Moments — approved direction, design locked, engine merged, wiring not yet built.**
+
+✓ **Product-priority context.** During over an hour of continuous real-device testing, Scout remained technically stable but felt too passive and boring — he mostly watches the room and waits to be spoken to. Improving Scout's sense of meaningful initiative is now a major product priority. This is explicitly **not** the same thing as "just make him talk more" — restraint is the core design constraint of Companion Moments, not a side concern.
+
+✓ **Relationship to the existing Presence system.** `ScoutPresenceDecider` (already shipped, July 27–28) continues to own return greetings and idle-silence courtesy remarks — unrelated to and unchanged by Companion Moments. Companion Moments is scoped to coexist with Presence, not duplicate or replace it: its own Environment category only covers a second person joining, not return-from-absence or a quiet room, which stay Presence's job. The two systems share **one** proactive-speech cooldown/budget — the user experiences one Scout, not two independently-timed subsystems talking over each other.
+
+✓ **Design constraint: Scout must never fake a signal he cannot observe.** No audio-tone/sentiment signal exists anywhere in the app today. Companion Moments generates candidates only from what's actually measurable (camera presence, taught facts, conversation cadence, habit patterns) — never invented emotion, laughter detection, or focus.
+
+✓ **Restraint gates come first, unconditionally, before any scoring.** `ScoutCompanionMomentsEngine.evaluate()` checks, in order: a situational safety gate, the shared proactive-speech cooldown (with Presence), a daily moment budget (3/day in the current design), and each category's own cooldown — all hard gates, checked before any candidate is even generated, and none of them can be overridden by a high-scoring candidate. Only after all of them pass does the engine generate grounded candidates across four categories (Environment, Memory, Observation, Curiosity) and score them **additively** — each contributing factor adds to a 0–1 confidence score, capped at 1.0, never multiplicative.
+
+✓ **Silence is the intended, common default outcome**, not a fallback or failure state — most evaluations are expected to return no candidate at all.
+
+✓ **The engine carries no literal spoken text.** It returns a category plus a stable content key; actual wording stays `VoiceBank`'s job (the existing, separate phrase-pool system), which keeps the decision layer privacy-safe and diagnostic-safe by construction — nothing it logs can ever contain a spoken sentence, a name, or a fact's value.
+
+✓ **Deterministic tie-breaking** when multiple candidates are simultaneously eligible: confidence score first, then a time-sensitivity rank, then least-recently-used content, then a fixed category order as the final fallback.
+
+✓ **MainActivity wiring is explicitly a separate, later PR** — the real call site, `VoiceBank` phrase pools for the four categories, `DiagLog` diagnostic entries, and `JournalDb` novelty-tracking reads/writes are all intentionally out of scope for PR #5. When that follow-up PR happens, it is intentionally scoped to only that wiring work — no new sensors, no emotion assumptions, no expanded categories.
 
 ---
 
@@ -618,6 +652,7 @@ Do not act on this area without his input. His expertise is the right lens for t
 
 ## 7d. Session Log
 
+- July 30: Workflow change documented — `main` is now the single source of truth, short-lived `claude/**` feature branches merge in via PR and get deleted. PRs #4, #5, and #6 all merged: PR #4 (speech reliability — `FuzzyNameMatcher.kt`, `ScoutSpeechAvailabilityMonitor.kt`, fully wired into `MainActivity`, live behavior), PR #5 (`ScoutCompanionMomentsEngine.kt` — pure decision-logic engine, no wiring yet), PR #6 (CI now runs `testDebugUnitTest` and adds a `pull_request` trigger; exposed and fixed a real pre-existing `ScoutMemoryGate.SELF_WORDS` gap missing "you"/"your"). Companion Moments approved as a major product-priority direction after real-device testing showed Scout stable but passive; design and restraint gates documented in the July 30 entry above. Final commit after all three merges: `1b5deb19dfced44529f571b30d27c622e8e12fb3`.
 - July 29 (documentation): Established the four-document system (Scout_Master_Summary.md, Architecture.md, MainActivity Cleanup.md, MAIN BUILD PATH - ACTIVE.md), all verified against the codebase directly and header-versioned (date/commit/status). Follow-up consistency pass found and fixed a real factual error in Architecture.md ("six" vs. the actual five SQLite databases), removed cross-document duplication of the presence-layer temporary-value TODO, and added redirect notes so this document's own Pending/Known-Issues lists stop being independently tracked in parallel with MAIN BUILD PATH - ACTIVE.md going forward.
 - July 29: Two rounds of ChatGPT-reviewed fixes (7 privacy/reliability, 7 mic/camera performance) — offline-brain gate bypass, LlamaEngine.free() race, misleading OpenAI/Claude setup, plaintext API keys + untouched backup templates, ScoutMemoryGate alias mismatch, TruthDb upsert staleness, onEndOfSpeech() restart risk, wake-word "out" false positive, fixed silence timeout, per-frame bitmap allocation, label/face cadence coupling, cameraEverStarted timing. Then: API keys encrypted via Android Keystore (ScoutSecureKeyStore, versioned format, typed encrypt/decrypt results, one-time plaintext migration via commit()); ScoutLlamaController introduced as a process-wide singleton owning TinyLlama's generation executor and owner/generation token, replacing per-Activity-instance state that could leak threads or deliver stale results across a configuration-change recreation; two follow-up corrections after a second review pass (invalidateOwner() on every onDestroy(), discard logging moved off an Activity-owned callback). Commits a348425, 0b3e9bc, 7d030e3, f856bb2, 2ac932e.
 - July 28: Listening reminder made vision-led (ML Kit head-yaw gate, sustained-facing streak, reason-based diagnostics), then tightened to conservative thresholds with a vision-staleness check and real measured values logged. Dev-only TinyLlama benchmark harness added (native runGeneration() extraction, perf_context bindings, hidden 7-tap unlock screen), then fixed for thermal run-order bias (Latin-square rotation) and an XML manifest comment bug that had silently broken the previous commit's build. A32 crash fully root-caused via full logcat capture — a camera/ML Kit/SpeechRecognizer startup collision with GMS's one-time ART verification pass, not a Scout or benchmark bug — fixed via staggered camera/speech startup, a startup-settled gate for face embedding, and full startup timing diagnostics. Real proactive return greeting (Presence Layer moment 2) landed at production thresholds after a temporary A32 smoke-test build.
@@ -1078,4 +1113,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 29, 2026 | Version 53 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 30, 2026 | Version 54 | Single source of truth — upload every session*
