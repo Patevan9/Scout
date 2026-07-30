@@ -84,6 +84,7 @@ import com.example.scoutface.brain.ScoutWeatherManager
 import com.example.scoutface.brain.ScoutPresenceDecider
 
 import com.example.scoutface.brain.FuzzyNameMatcher
+import com.example.scoutface.brain.ScoutSpeechAvailabilityMonitor
 
 import com.example.scoutface.brain.TextNormalizer
 
@@ -692,6 +693,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var weatherManager: ScoutWeatherManager
 
     private lateinit var presenceDecider: ScoutPresenceDecider
+
+    // Tracks a sustained pattern of network-dependent recognizer failures so Scout
+    // can be honest about it instead of silently retrying forever -- see
+    // ScoutSpeechAvailabilityMonitor and its one call site in onError() below.
+    private val speechAvailabilityMonitor = ScoutSpeechAvailabilityMonitor()
 
     // =======================
 
@@ -2745,6 +2751,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 diagLog.logSpeechError(error)
                 diagLog.logListenStop(DiagLog.StopReason.ERROR)
+
+                // Always fed, regardless of error type -- onRecognizerError() itself
+                // ignores anything that isn't ERROR_NETWORK/ERROR_NETWORK_TIMEOUT, and
+                // the rolling window needs every qualifying error recorded to stay
+                // accurate even on a cycle where the warning ends up skipped below.
+                val shouldWarnAboutAvailability = speechAvailabilityMonitor.onRecognizerError(error)
+                // isSpeaking guard: a recognizer session cancelled because Scout just
+                // started speaking can still deliver a trailing onError() shortly
+                // after -- speaking the warning on top of that would double up TTS.
+                // Skipping here (without calling onWarned()) leaves the cooldown
+                // untouched, so the very next qualifying error gets a fresh chance
+                // once Scout isn't mid-utterance, rather than the warning being lost
+                // for a full cooldown window over a timing coincidence.
+                if (shouldWarnAboutAvailability && !isSpeaking) {
+                    speechAvailabilityMonitor.onWarned()
+                    diagLog.logSpeechAvailabilityWarning(speechAvailabilityMonitor.currentPatternSize())
+                    // respond() -> speak() sets wantListening = false synchronously, so
+                    // the scheduleListenRestart() call below (still reached on this same
+                    // pass, since error is 1 or 2 here, never 8) becomes a no-op exactly
+                    // the way it already does for any other spoken response -- the real
+                    // restart comes from TTS's onDone once the warning finishes, so this
+                    // cannot create a second, competing restart or a speak/listen loop.
+                    respond("I'm having trouble hearing you right now. Speech recognition may be unavailable, and I can't reach the service it needs.")
+                }
 
                 // ERROR_RECOGNIZER_BUSY (8) means two sessions overlapped.
                 // Give the engine 600ms to fully close before restarting.
