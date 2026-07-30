@@ -212,6 +212,18 @@ class DiagLog(private val db: DiagnosticDb) {
     }
 
     /**
+     * Recorded when ScoutSpeechAvailabilityMonitor detects a sustained pattern of
+     * network-dependent recognizer failures (ERROR_NETWORK/ERROR_NETWORK_TIMEOUT)
+     * and the availability warning is actually spoken to the user.
+     * errorCount — how many qualifying errors were in the rolling window at the
+     * moment of warning; clamped to >= 0. No speech content, no error messages,
+     * no stack traces.
+     */
+    fun logSpeechAvailabilityWarning(errorCount: Int) = safe("SPEECH_AVAILABILITY") {
+        "warned=1 error_count=${errorCount.coerceAtLeast(0)}"
+    }
+
+    /**
      * Recorded when an incoming utterance is dispatched to a handler.
      * intent — DiagIntent enum value; compiler-enforced; no arbitrary string accepted.
      * Brain source is NOT recorded here — it is recorded by logBrainStarted() only
