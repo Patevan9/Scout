@@ -29,16 +29,66 @@ object ScoutIntentRouter {
             return IntentType.IDENTITY
         }
 
-        if ((clean.contains("wife") || clean.contains("spouse")) && clean.contains("name")) {
-            return IntentType.ASK_WIFE_NAME
+        // "what are the names in my family" / "who's in my family" -- a summary across
+        // wife/son/dog, checked before the individual wife/son/dog checks below since
+        // it doesn't name any one relation specifically.
+        if (
+            clean.contains("names in my family") ||
+            clean.contains("name in my family") ||
+            clean.contains("who's in my family") ||
+            clean.contains("who is in my family") ||
+            clean.contains("family's names") ||
+            clean.contains("families names") ||
+            clean.contains("who are the people in my family") ||
+            (clean.contains("family") && clean.contains("member") && clean.contains("name"))
+        ) {
+            return IntentType.FAMILY_NAMES
         }
 
-        if ((clean.contains("son") || clean.contains("kid") || clean.contains("child")) && clean.contains("name")) {
-            return IntentType.ASK_SON_NAME
+        // "turn on calendar" / "turn on the calendar" / "enable calendar" -- opens Calendar
+        // Awareness in Settings. Distinct from the CALENDAR intent below, which reads
+        // calendar events -- this is about finding the toggle itself. The optional "the"
+        // matters: "turn on THE calendar" is the more natural phrasing and a bare
+        // clean.contains("turn on calendar") substring check misses it entirely.
+        if (
+            Regex("""\bturn on (?:the\s+)?calendar\b""").containsMatchIn(clean) ||
+            Regex("""\bturn (?:the\s+)?calendar on\b""").containsMatchIn(clean) ||
+            Regex("""\benable (?:the\s+)?calendar\b""").containsMatchIn(clean) ||
+            clean.contains("calendar settings") ||
+            clean.contains("calendar awareness")
+        ) {
+            return IntentType.OPEN_CALENDAR_SETTINGS
         }
 
-        if ((clean.contains("dog") || clean.contains("pet")) && clean.contains("name")) {
-            return IntentType.ASK_DOG_NAME
+        // A query naming more than one relation ("what are my wife and son's
+        // names") isn't answerable by any single one of these three handlers --
+        // each only knows how to say one name. Rather than pick one relation
+        // arbitrarily and drop the rest, a compound mention falls through
+        // unmatched here so it reaches UNKNOWN, where the personal-memory gate
+        // retrieves every relevant fact instead of just one.
+        val relationCategoriesPresent = listOf(
+            clean.contains("wife") || clean.contains("spouse"),
+            clean.contains("son") || clean.contains("kid") || clean.contains("child"),
+            clean.contains("dog") || clean.contains("pet")
+        ).count { it }
+        val isSingleRelation = relationCategoriesPresent <= 1
+
+        if (isSingleRelation && (clean.contains("wife") || clean.contains("spouse"))) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_WIFE_NAME
+            }
+        }
+
+        if (isSingleRelation && (clean.contains("son") || clean.contains("kid") || clean.contains("child"))) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_SON_NAME
+            }
+        }
+
+        if (isSingleRelation && (clean.contains("dog") || clean.contains("pet"))) {
+            if (clean.contains("name") || clean.contains("who is my") || clean.contains("who's my") || clean.contains("what is my") || clean.contains("what's my") || clean.contains("tell me about my")) {
+                return IntentType.ASK_DOG_NAME
+            }
         }
 
         if (
@@ -120,51 +170,6 @@ clean.contains("go on the internet")
             return IntentType.GO_OFFLINE
         }
 
-        if (
-            clean.contains("download status") ||
-            clean.contains("downloads status") ||
-            clean.contains("what is downloaded") ||
-            clean.contains("what downloads are installed")
-        ) {
-            return IntentType.DOWNLOAD_STATUS
-        }
-
-        if (
-            clean.contains("download all") ||
-            clean.contains("download everything") ||
-            clean.contains("download brain pack")
-        ) {
-            return IntentType.DOWNLOAD_ALL
-        }
-
-        if (clean.contains("download dictionary") || clean.contains("download wikdict")) {
-            return IntentType.DOWNLOAD_DICT
-        }
-
-        if (clean.contains("download idioms") || clean.contains("download idiom")) {
-            return IntentType.DOWNLOAD_IDIOMS
-        }
-
-        if (clean.contains("download wordnet")) {
-            return IntentType.DOWNLOAD_WORDNET
-        }
-
-        if (clean.contains("download sentiment")) {
-            return IntentType.DOWNLOAD_SENTIMENT
-        }
-
-        if (clean.contains("download slang")) {
-            return IntentType.DOWNLOAD_SLANG
-        }
-
-        if (clean.contains("reset download")) {
-            return IntentType.RESET_DOWNLOAD_DECISIONS
-        }
-
-        if (clean.contains("remove downloads") || clean.contains("delete downloads")) {
-            return IntentType.REMOVE_DOWNLOADS
-        }
-
         if (clean.contains("export brain") || clean.contains("export memory")) {
             return IntentType.EXPORT_BRAIN
         }
@@ -234,11 +239,63 @@ clean.contains("go on the internet")
             clean.contains("is it warm") ||
             clean.contains("will it rain") ||
             clean.contains("will it snow") ||
-            clean.contains("tonight") ||
+            (clean.contains("tonight") && (
+                clean.contains("weather") || clean.contains("forecast") ||
+                clean.contains("rain") || clean.contains("snow") ||
+                clean.contains("temperature") || clean.contains("degrees") ||
+                clean.contains("hot") || clean.contains("cold") || clean.contains("warm") ||
+                clean.contains("outside")
+            )) ||
             (clean.contains("what") && clean.contains("outside")) ||
             (clean.contains("how") && clean.contains("outside"))
         ) {
             return IntentType.WEATHER
+        }
+
+        if (
+            clean.contains("what do i have today") ||
+            clean.contains("do i have anything today") ||
+            (clean.contains("today") && clean.contains("calendar")) ||
+            clean.contains("what is happening tomorrow") ||
+            (clean.contains("tomorrow") && clean.contains("calendar")) ||
+            (clean.contains("this week") && clean.contains("calendar")) ||
+            clean.contains("next event") ||
+            clean.contains("next appointment")
+        ) {
+            return IntentType.CALENDAR
+        }
+
+        // "when is Nick's vet appointment" / "what time is the school play" — calendar
+        // title search. Excludes bare "my" (e.g. "when is my birthday") so personal facts
+        // keep routing to RECALL_FACT below -- but "my next ___" (e.g. "when is my next
+        // injection") is a recurring-event calendar lookup, not a personal fact, so that
+        // specific phrasing is allowed through instead of being excluded.
+        Regex("""\b(?:when is|what time is)\s+(?!my\b(?!\s+next\b))([a-z0-9' ]+?)\??$""").find(clean)?.let {
+            if (it.groupValues[1].isNotBlank()) return IntentType.CALENDAR
+        }
+
+        // "am I free on July 10th" / "what do I have on the 10th of July" / "are we busy
+        // next Saturday" — arbitrary date lookup. Also requires a clear calendar-question
+        // word so a date mentioned for some other reason isn't mistaken for one.
+        if (
+            CalendarDateParser.parseDate(clean) != null &&
+            (
+                clean.contains("free") || clean.contains("busy") || clean.contains("available") ||
+                clean.contains("anything") || clean.contains("plans") || clean.contains("calendar") ||
+                clean.contains("schedule") || clean.contains("do i have") ||
+                clean.contains("appointment") || clean.contains("event")
+            )
+        ) {
+            return IntentType.CALENDAR
+        }
+
+        // Catch-all: any other mention of "calendar" that didn't match a more specific
+        // pattern above still routes through handleCalendarIntent() -- which already
+        // opens Calendar Awareness in Settings when it isn't on, or gives a best-effort
+        // answer (defaulting to today) when it is -- instead of falling through to the
+        // general conversational brain, which has no calendar awareness of its own.
+        if (clean.contains("calendar")) {
+            return IntentType.CALENDAR
         }
 
         if (
@@ -247,7 +304,17 @@ clean.contains("what's my") ||
 clean.contains("do you know my") ||
 clean.contains("do you remember my") ||
 clean.contains("what was my") ||
-clean.contains("tell me my")
+clean.contains("when is my") ||
+clean.contains("when's my") ||
+clean.contains("when was my") ||
+clean.contains("tell me my") ||
+clean.contains("what will you remember") ||
+clean.contains("what do you remember") ||
+clean.contains("what have you remembered") ||
+clean.contains("what did you learn") ||
+clean.contains("what have you learned") ||
+clean.contains("what do you know about me") ||
+(clean.contains("what do you know") && !clean.contains("what do you know about"))
 ) {
 return IntentType.RECALL_FACT
 }

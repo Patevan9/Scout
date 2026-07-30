@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
+import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -39,7 +41,16 @@ private enum class Provider(
     val displayName: String,
     val prefKey: String,
     val badge: String,
-    val steps: List<SetupStep>
+    val steps: List<SetupStep>,
+    // Whether this provider is actually wired up end-to-end. MainActivity's
+    // GeminiClient/ScoutGeminiManager currently only ever read the Gemini key
+    // (ScoutApiKeyHelper.Provider.GEMINI) -- OpenAI/Claude keys can be saved here
+    // but nothing in Scout uses them yet, so a user who set one up would see
+    // "We're connected!" and then have Scout keep talking to Gemini or TinyLlama
+    // regardless. Hidden from the picker (see renderPick()) until real clients
+    // and routing exist for them -- not deleted, so re-enabling later is just
+    // flipping this flag once that work is done.
+    val isAvailable: Boolean = true
 ) {
     GEMINI(
         displayName = "Google Gemini",
@@ -101,7 +112,8 @@ private enum class Provider(
                 hasInput = true,
                 actionLabel = "Connect OpenAI!"
             )
-        )
+        ),
+        isAvailable = false
     ),
     CLAUDE(
         displayName = "Claude (Anthropic)",
@@ -139,7 +151,8 @@ private enum class Provider(
                 hasInput = true,
                 actionLabel = "Connect Claude!"
             )
-        )
+        ),
+        isAvailable = false
     )
 }
 
@@ -181,7 +194,21 @@ class ApiKeySetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         rootLayout = buildLayout()
-        setContentView(rootLayout)
+
+        // The picker phase stacks a title, subtitle, a responsibility note, and three
+        // provider cards (Gemini/OpenAI/Claude) in a plain vertical layout with no scroll
+        // capability -- on this screen's locked landscape orientation (short height), that
+        // content is taller than the visible screen, silently cutting off the last card
+        // (Claude) below the fold rather than showing it scrolled. Wrapping in a ScrollView
+        // fixes that without changing anything about how the content itself is built.
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(
+                rootLayout,
+                ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
+        }
+        setContentView(scroll)
 
         renderPhase()
     }
@@ -236,7 +263,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         providerContainer.visibility = View.VISIBLE
 
         providerContainer.removeAllViews()
-        Provider.values().forEach { p ->
+        Provider.values().filter { it.isAvailable }.forEach { p ->
             val card = buildProviderCard(p)
             providerContainer.addView(card)
         }
@@ -305,7 +332,10 @@ class ApiKeySetupActivity : AppCompatActivity() {
                         inputField.error = "Please paste your key first."
                         return@setOnClickListener
                     }
-                    saveKey(provider.prefKey, key)
+                    if (!saveKey(provider.prefKey, key)) {
+                        inputField.error = "Couldn't save the key securely. Please try again."
+                        return@setOnClickListener
+                    }
                     phase = Phase.DONE
                     renderPhase()
                 }
@@ -359,11 +389,22 @@ class ApiKeySetupActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveKey(prefKey: String, value: String) {
+    // Returns false (and stores nothing) if encryption failed -- callers must
+    // not fall back to storing the plaintext key, and should surface a save
+    // failure to the user instead.
+    private fun saveKey(prefKey: String, value: String): Boolean {
+        // Encrypted at rest via ScoutSecureKeyStore (Android Keystore-backed) --
+        // never stored as a plain string. See ScoutApiKeyHelper.getKey() for the
+        // read side and the one-time migration for any key saved before this.
+        val stored = when (val result = ScoutSecureKeyStore.encrypt(value)) {
+            is ScoutSecureKeyStore.EncryptResult.Available -> result.stored
+            ScoutSecureKeyStore.EncryptResult.Unavailable -> return false
+        }
         getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
             .edit()
-            .putString(prefKey, value)
+            .putString(prefKey, stored)
             .apply()
+        return true
     }
 
     private fun buildProviderCard(provider: Provider): View {
@@ -582,6 +623,8 @@ class ApiKeySetupActivity : AppCompatActivity() {
 // ── Static helper to read saved keys elsewhere in Scout ─────
 object ScoutApiKeyHelper {
 
+    private const val TAG = "ScoutApiKeyHelper"
+
     enum class Provider(val prefKey: String) {
         GEMINI("gemini_api_key"),
         OPENAI("openai_api_key"),
@@ -589,10 +632,39 @@ object ScoutApiKeyHelper {
     }
 
     fun getKey(context: Context, provider: Provider): String? {
-        return context
-            .getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
-            .getString(provider.prefKey, null)
-            ?.takeIf { it.isNotBlank() }
+        val prefs = context.getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+        val stored = prefs.getString(provider.prefKey, null)?.takeIf { it.isNotBlank() } ?: return null
+
+        if (!ScoutSecureKeyStore.isEncryptedFormat(stored)) {
+            // One-time migration: an existing plaintext beta key saved before
+            // encryption was added. Encrypt it now and overwrite the stored value;
+            // still returns the plaintext value for this call since re-decrypting
+            // what was just encrypted would be redundant. Uses commit() (not
+            // apply()) so the outcome is known synchronously rather than assumed.
+            // A false result does NOT guarantee the plaintext pref is still in
+            // place -- SharedPreferences.commit() can return false even when the
+            // in-memory write already landed, so durable persistence of the
+            // encrypted replacement simply could not be confirmed. Either way,
+            // the current call may continue using the already-loaded key, and
+            // migration will be evaluated again on a later read.
+            when (val encrypted = ScoutSecureKeyStore.encrypt(stored)) {
+                is ScoutSecureKeyStore.EncryptResult.Available -> {
+                    val committed = prefs.edit().putString(provider.prefKey, encrypted.stored).commit()
+                    if (!committed) {
+                        Log.w(TAG, "failed to persist encrypted key migration for ${provider.name}")
+                    }
+                }
+                ScoutSecureKeyStore.EncryptResult.Unavailable -> {
+                    Log.w(TAG, "encryption unavailable during key migration for ${provider.name}")
+                }
+            }
+            return stored
+        }
+
+        return when (val result = ScoutSecureKeyStore.decrypt(stored)) {
+            is ScoutSecureKeyStore.DecryptResult.Available -> result.value
+            ScoutSecureKeyStore.DecryptResult.Unavailable -> null
+        }
     }
 
     fun hasAnyKey(context: Context): Boolean {

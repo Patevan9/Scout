@@ -51,6 +51,16 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
         }
     }
+
+    packaging {
+        jniLibs {
+            // NDK 28.2 llvm-strip crashes on Windows (STATUS_ILLEGAL_INSTRUCTION) when
+            // processing x86_64 ELF binaries from ML Kit AARs. Scout is arm64-only so
+            // these files are never loaded. Skipping the strip step avoids the crash.
+            // The x86_64 .so files remain in debug APKs but are harmless on arm64 devices.
+            keepDebugSymbols += "*/x86_64/*.so"
+        }
+    }
 }
 
 dependencies {
@@ -65,12 +75,14 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
 
-    // ML Kit
-    implementation("com.google.mlkit:face-detection:16.1.6")
-    implementation("com.google.mlkit:image-labeling:17.0.7")
+    // ML Kit — versions confirmed 16KB page-aligned on arm64-v8a (Scout's only ABI).
+    // face-detection 16.1.7: arm64 fixed Dec 2025 (issue #986); 32-bit still 4KB but Scout
+    // doesn't ship armeabi-v7a. image-labeling 17.0.9: used by official ML Kit sample;
+    // pulls in fixed vision-common that resolves libimage_processing_util_jni.so alignment.
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.mlkit:image-labeling:17.0.9")
 
-    // TensorFlow Lite (on-device face recognition)
-    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("com.google.ai.edge.litert:litert:2.1.5")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

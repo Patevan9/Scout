@@ -19,18 +19,24 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
 
     override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) {}
 
+    // Returns true if this call actually changed something (a brand-new fact, or an
+    // existing one whose value changed) — false if it's a duplicate re-teach of the
+    // same value. Callers use this to decide whether it's worth journaling.
     fun upsertFact(
         entity: String,
         factKey: String,
         value: String,
         confidence: Float,
         source: String
-    ) {
+    ): Boolean {
+        val existing = getFactValue(entity, factKey)
         val now = System.currentTimeMillis()
         writableDatabase.execSQL(
             "INSERT INTO entity_memory(entity, fact_key, value, confidence, source, last_confirmed, created_at, updated_at) " +
                     "VALUES(?, ?, ?, ?, ?, ?, ?, ?) " +
-                    "ON CONFLICT(entity, fact_key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;",
+                    "ON CONFLICT(entity, fact_key) DO UPDATE SET " +
+                    "value=excluded.value, confidence=excluded.confidence, source=excluded.source, " +
+                    "last_confirmed=excluded.last_confirmed, updated_at=excluded.updated_at;",
             arrayOf(
                 entity.lowercase(),
                 factKey.lowercase(),
@@ -42,6 +48,7 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
                 now
             )
         )
+        return existing == null || !existing.equals(value, ignoreCase = true)
     }
 
     fun getFactValue(entity: String, factKey: String): String? {
@@ -52,5 +59,79 @@ class TruthDb(context: Context) : SQLiteOpenHelper(context, "scout_truth.db", nu
             if (it.moveToFirst()) return it.getString(0)
         }
         return null
+    }
+
+    fun getAllFacts(entity: String): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        readableDatabase.rawQuery(
+            "SELECT fact_key, value FROM entity_memory WHERE entity=? ORDER BY updated_at ASC;",
+            arrayOf(entity.lowercase())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getString(1))
+        }
+        return out
+    }
+
+    // Every distinct entity that has ever had a fact stored -- "user_primary",
+    // "scout", and any named person/pet (e.g. "diana", "nicolas") once something's
+    // been taught about them directly. Lets callers discover and gather facts for
+    // every person/pet Scout knows about, not just a fixed pair of entity names.
+    fun getAllEntities(): List<String> {
+        val out = mutableListOf<String>()
+        readableDatabase.rawQuery(
+            "SELECT DISTINCT entity FROM entity_memory;",
+            null
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    // Aliases (nicknames) for an entity, stored as one comma-joined "aliases" fact
+    // rather than a new table -- "Nicolas" can pick up "Nick," then later "Nicky,"
+    // without a schema change, and without one row per alias.
+    fun addAlias(entity: String, alias: String) {
+        val aliasClean = alias.trim()
+        if (aliasClean.isBlank()) return
+        val existing = getAliases(entity)
+        if (existing.any { it.equals(aliasClean, ignoreCase = true) }) return
+        val updated = (existing + aliasClean).joinToString(", ")
+        upsertFact(entity, "aliases", updated, 1.0f, "spoken_teach")
+    }
+
+    fun getAliases(entity: String): List<String> {
+        val raw = getFactValue(entity, "aliases") ?: return emptyList()
+        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+
+    fun deleteFact(entity: String, factKey: String) {
+        writableDatabase.execSQL(
+            "DELETE FROM entity_memory WHERE entity=? AND fact_key=?;",
+            arrayOf(entity.lowercase(), factKey.lowercase())
+        )
+    }
+
+    fun deleteFactsWithKeyLike(entity: String, pattern: String) {
+        writableDatabase.execSQL(
+            "DELETE FROM entity_memory WHERE entity=? AND fact_key LIKE ?;",
+            arrayOf(entity.lowercase(), pattern)
+        )
+    }
+
+    fun getFactsUpdatedToday(entity: String): List<Pair<String, String>> {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = cal.timeInMillis
+        val out = mutableListOf<Pair<String, String>>()
+        readableDatabase.rawQuery(
+            "SELECT fact_key, value FROM entity_memory WHERE entity=? AND updated_at >= ? ORDER BY updated_at ASC;",
+            arrayOf(entity.lowercase(), startOfDay.toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getString(1))
+        }
+        return out
     }
 }

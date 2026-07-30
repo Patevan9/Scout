@@ -1,42 +1,84 @@
 package com.example.scoutface
 
+import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.text.InputType
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import kotlin.math.abs
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var container: FrameLayout
     private lateinit var scoutPrefs: SharedPreferences
     private lateinit var memPrefs: SharedPreferences
+    private lateinit var calendarPermissionLauncher: ActivityResultLauncher<String>
 
     private val screenStack = ArrayDeque<String>()
 
-    private val BG       = Color.parseColor("#0D1728")
-    private val BG_ROW   = Color.parseColor("#19293F")
-    private val ACCENT   = Color.parseColor("#4A8EFF")
-    private val DIM_BLUE = Color.parseColor("#1E3D6E")
-    private val TXT      = Color.WHITE
-    private val TXT_SEC  = Color.parseColor("#8AAFC8")
-    private val TXT_MUTE = Color.parseColor("#4A6280")
-    private val DIV      = Color.parseColor("#1A2D45")
+    private var tts: TextToSpeech? = null
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private var previewRunnable: Runnable? = null
+
+    private lateinit var swipeDetector: GestureDetector
+
+    // Hidden developer-tools unlock: 7 taps on "About Scout" within ABOUT_TAP_WINDOW_MS,
+    // mirroring Android's own "tap build number 7 times" convention. Persisted once
+    // unlocked so the Performance Benchmark row stays visible on later visits without
+    // re-tapping. Ordinary users are never shown this row or told it exists.
+    private var aboutTapCount = 0
+    private var aboutTapWindowStartMs = 0L
+    private val ABOUT_TAPS_TO_UNLOCK = 7
+    private val ABOUT_TAP_WINDOW_MS = 4_000L
+
+    private val BG           = Color.parseColor("#0D1728")
+    private val CARD         = Color.parseColor("#19293F")
+    private val ACCENT       = Color.parseColor("#4A8EFF")
+    private val DIM_BLUE     = Color.parseColor("#1E3D6E")
+    private val TXT          = Color.WHITE
+    private val TXT_SEC      = Color.parseColor("#8AAFC8")
+    private val TXT_MUTE     = Color.parseColor("#4A6280")
+    private val DESTRUCTIVE  = Color.parseColor("#FF4D4D")
+    private val DIV          = Color.parseColor("#1A2D45")
+
+    // Subtle icon badge colors per section
+    private val IC_IDENTITY  = Color.parseColor("#1F3A70")
+    private val IC_BRAIN     = Color.parseColor("#3A2060")
+    private val IC_WORKBENCH = Color.parseColor("#153E3E")
+    private val IC_PRIVACY   = Color.parseColor("#153E20")
+    private val IC_EXTRAS    = Color.parseColor("#3E2E10")
 
     companion object {
+        // Lets other activities (MainActivity, via voice commands like "go online" /
+        // "turn on calendar") launch straight into a specific screen instead of always
+        // landing on the main menu -- S_BRAIN and S_PRIVACY are exposed for that.
+        const val EXTRA_TARGET_SCREEN = "target_screen"
+        const val S_BRAIN     = "brain"
+        const val S_PRIVACY   = "privacy"
+
         private const val S_MAIN      = "main"
         private const val S_IDENTITY  = "identity"
-        private const val S_BRAIN     = "brain"
         private const val S_WORKBENCH = "workbench"
-        private const val S_PRIVACY   = "privacy"
         private const val S_EXTRAS    = "extras"
         private const val S_ROBOT     = "robot_name"
         private const val S_APIKEY    = "api_key"
@@ -48,7 +90,71 @@ class SettingsActivity : AppCompatActivity() {
         memPrefs   = getSharedPreferences("scout_memory", Context.MODE_PRIVATE)
         container  = FrameLayout(this).apply { setBackgroundColor(BG) }
         setContentView(container)
+        tts = TextToSpeech(this) { /* init silent — ready by the time the user touches sliders */ }
+
+        // Must be registered unconditionally here, before the activity is STARTED —
+        // AndroidX requirement for ActivityResultLauncher.
+        calendarPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            scoutPrefs.edit().putBoolean("calendar_permission_asked_before", true).apply()
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", granted).apply()
+            refreshCurrentScreen()
+        }
+
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vX: Float, vY: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: return false)
+                if (dx < -160f && vX < -400f && abs(vY) < abs(vX)) {
+                    finish()
+                    return true
+                }
+                return false
+            }
+        })
+
         push(S_MAIN)
+
+        // Voice-command deep link (e.g. "go online" / "turn on calendar") -- lands on
+        // the requested screen on top of Main, so back navigation still makes sense.
+        intent.getStringExtra(EXTRA_TARGET_SCREEN)?.let { target ->
+            if (target == S_BRAIN || target == S_PRIVACY) push(target)
+        }
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipeDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun finish() {
+        super.finish()
+        overridePendingTransition(R.anim.stay_still, R.anim.slide_out_to_left)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        previewRunnable?.let { previewHandler.removeCallbacks(it) }
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+    }
+
+    private fun speakPreview(full: Boolean) {
+        val pitch = scoutPrefs.getFloat("voice_pitch", 1.0f)
+        val speed = scoutPrefs.getFloat("voice_speed", 1.0f)
+        val name  = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
+        // Deliberately not phrased as "My name is $name" / "I'm $name" -- those exact
+        // sentence shapes are what TeachExtractor listens for to learn the *user's* own
+        // name (FactKey.NAME), so if this preview were ever picked up by the recognizer,
+        // it would misattribute Scout's own new name to the user instead.
+        val phrase = if (full) "Hi! How does this voice sound, $name?" else "Hello."
+        tts?.let {
+            it.setPitch(pitch)
+            it.setSpeechRate(speed)
+            it.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, "preview")
+        }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
@@ -57,14 +163,16 @@ class SettingsActivity : AppCompatActivity() {
             screenStack.removeLast()
             show(screenStack.last())
         } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
+            finish()
         }
     }
 
     private fun push(screen: String) { screenStack.addLast(screen); show(screen) }
     private fun pop() { if (screenStack.size > 1) { screenStack.removeLast(); show(screenStack.last()) } else finish() }
     private fun show(s: String) { container.removeAllViews(); container.addView(build(s)) }
+    // Re-renders the current screen from live prefs/permission state — used after a
+    // calendar permission result so a toggle can't show a state that isn't actually true.
+    private fun refreshCurrentScreen() { show(screenStack.last()) }
 
     private fun build(s: String): View = when (s) {
         S_MAIN      -> mainScreen()
@@ -84,18 +192,18 @@ class SettingsActivity : AppCompatActivity() {
         val root = vCol(BG).fillParent()
         root.addView(mainHeader())
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(24))
+        val body = vCol(BG).padded(dp(16), dp(8), dp(16), dp(32))
 
-        body.addView(sectionRow("👤", "1. Identity & Voice",  "Customize Scout's name and how he speaks", Color.parseColor("#1A2D4A")) { push(S_IDENTITY) })
-        body.addView(div())
-        body.addView(sectionRow("🧠", "2. Brain & Behavior",   "How Scout thinks and responds",           Color.parseColor("#221A0D")) { push(S_BRAIN) })
-        body.addView(div())
-        body.addView(sectionRow("🔧", "3. Builder's Workbench","Hardware, controls, and chassis",         Color.parseColor("#0D2326")) { push(S_WORKBENCH) })
-        body.addView(div())
-        body.addView(sectionRow("🛡️", "4. Privacy & Data",     "Manage Scout's memory and privacy",       Color.parseColor("#0D2A0D")) { push(S_PRIVACY) })
-        body.addView(div())
-        body.addView(sectionRow("⭐", "5. Extras & Support",   "Cosmetics, support, and more",            Color.parseColor("#2A2408")) { push(S_EXTRAS) })
-        body.addView(footerNote("💙  Scout is built for families.\nSafe, private, and always on your side."))
+        body.addView(sectionCard("👤", "Identity & Voice",    "Name, voice pitch, and speed",   IC_IDENTITY)  { push(S_IDENTITY) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🧠", "Brain & Behavior",    "How Scout thinks and responds",   IC_BRAIN)     { push(S_BRAIN) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🔧", "Builder's Workbench", "Hardware, controls, and chassis", IC_WORKBENCH) { push(S_WORKBENCH) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🛡️", "Privacy & Data",      "Memory and privacy controls",     IC_PRIVACY)   { push(S_PRIVACY) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("⭐", "Extras & Support",    "Cosmetics, licenses, and help",   IC_EXTRAS)    { push(S_EXTRAS) })
+        body.addView(footerNote("Scout is built for families — safe, private, and always on your side."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -103,10 +211,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun mainHeader(): View {
-        val v = vCol(BG).padded(dp(20), dp(52), dp(20), dp(16))
-        v.addView(lbl("Settings", 28f, TXT, bold = true))
-        v.addView(lbl("Customize Scout to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(14)))
-        v.addView(div())
+        val v = vCol(BG).padded(dp(20), dp(52), dp(20), dp(12))
+        v.addView(lbl("Settings", 26f, TXT, bold = true))
+        v.addView(lbl("Customize Scout to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(12)))
         return v
     }
 
@@ -114,20 +221,39 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun identityScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("👤", "1. Identity & Voice", "Customize Scout's name and how he speaks."))
+        root.addView(subHeader("Identity & Voice", "Customize Scout's name and how he speaks."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
         val name = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
-        body.addView(navRow("Robot Name", name, "This is how Scout introduces himself") { push(S_ROBOT) })
-        body.addView(div())
-        body.addView(sliderRow("🎵", "Voice Pitch",  "Adjust how high or low Scout's voice sounds", "voice_pitch",  scoutPrefs, 0.5f, 2.0f, 1.0f))
-        body.addView(div())
-        body.addView(sliderRow("⚡", "Voice Speed",  "Adjust how fast or slow Scout speaks",        "voice_speed",  scoutPrefs, 0.5f, 2.0f, 1.0f))
-        body.addView(div())
-        body.addView(navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") })
-        body.addView(footerNote("✦  More voice tone options coming in a future update!"))
 
+        body.addView(sectionLabel("IDENTITY"))
+        body.addView(cardGroup(
+            navRow("Robot Name", name, "How Scout introduces himself") { push(S_ROBOT) }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("VOICE"))
+        body.addView(cardGroup(
+            sliderRow("🎵", "Voice Pitch", "Adjust how high or low Scout's voice sounds", "voice_pitch", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            sliderRow("⚡", "Voice Speed", "Adjust how fast or slow Scout speaks", "voice_speed", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            resetVoiceRow()
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("ACCESSIBILITY"))
+        body.addView(cardGroup(
+            toggleRow("Closed Captions", "Show Scout's words as text at the bottom of the screen",
+                scoutPrefs.getBoolean("closed_captions", false)
+            ) { on -> scoutPrefs.edit().putBoolean("closed_captions", on).apply() }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(cardGroup(
+            navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") }
+        ))
+
+        body.addView(footerNote("More voice tone options coming in a future update."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -137,33 +263,33 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun brainScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🧠", "2. Brain & Behavior", "How Scout thinks and responds."))
+        root.addView(subHeader("Brain & Behavior", "How Scout thinks and responds."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(toggleRow("Offline Mode", "Only use data stored on this device",
-            !memPrefs.getBoolean("gemini_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("gemini_enabled", !on).apply() })
-        body.addView(div())
-        body.addView(navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("API Key", "", "Connect Scout to online services") { push(S_APIKEY) })
-        body.addView(div())
-        body.addView(toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
-            scoutPrefs.getBoolean("kid_safe_filter", true)
-        ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Pet Safety Protocol Awareness", "Scout mentions pet safety when relevant",
-            scoutPrefs.getBoolean("pet_safety", true)
-        ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Presence Mode", "Scout adapts when you're nearby",
-            memPrefs.getBoolean("presence_mode_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() })
-        body.addView(div())
-        body.addView(toggleRow("Allow Spontaneous Comments", "Scout may share observations",
-            memPrefs.getBoolean("spontaneous_enabled", true)
-        ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() })
+        body.addView(sectionLabel("CONNECTION"))
+        body.addView(cardGroup(
+            toggleRow("Online Features", "Use internet services when available",
+                memPrefs.getBoolean("gemini_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("gemini_enabled", on).apply() },
+            navRow("Online Services", "", "Manage API keys and providers") { push(S_APIKEY) },
+            navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("BEHAVIOR"))
+        body.addView(cardGroup(
+            toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
+                scoutPrefs.getBoolean("kid_safe_filter", true)
+            ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() },
+            toggleRow("Presence Mode", "Scout adapts when you're nearby",
+                memPrefs.getBoolean("presence_mode_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
+            toggleRow("Allow Spontaneous Comments", "Scout may share observations",
+                memPrefs.getBoolean("spontaneous_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() }
+        ))
+
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -173,19 +299,28 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun workbenchScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🔧", "3. Builder's Workbench", "Hardware, controls, and chassis."))
+        root.addView(subHeader("Builder's Workbench", "Hardware, controls, and chassis."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(toggleRow("Enable Hardware Mode", "Use motors, sensors, and chassis",
-            scoutPrefs.getBoolean("hardware_mode", false)
-        ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() })
-        body.addView(div())
-        body.addView(navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") })
-        body.addView(footerNote("✦  More work and controls coming in a future update!"))
+        body.addView(sectionLabel("HARDWARE"))
+        body.addView(cardGroup(
+            toggleRow("Enable Hardware Mode", "Use motors, sensors, and chassis",
+                scoutPrefs.getBoolean("hardware_mode", false)
+            ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() },
+            navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") },
+            navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") }
+        ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("SAFETY"))
+        body.addView(cardGroup(
+            toggleRow("Pet Awareness", "Scout uses extra caution around pets",
+                scoutPrefs.getBoolean("pet_safety", true)
+            ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() }
+        ))
+
+        body.addView(footerNote("More hardware controls coming in a future update."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -193,25 +328,94 @@ class SettingsActivity : AppCompatActivity() {
 
     // ─── PRIVACY & DATA ─────────────────────────────────────────
 
+    // Calendar Awareness toggle state machine. Handles all four permission states
+    // without ever nagging: granted (no dialog, just turn on), first-time-or-rationale-ok
+    // (explain, then let Android show the system prompt), and permanently denied (Android
+    // will no longer show its own prompt, so instead of calling launch() into a silent
+    // auto-deny, send the user to the app's system settings page — one clear path, shown
+    // only when the user just tapped the toggle, never proactively).
+    private fun onCalendarToggleChanged(wantsOn: Boolean) {
+        if (!wantsOn) {
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", false).apply()
+            return
+        }
+
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            memPrefs.edit().putBoolean("calendar_awareness_enabled", true).apply()
+            return
+        }
+
+        val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.READ_CALENDAR)
+        val askedBefore = scoutPrefs.getBoolean("calendar_permission_asked_before", false)
+
+        if (!askedBefore || shouldShowRationale) {
+            AlertDialog.Builder(this)
+                .setTitle("Calendar Access")
+                .setMessage("Scout will look up your calendar to answer questions like \"what's on my calendar today.\" He can only read events — he can never create, change, or delete anything.")
+                .setPositiveButton("Continue") { _, _ ->
+                    scoutPrefs.edit().putBoolean("calendar_permission_asked_before", true).apply()
+                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                }
+                .setNegativeButton("Not Now") { _, _ -> refreshCurrentScreen() }
+                .setOnCancelListener { refreshCurrentScreen() }
+                .show()
+        } else {
+            // Permanently denied — Android will silently auto-deny a fresh request without
+            // showing any dialog, so don't call launch() here at all.
+            AlertDialog.Builder(this)
+                .setTitle("Calendar Access Needed")
+                .setMessage("Calendar access was turned off in your phone's settings. To use Calendar Awareness, open Scout's app settings and allow Calendar access.")
+                .setPositiveButton("Open Settings") { _, _ ->
+                    startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                    })
+                }
+                .setNegativeButton("Cancel") { _, _ -> refreshCurrentScreen() }
+                .show()
+        }
+    }
+
     private fun privacyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🛡️", "4. Privacy & Data", "Manage Scout's memory and privacy."))
+        root.addView(subHeader("Privacy & Data", "Manage Scout's memory and privacy."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") })
-        body.addView(div())
-        body.addView(navRow("Import Memory", "", "Load memory from a file to restore or transfer to this device") { toast("Memory Import coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Reset Memory Layers", "", "Clear Scout's memory") { confirmReset() })
-        body.addView(div())
-        body.addView(navRow("Camera Controls", "✦ Future", "Manage access controls") { toast("Camera Controls coming in a future update!") })
-        body.addView(div())
-        body.addView(toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
-            scoutPrefs.getBoolean("voice_cam_cmds", true)
-        ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() })
-        body.addView(footerNote("🔒  Your data stays private.\nAll memory files stay on your device unless you choose to share them."))
+        body.addView(sectionLabel("MEMORY"))
+        body.addView(cardGroup(
+            navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
+            navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
+            navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
+        ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("CAMERA"))
+        body.addView(cardGroup(
+            navRow("Camera Controls", "✦ Future", "Manage access controls") { toast("Camera Controls coming in a future update!") },
+            toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
+                scoutPrefs.getBoolean("voice_cam_cmds", true)
+            ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("CALENDAR"))
+        body.addView(cardGroup(
+            toggleRow("Calendar Awareness", "Let Scout answer questions about your calendar (read-only)",
+                memPrefs.getBoolean("calendar_awareness_enabled", false) &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            ) { on -> onCalendarToggleChanged(on) }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("LEGAL"))
+        body.addView(cardGroup(
+            navRow("Privacy Policy", "", "How Scout handles your data") { showPrivacyPolicy() },
+            navRow("Terms of Use", "", "Terms for using Scout") { showTermsOfUse() }
+        ))
+
+        body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -221,19 +425,40 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun extrasScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("⭐", "5. Extras & Support", "Cosmetics, support, and more."))
+        root.addView(subHeader("Extras & Support", "Cosmetics, support, and more."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(0, dp(8), 0, dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(navRow("Cosmetics  ✦ Future", "", "Change Scout's backpack and look") { toast("Cosmetics coming in a future update!") })
-        body.addView(div())
-        body.addView(navRow("Support", "", "Get help and connect to support") { showSupport() })
-        body.addView(div())
-        body.addView(navRow("About Scout", "", "Version and info") { showAbout() })
-        body.addView(div())
-        body.addView(navRow("Licenses", "", "Open source licenses") { showLicenses() })
-        body.addView(footerNote("💙  Thank you for supporting Scout!"))
+        body.addView(sectionLabel("COSMETICS"))
+        body.addView(cardGroup(
+            navRow("Cosmetics  ✦ Future", "", "Change Scout's backpack and look") { toast("Cosmetics coming in a future update!") }
+        ))
 
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("SUPPORT"))
+        body.addView(cardGroup(
+            navRow("Support", "", "Get help and connect to support") { showSupport() },
+            navRow("About Scout", "", "Version and info") { onAboutScoutTapped() },
+            navRow("Licenses", "", "Open source licenses") { showLicenses() }
+        ))
+
+        body.addView(cardSpacer())
+        body.addView(sectionLabel("DIAGNOSTICS"))
+        val diagRows = mutableListOf(
+            navRow("View Diagnostic Report",  "", "Review the technical information in Scout's diagnostic report.") { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, false)) },
+            navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it")                  { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true)) },
+            navRow("Clear Diagnostic History", "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
+        )
+        // Hidden until unlocked via 7 taps on "About Scout" -- see onAboutScoutTapped().
+        // Ordinary users never see this row.
+        if (scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
+            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run TinyLlama thread-count benchmarks") {
+                startActivity(Intent(this, LlamaBenchmarkActivity::class.java))
+            })
+        }
+        body.addView(cardGroup(*diagRows.toTypedArray()))
+
+        body.addView(footerNote("Thank you for supporting Scout!"))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -243,11 +468,21 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun robotNameScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("👤", "Robot Name", "This is how Scout introduces himself."))
+        root.addView(subHeader("Robot Name", "This is how Scout introduces himself."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(dp(20), dp(24), dp(20), dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(lbl("Robot Name", 13f, TXT_SEC).padded(0, 0, 0, dp(8)))
+        body.addView(sectionLabel("NAME"))
+
+        val cardWrap = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 14)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
 
         val cur = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
         val edit = EditText(this).apply {
@@ -256,25 +491,35 @@ class SettingsActivity : AppCompatActivity() {
             setTextColor(TXT)
             setHintTextColor(TXT_MUTE)
             hint = "Scout"
-            setBackgroundColor(BG_ROW)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = roundRect(BG, 10)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             setSelection(cur.length)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
-        body.addView(edit)
-        body.addView(lbl("Choose the name Scout will use when speaking to you and others.", 13f, TXT_SEC).padded(0, dp(10), 0, dp(20)))
+        cardWrap.addView(lbl("Robot Name", 12f, TXT_SEC).padded(0, 0, 0, dp(8)))
+        cardWrap.addView(edit)
+        cardWrap.addView(lbl("Choose the name Scout will use when speaking.", 12f, TXT_MUTE).padded(0, dp(8), 0, 0))
+        body.addView(cardWrap)
+
+        body.addView(spacer(dp(16)))
         body.addView(actionBtn("Save Name") {
             val n = edit.text.toString().trim()
             if (n.isNotEmpty()) {
                 scoutPrefs.edit().putString("robot_name", n).apply()
+                // Also update TruthDb so the wake word and identity responses use the new name
+                try {
+                    val db = TruthDb(this)
+                    db.upsertFact("scout", "name", n, 1.0f, "user_setting")
+                    db.close()
+                } catch (_: Exception) { }
                 toast("Name saved as \"$n\"")
                 pop()
             } else {
                 toast("Name can't be empty")
             }
         })
-        body.addView(tipCard("💡  You can change this anytime.\nScout will remember."))
+        body.addView(tipCard("Your change takes effect immediately. Scout will use this name from now on."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -285,32 +530,121 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun apiKeyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("🔑", "API Key", "Connect Scout to online services."))
+        root.addView(subHeader("Online Services", "Manage API keys and providers."))
         val scroll = ScrollView(this).wrapWeight()
-        val body = vCol(BG).padded(dp(20), dp(24), dp(20), dp(32))
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
         val key = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI)
         val hasKey = !key.isNullOrBlank()
 
-        body.addView(lbl("Google Gemini API Key", 14f, TXT_SEC).padded(0, 0, 0, dp(8)))
-        body.addView(lbl(
-            if (hasKey) "✓  API key is saved and active" else "No key saved yet",
-            14f,
-            if (hasKey) Color.parseColor("#4CAF50") else TXT_MUTE
-        ).padded(0, 0, 0, dp(20)))
+        body.addView(sectionLabel("GEMINI"))
+        body.addView(cardGroup(
+            statusRow(
+                "Google Gemini API Key",
+                if (hasKey) "✓  Key saved and active" else "No key saved yet",
+                if (hasKey) Color.parseColor("#4CAF50") else TXT_MUTE
+            )
+        ))
+
+        body.addView(spacer(dp(16)))
         body.addView(actionBtn(if (hasKey) "Update API Key" else "Set Up API Key") {
             startActivity(Intent(this, ApiKeySetupActivity::class.java))
         })
-        body.addView(tipCard("🔒  Your key is stored securely on this device only.\nScout never sends your key anywhere else."))
+        body.addView(tipCard("Your key is stored securely on this device only. Scout never sends your key anywhere else."))
 
         scroll.addView(body)
         root.addView(scroll)
         return root
     }
 
+    // ─── CARD LAYOUT BUILDERS ───────────────────────────────────
+
+    private fun sectionCard(icon: String, title: String, sub: String, iconBg: Int, onClick: () -> Unit): View {
+        val card = hRow(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 16)
+            clipToOutline = true
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(16), dp(14), dp(16))
+            isClickable = true; isFocusable = true
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        val iconBadge = FrameLayout(this).apply {
+            background = roundRect(iconBg, 10)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) }
+        }
+        iconBadge.addView(TextView(this).apply {
+            text = icon; textSize = 20f; gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+        })
+        card.addView(iconBadge)
+        val col = vCol(Color.TRANSPARENT).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        col.addView(lbl(title, 15f, TXT, bold = true))
+        col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
+        card.addView(col)
+        card.addView(lbl("›", 22f, TXT_MUTE).padded(dp(8), 0, 0, 0))
+        return card
+    }
+
+    private fun cardGroup(vararg rows: View): LinearLayout {
+        val card = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(CARD, 14)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        rows.forEachIndexed { i, row ->
+            card.addView(row)
+            if (i < rows.size - 1) card.addView(cardDivider())
+        }
+        return card
+    }
+
+    private fun cardDivider() = View(this).apply {
+        setBackgroundColor(DIV)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
+            marginStart = dp(20)
+        }
+    }
+
+    private fun sectionLabel(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 11f
+        setTextColor(TXT_MUTE)
+        typeface = Typeface.DEFAULT_BOLD
+        letterSpacing = 0.12f
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(8); topMargin = dp(4) }
+        setPadding(dp(4), 0, 0, 0)
+    }
+
+    private fun cardSpacer() = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16))
+    }
+
+    private fun spacer(height: Int) = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height)
+    }
+
+    private fun roundRect(color: Int, radiusDp: Int): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+    }
+
     // ─── SHARED HEADER ──────────────────────────────────────────
 
-    private fun subHeader(icon: String, title: String, sub: String): View {
+    private fun subHeader(title: String, sub: String): View {
         val v = vCol(BG).padded(0, dp(48), 0, 0)
         val backRow = hRow(BG).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -319,43 +653,16 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener { pop() }
         }
         backRow.addView(lbl("←", 22f, ACCENT).padded(dp(8), dp(8), dp(16), dp(8)))
-        backRow.addView(lbl("$icon  $title", 16f, TXT, bold = true))
+        backRow.addView(lbl(title, 16f, TXT, bold = true))
         v.addView(backRow)
-        if (sub.isNotEmpty()) v.addView(lbl(sub, 13f, TXT_SEC).padded(dp(20), dp(4), dp(20), dp(14)))
-        v.addView(div())
+        if (sub.isNotEmpty()) v.addView(lbl(sub, 13f, TXT_SEC).padded(dp(20), dp(4), dp(20), dp(12)))
         return v
     }
 
     // ─── ROW BUILDERS ───────────────────────────────────────────
 
-    private fun sectionRow(icon: String, title: String, sub: String, bg: Int, onClick: () -> Unit): View {
-        val row = hRow(bg).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(18), dp(16), dp(18))
-            isClickable = true; isFocusable = true
-            setOnClickListener { onClick() }
-        }
-        val iconBox = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#0F1F35"))
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(16) }
-        }
-        iconBox.addView(TextView(this).apply {
-            text = icon; textSize = 20f; gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        })
-        row.addView(iconBox)
-        val col = vCol(Color.TRANSPARENT).apply {
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        col.addView(lbl(title, 15f, TXT, bold = true))
-        col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
-        row.addView(col)
-        row.addView(lbl("›", 22f, TXT_MUTE).padded(dp(8), 0, 0, 0))
-        return row
-    }
-
-    private fun navRow(title: String, value: String, sub: String, onClick: () -> Unit): View {
-        val row = hRow(BG_ROW).apply {
+    private fun navRow(title: String, value: String, sub: String, titleColor: Int = TXT, onClick: () -> Unit): View {
+        val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(16), dp(16), dp(16))
             isClickable = true; isFocusable = true
@@ -364,7 +671,7 @@ class SettingsActivity : AppCompatActivity() {
         val col = vCol(Color.TRANSPARENT).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        col.addView(lbl(title, 15f, TXT))
+        col.addView(lbl(title, 15f, titleColor))
         if (sub.isNotEmpty()) col.addView(lbl(sub, 12f, TXT_SEC).padded(0, dp(2), 0, 0))
         row.addView(col)
         if (value.isNotEmpty()) row.addView(lbl(value, 13f, ACCENT).padded(dp(8), 0, dp(4), 0))
@@ -373,7 +680,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun toggleRow(title: String, sub: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): View {
-        val row = hRow(BG_ROW).apply {
+        val row = hRow(Color.TRANSPARENT).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), dp(14), dp(16), dp(14))
         }
@@ -395,8 +702,38 @@ class SettingsActivity : AppCompatActivity() {
         return row
     }
 
-    private fun sliderRow(icon: String, title: String, sub: String, key: String, prefs: SharedPreferences, min: Float, max: Float, def: Float): View {
-        val col = vCol(BG_ROW).padded(dp(20), dp(14), dp(20), dp(14))
+    private fun resetVoiceRow(): View {
+        val row = hRow(Color.TRANSPARENT).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+        }
+        val col = vCol(Color.TRANSPARENT).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        col.addView(lbl("Reset Voice to Default", 15f, TXT))
+        col.addView(lbl("Pitch 1.00  ·  Speed 1.00", 12f, TXT_SEC).padded(0, dp(2), 0, 0))
+        row.addView(col)
+        row.addView(Button(this).apply {
+            text = "Reset"
+            textSize = 13f; isAllCaps = false
+            setTextColor(Color.WHITE)
+            background = roundRect(DIM_BLUE, 8)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener {
+                scoutPrefs.edit().putFloat("voice_pitch", 1.0f).putFloat("voice_speed", 1.0f).apply()
+                speakPreview(true)
+                show(S_IDENTITY)
+            }
+        })
+        return row
+    }
+
+    private fun sliderRow(icon: String, title: String, sub: String, key: String, prefs: SharedPreferences, min: Float, max: Float, def: Float, preview: Boolean = false): View {
+        val col = vCol(Color.TRANSPARENT).padded(dp(20), dp(14), dp(20), dp(14))
         val header = hRow(Color.TRANSPARENT).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(lbl("$icon  $title", 15f, TXT).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -418,38 +755,55 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
                     val v = (Math.round((rangeMin + p.toFloat() / steps * (rangeMax - rangeMin)) * 100f)) / 100f
                     valLabel.text = String.format("%.2f", v)
-                    if (fromUser) prefs.edit().putFloat(key, v).apply()
+                    if (fromUser) {
+                        prefs.edit().putFloat(key, v).apply()
+                        if (preview) {
+                            previewRunnable?.let { previewHandler.removeCallbacks(it) }
+                            previewRunnable = Runnable { speakPreview(false) }
+                            previewHandler.postDelayed(previewRunnable!!, 350L)
+                        }
+                    }
                 }
                 override fun onStartTrackingTouch(sb: SeekBar) {}
-                override fun onStopTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {
+                    if (preview) {
+                        previewRunnable?.let { previewHandler.removeCallbacks(it) }
+                        previewRunnable = null
+                        speakPreview(true)
+                    }
+                }
             })
         })
         return col
     }
 
-    // ─── SMALL HELPERS ──────────────────────────────────────────
-
-    private fun div() = View(this).apply {
-        setBackgroundColor(DIV)
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
+    private fun statusRow(title: String, status: String, statusColor: Int): View {
+        val row = vCol(Color.TRANSPARENT).apply {
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+        }
+        row.addView(lbl(title, 15f, TXT))
+        row.addView(lbl(status, 13f, statusColor).padded(0, dp(4), 0, 0))
+        return row
     }
 
+    // ─── SMALL HELPERS ──────────────────────────────────────────
+
     private fun footerNote(text: String): LinearLayout {
-        val v = vCol(Color.TRANSPARENT).padded(dp(20), dp(20), dp(20), dp(8))
-        v.addView(div())
-        v.addView(lbl(text, 12f, ACCENT).apply {
-            (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(12)
-            setLineSpacing(0f, 1.4f)
-        })
+        val v = vCol(Color.TRANSPARENT).padded(dp(4), dp(16), dp(4), dp(8))
+        v.addView(lbl(text, 12f, TXT_MUTE).apply { setLineSpacing(0f, 1.4f) })
         return v
     }
 
     private fun tipCard(text: String): View {
-        val v = vCol(DIM_BLUE).padded(dp(16), dp(14), dp(16), dp(14))
-        v.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(20) }
+        val v = vCol(Color.TRANSPARENT).apply {
+            background = roundRect(DIM_BLUE, 12)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(16) }
+        }
+        v.setPadding(dp(16), dp(14), dp(16), dp(14))
         v.addView(lbl(text, 13f, TXT_SEC).apply { setLineSpacing(0f, 1.4f) })
         return v
     }
@@ -458,12 +812,12 @@ class SettingsActivity : AppCompatActivity() {
         this.text = text
         textSize = 15f; isAllCaps = false
         setTextColor(Color.WHITE)
-        setBackgroundColor(ACCENT)
+        background = roundRect(ACCENT, 10)
         setPadding(dp(16), dp(12), dp(16), dp(12))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(12) }
+        ).apply { bottomMargin = dp(8) }
         setOnClickListener { onClick() }
     }
 
@@ -500,9 +854,9 @@ class SettingsActivity : AppCompatActivity() {
     // ─── DIALOGS ────────────────────────────────────────────────
 
     private fun confirmReset() {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Reset Memory Layers")
-            .setMessage("This will clear Scout's learned face and memory data. Scout's built-in knowledge stays intact.\n\nContinue?")
+            .setMessage("This will permanently erase Scout's learned memories and learned face data. Scout's built-in knowledge will not be affected.\n\nContinue?")
             .setPositiveButton("Reset") { _, _ ->
                 try {
                     val db = PeopleDb(this)
@@ -515,6 +869,55 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(DESTRUCTIVE)
+    }
+
+    private fun confirmDeleteDiagLogs() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear Diagnostic History")
+            .setMessage(
+                "This will immediately remove:\n" +
+                "  · All diagnostic events\n" +
+                "  · The crash log\n" +
+                "  · Any generated diagnostic report\n\n" +
+                "Diagnostic information is normally removed automatically after 7 days.\n\n" +
+                "This will not affect Scout's memories, personal facts, habits, " +
+                "settings, conversations, model files, or any other data.\n\n" +
+                "Continue?"
+            )
+            .setPositiveButton("Clear") { _, _ ->
+                try {
+                    DiagnosticDb(this).use { db -> db.deleteAll() }
+                    toast("Diagnostic history cleared.")
+                } catch (_: Exception) {
+                    toast("Could not clear diagnostic history.")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // Counts rapid taps on "About Scout" to unlock the hidden developer
+    // Performance Benchmark row -- see ABOUT_TAPS_TO_UNLOCK/ABOUT_TAP_WINDOW_MS.
+    // Always shows the normal About dialog too, so nothing about the row's
+    // ordinary behavior changes for users who aren't trying to unlock it.
+    private fun onAboutScoutTapped() {
+        val now = System.currentTimeMillis()
+        if (now - aboutTapWindowStartMs > ABOUT_TAP_WINDOW_MS) {
+            aboutTapCount = 0
+            aboutTapWindowStartMs = now
+        }
+        aboutTapCount++
+        if (aboutTapCount >= ABOUT_TAPS_TO_UNLOCK) {
+            aboutTapCount = 0
+            if (!scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
+                scoutPrefs.edit().putBoolean("dev_benchmark_unlocked", true).apply()
+                toast("Developer benchmark unlocked.")
+                refreshCurrentScreen()
+                return
+            }
+        }
+        showAbout()
     }
 
     private fun showAbout() {
@@ -526,23 +929,215 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showSupport() {
-        AlertDialog.Builder(this)
-            .setTitle("Support")
-            .setMessage("Need help with Scout? Visit our support page or reach out for assistance.")
-            .setPositiveButton("Close", null)
-            .show()
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://patevan9.github.io/lippyrobotics.github.io/support.html")))
+        } catch (_: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Unable to open the Scout Support Center")
+                .setMessage("Scout couldn't open the Support Center. Please make sure Internet access is enabled in Scout, confirm that your device is connected to the Internet, and try again.")
+                .setPositiveButton("Close", null)
+                .show()
+        }
     }
 
     private fun showLicenses() {
         AlertDialog.Builder(this)
-            .setTitle("Open Source Licenses")
+            .setTitle("Open Source Software & Credits")
             .setMessage(
-                "MobileFaceNet — MIT License\n" +
-                "TensorFlow Lite — Apache 2.0\n" +
-                "ML Kit — Google APIs Terms\n" +
-                "CameraX — Apache 2.0\n" +
-                "OkHttp — Apache 2.0\n" +
-                "Room — Apache 2.0"
+                "OFFLINE AI\n\n" +
+
+                "TinyLlama 1.1B Chat v1.0\n" +
+                "Apache 2.0 · Copyright © Zhang Peiyuan et al., Singapore University of Technology and Design\n" +
+                "github.com/jzhang38/TinyLlama\n\n" +
+
+                "llama.cpp\n" +
+                "MIT License · Copyright © Georgi Gerganov and contributors\n" +
+                "github.com/ggerganov/llama.cpp\n\n" +
+
+                "──────────────────────────\n" +
+                "FACE RECOGNITION\n\n" +
+
+                "MobileFaceNet\n" +
+                "MIT License · Copyright © 2019 syaringan357\n" +
+                "Lightweight on-device face recognition model\n" +
+                "github.com/syaringan357/Android-MobileFaceNet-MTCNN-FaceAntiSpoofing\n\n" +
+
+                "ArcFace (InsightFace)\n" +
+                "License: Under review — see insightface.ai\n" +
+                "Face recognition training framework\n" +
+                "github.com/deepinsight/insightface\n\n" +
+
+                "TensorFlow Lite\n" +
+                "Apache 2.0 · Copyright © Google LLC\n" +
+                "tensorflow.org\n\n" +
+
+                "──────────────────────────\n" +
+                "CAMERA & VISION\n\n" +
+
+                "Google ML Kit (Face Detection, Image Labeling)\n" +
+                "Google APIs Terms of Service apply\n" +
+                "developers.google.com/ml-kit\n\n" +
+
+                "CameraX (AndroidX)\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project\n" +
+                "developer.android.com/training/camerax\n\n" +
+
+                "──────────────────────────\n" +
+                "NETWORKING & STORAGE\n\n" +
+
+                "OkHttp\n" +
+                "Apache 2.0 · Copyright © Square, Inc.\n" +
+                "square.github.io/okhttp\n\n" +
+
+                "Room (AndroidX)\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project\n" +
+                "developer.android.com/training/data-storage/room\n\n" +
+
+                "──────────────────────────\n" +
+                "UI FRAMEWORK\n\n" +
+
+                "AndroidX & Material Components\n" +
+                "Apache 2.0 · Copyright © The Android Open Source Project / Google\n" +
+                "developer.android.com/jetpack\n\n" +
+
+                "Kotlin\n" +
+                "Apache 2.0 · Copyright © JetBrains s.r.o.\n" +
+                "kotlinlang.org\n\n" +
+
+                "──────────────────────────\n" +
+                "EXTERNAL SERVICES\n\n" +
+
+                "National Weather Service API (weather.gov)\n" +
+                "Public Domain · Published by the U.S. Government\n" +
+                "U.S. locations only · No tracking\n" +
+                "weather.gov\n\n" +
+
+                "Google Gemini API (optional)\n" +
+                "Google AI Terms of Service apply\n" +
+                "Used only when you provide your own API key\n" +
+                "ai.google.dev/gemini-api/terms"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showPrivacyPolicy() {
+        AlertDialog.Builder(this)
+            .setTitle("Privacy Policy")
+            .setMessage(
+                "Lippy Robotics · Effective Date: July 8, 2026\n\n" +
+
+                "YOUR DATA STAYS ON YOUR DEVICE\n" +
+                "All of Scout's memory stays on your device. Your name, family members' names, " +
+                "favorites, face recognition data, and conversation history are stored in local " +
+                "files and databases only. Nothing is uploaded to our servers.\n\n" +
+
+                "CAMERA & FACE RECOGNITION\n" +
+                "Scout uses your device camera to recognize faces and see the room. Face " +
+                "recognition data (mathematical embeddings) is stored locally and never " +
+                "transmitted. The camera is only active while the Scout app is open.\n\n" +
+
+                "MICROPHONE\n" +
+                "Scout listens for your voice through your device microphone. Voice input is " +
+                "processed on-device unless you choose to enable Online Features (see below).\n\n" +
+
+                "OPTIONAL ONLINE FEATURES\n" +
+                "If you enable Online Features and provide a Google Gemini API key, your voice " +
+                "queries will be sent to Google's Gemini API using your own key. This is governed " +
+                "by Google's Privacy Policy and Terms of Service. Lippy Robotics never receives " +
+                "your queries — the connection goes directly from your device to Google.\n\n" +
+
+                "WEATHER\n" +
+                "If you ask Scout about the weather, your approximate device location is sent to " +
+                "the U.S. National Weather Service (api.weather.gov) to retrieve a local " +
+                "forecast. No personal data is included in this request.\n\n" +
+
+                "NO ACCOUNTS REQUIRED\n" +
+                "Scout does not require you to create an account. We do not collect your name, " +
+                "email address, or any personal information.\n\n" +
+
+                "NO ANALYTICS OR TRACKING\n" +
+                "Scout does not include analytics, crash reporting, or ad tracking. No usage " +
+                "data is collected or transmitted to Lippy Robotics.\n\n" +
+
+                "DATA EXPORT\n" +
+                "You can export Scout's memory at any time using the voice command " +
+                "\"export brain.\" The exported file stays on your device until you choose to " +
+                "share or delete it.\n\n" +
+
+                "CHILDREN\n" +
+                "Scout is not directed at children under 13. If you are under 13, please ask " +
+                "a parent or guardian before using Scout.\n\n" +
+
+                "CHANGES TO THIS POLICY\n" +
+                "We may update this Privacy Policy from time to time. Changes will be reflected " +
+                "in the app with an updated effective date.\n\n" +
+
+                "CONTACT\n" +
+                "Questions? Email us at lippyroboticslabs@gmail.com"
+            )
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun showTermsOfUse() {
+        AlertDialog.Builder(this)
+            .setTitle("Terms of Use")
+            .setMessage(
+                "Lippy Robotics · Effective Date: July 8, 2026\n\n" +
+
+                "AGREEMENT\n" +
+                "By downloading or using Scout, you agree to these Terms of Use. If you do not " +
+                "agree, please do not use the app.\n\n" +
+
+                "ABOUT THIS APP\n" +
+                "Scout is a personal AI companion app for Android, created and maintained by " +
+                "Lippy Robotics. Scout is provided \"as is,\" without warranties of any kind. " +
+                "While we work to keep Scout reliable, we cannot guarantee uninterrupted " +
+                "operation or compatibility with every Android device.\n\n" +
+
+                "SCOUT IS A COMPANION, NOT AN ADVISOR\n" +
+                "Scout is not a substitute for professional medical, legal, financial, mental " +
+                "health, safety, or emergency advice. Nothing Scout says should be treated as " +
+                "such. If you or someone you know is in an emergency, contact the appropriate " +
+                "services immediately.\n\n" +
+
+                "HOW YOU USE SCOUT\n" +
+                "You are responsible for how you use Scout and for any content you choose to " +
+                "teach or share with him. Scout is designed to be family-friendly, but no " +
+                "software is perfect and unexpected responses may occasionally occur.\n\n" +
+
+                "THIRD-PARTY CONNECTIONS\n" +
+                "If you choose to connect Scout to third-party services such as Google Gemini " +
+                "using your own API key, those services are governed by their own terms and " +
+                "privacy policies. Lippy Robotics has no control over those services.\n\n" +
+
+                "HOW SCOUT IS SOLD\n" +
+                "Scout is sold as a one-time purchase. After purchase, you receive a license to " +
+                "use your copy of Scout. We do not offer refunds except where required by law " +
+                "or Google Play policy.\n\n" +
+
+                "UPDATES\n" +
+                "Scout may receive updates through Google Play. We may add, change, or remove " +
+                "features over time. We intend to continue maintaining Scout's core companion " +
+                "features and improving the app over time.\n\n" +
+
+                "CHANGES TO TERMS\n" +
+                "We may update these Terms of Use from time to time. When we do, we will update " +
+                "the Effective Date above. Continued use of Scout after changes are posted means " +
+                "you accept the updated terms.\n\n" +
+
+                "LIMITATION OF LIABILITY\n" +
+                "To the fullest extent permitted by law, Lippy Robotics is not responsible for " +
+                "any indirect, incidental, or consequential damages arising from the use or " +
+                "inability to use Scout.\n\n" +
+
+                "YOUR DATA\n" +
+                "How Scout handles your data is described in the Privacy Policy, available in " +
+                "this app under Settings > Privacy & Data.\n\n" +
+
+                "CONTACT\n" +
+                "Questions? Email us at lippyroboticslabs@gmail.com"
             )
             .setPositiveButton("Close", null)
             .show()

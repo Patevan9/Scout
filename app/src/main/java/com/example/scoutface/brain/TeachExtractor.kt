@@ -25,11 +25,22 @@ object TeachExtractor {
         "cool", "awesome", "amazing", "weird", "crazy", "funny",
         "interesting", "nice", "terrible", "annoying", "perfect", "stupid",
         "dumb", "silly", "important", "true", "false", "real", "fake",
-        "different", "new", "old", "big", "small", "broken", "working"
+        "different", "new", "old", "big", "small", "broken", "working",
+        "now", "today", "then", "soon", "later", "again", "still", "next",
+        "last", "already", "yet", "always", "never", "just", "only",
+        "anymore", "sometimes", "often", "lately", "recently", "currently",
+        "here", "there", "away", "out", "up", "down",
+        // Intensifiers/adverbs — "I am very tired", "that is really nice" must
+        // not register "very"/"really" as a name (root cause of a real bug:
+        // a false "Very" profile accumulated a full set of face embeddings).
+        "very", "really", "quite", "extremely", "totally", "pretty",
+        "so", "too", "kinda", "sorta"
     )
 
     fun extract(input: String): Pair<String, String>? {
         val s = input.lowercase().trim()
+            .replace("that's", "that is")
+            .replace("it's", "it is")
 
         // -------------------------
         // NAME
@@ -61,6 +72,24 @@ object TeachExtractor {
             if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
         }
 
+        // "his name is X" / "her name is X" — pointing at someone
+        Regex("""\bhis name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bher name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.NAME to cleanName(it.groupValues[1])
+        }
+
+        // "that is X" / "that person is X" — broad pointing phrases (checked before son/wife specifics)
+        Regex("""\bthat is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+        Regex("""\bthat person is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        }
+
         // -------------------------
         // WIFE
         // -------------------------
@@ -71,6 +100,12 @@ object TeachExtractor {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my wife ([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
 
@@ -84,6 +119,12 @@ object TeachExtractor {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
         Regex("""\bthis is my son ([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat is my son[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthat person is my son[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
         }
 
@@ -104,6 +145,32 @@ object TeachExtractor {
         }
         Regex("""\bthis is my dog ([a-z]+)\b""").find(s)?.let {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        // "the dog is Nicolas" / "the dog's name is Nicolas"
+        Regex("""\bthe dog'?s name is ([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        Regex("""\bthe dog is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.DOG_NAME to cleanName(word)
+        }
+        // "that is my dog Nicolas" (also catches "that's my dog Nicolas" via contraction expansion above)
+        Regex("""\bthat is my dog[,\s]+([a-z]+)\b""").find(s)?.let {
+            return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+
+        // -------------------------
+        // BIRTHDAY / ANNIVERSARY
+        // Dates need to be stored in full, including the day number — the generic
+        // catch-all below only matches [a-z ], which silently truncates any date
+        // ("January 27th" → "January"). These also skip the "favorite_" auto-prefix
+        // since a birthday isn't a preference.
+        // -------------------------
+        Regex("""\bmy birthday is ([a-z0-9,'\-/\s]+)""").find(s)?.let {
+            return FactKey.custom("birthday") to cleanDateValue(it.groupValues[1])
+        }
+        Regex("""\b(?:our|my) anniversary is ([a-z0-9,'\-/\s]+)""").find(s)?.let {
+            return FactKey.custom("anniversary") to cleanDateValue(it.groupValues[1])
         }
 
         // -------------------------
@@ -128,10 +195,12 @@ object TeachExtractor {
             val value = cleanName(it.groupValues[2])
             return label to value
         }
-Regex("""\bmy ([a-z ]+?) is ([a-z ]+)""").find(s)?.let {
-            val label = FactKey.custom("favorite_" + it.groupValues[1].trim())
-            val value = it.groupValues[2].trim()
-                .replaceFirstChar { c -> c.uppercase() }
+Regex("""\bmy ([a-z ]+?) is ([a-z0-9,'\-/ ]+)""").find(s)?.let {
+            val rawLabel = it.groupValues[1].trim()
+            // Don't double-prefix: "my favorite color is X" → "favorite_color", not "favorite_favorite_color"
+            val label = if (rawLabel.startsWith("favorite")) FactKey.custom(rawLabel)
+                        else FactKey.custom("favorite_$rawLabel")
+            val value = cleanDateValue(it.groupValues[2])
             return label to value
         }
         Regex("""\bmy ([a-z ]+?) is ([a-z ]+)\b""").find(s)?.let {
@@ -146,5 +215,12 @@ Regex("""\bmy ([a-z ]+?) is ([a-z ]+)""").find(s)?.let {
 
     private fun cleanName(raw: String): String {
         return raw.trim().replaceFirstChar { it.uppercase() }
+    }
+
+    // Capitalizes each word — "january 27th" → "January 27th", "new york" → "New York".
+    private fun cleanDateValue(raw: String): String {
+        return raw.trim().split(" ").joinToString(" ") { w ->
+            w.replaceFirstChar { c -> c.uppercase() }
+        }
     }
 }

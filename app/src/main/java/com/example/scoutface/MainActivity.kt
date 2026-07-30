@@ -60,6 +60,8 @@ import androidx.core.view.WindowCompat
 
 import androidx.core.view.WindowInsetsControllerCompat
 
+import com.example.scoutface.brain.CalendarDateParser
+
 import com.example.scoutface.brain.FactKey
 
 import com.example.scoutface.brain.ScoutBootStatus
@@ -67,8 +69,11 @@ import com.example.scoutface.brain.ScoutBootStatus
 import com.example.scoutface.brain.ScoutConnectivityManager
 
 import com.example.scoutface.brain.ScoutIntentRouter
+import com.example.scoutface.brain.ScoutMemoryGate
 
 import com.example.scoutface.brain.TeachExtractor
+import com.example.scoutface.brain.ScoutEntityResolver
+import com.example.scoutface.brain.ScoutFactExtractor
 
 import com.example.scoutface.brain.ScoutPromptBuilder
 
@@ -94,15 +99,7 @@ import com.google.mlkit.vision.label.ImageLabeling
 
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 
-import java.io.BufferedInputStream
-
 import java.io.File
-
-import java.io.FileOutputStream
-
-import java.net.HttpURLConnection
-
-import java.net.URL
 
 import java.text.SimpleDateFormat
 
@@ -126,8 +123,6 @@ import android.graphics.Bitmap
 
 import android.graphics.Matrix
 
-import java.util.zip.ZipInputStream
-
 import kotlin.math.abs
 
 enum class IntentType {
@@ -135,10 +130,6 @@ enum class IntentType {
     TIME, DATE, CONNECTIVITY,
 
     GO_ONLINE, GO_OFFLINE,
-
-    DOWNLOAD_ALL, DOWNLOAD_STATUS, DOWNLOAD_DICT, DOWNLOAD_IDIOMS, DOWNLOAD_WORDNET, DOWNLOAD_SENTIMENT, DOWNLOAD_SLANG,
-
-    RESET_DOWNLOAD_DECISIONS, REMOVE_DOWNLOADS,
 
     EXPORT_BRAIN,
 
@@ -158,15 +149,19 @@ enum class IntentType {
 
     TEACH_WIFE_NAME, TEACH_SON_NAME, TEACH_DOG_NAME, TEACH_MY_NAME,
 
+    FAMILY_NAMES,
+
+    OPEN_CALENDAR_SETTINGS,
+
     WEATHER,
+
+    CALENDAR,
 
     UNKNOWN
 
 }
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
-
-    private lateinit var datasetStore: ScoutDatasetStore
 
     // =======================
 
@@ -177,7 +172,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val apiKey: String
         get() = ScoutApiKeyHelper.getKey(this, ScoutApiKeyHelper.Provider.GEMINI) ?: ""
 
-    private val GEMINI_MODEL = "gemini-3.5-flash"
+    private val GEMINI_MODEL = "gemini-3.5-flash-lite"
 
     // =======================
 
@@ -194,38 +189,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastSentGazeY = 0f
 
     private val MIN_GAZE_DELTA = 3.0f
-
-    // =======================
-
-    // FALLBACK DATASET URLS
-
-    // =======================
-
-    private val URL_WIKDICT_ZIP = "https://download.wikdict.com/dictionaries/sqlite/en.db.zip"
-
-    private val URL_IDIOMS_JSON_FALLBACKS = listOf(
-
-        "https://raw.githubusercontent.com/yuxiaojian/most-common-american-idioms-with-synonyms/main/idioms.json",
-
-        "https://raw.githubusercontent.com/leonardlin/common-english-idioms/master/idioms.json"
-
-    )
-
-    private val URL_WORDNET_ZIP = "https://en-word.net/static/english-wordnet-2025-json.zip"
-
-    private val URL_POS_WORDS =
-
-        "https://raw.githubusercontent.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/master/data/opinion-lexicon-English/positive-words.txt"
-
-    private val URL_NEG_WORDS =
-
-        "https://raw.githubusercontent.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/master/data/opinion-lexicon-English/negative-words.txt"
-
-    private val URL_SLANG_JSON_FALLBACKS = listOf(
-
-        "https://raw.githubusercontent.com/words/slang/master/slang.json"
-
-    )
 
     // =======================
 
@@ -247,41 +210,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val PREF_GEMINI_ENABLED = "gemini_enabled"
 
+    // Off by default — matches SettingsActivity's memPrefs key of the same name.
+    private val PREF_CALENDAR_ENABLED = "calendar_awareness_enabled"
+
     private val PREF_PRESENCE_MODE_ENABLED = "presence_mode_enabled"
 
     private val PREF_SPONTANEOUS_ENABLED = "spontaneous_enabled"
 
-    private val PREF_DL_DICT_DECISION = "dl_dict_decision"
-
-    private val PREF_DL_IDIOMS_DECISION = "dl_idioms_decision"
-
-    private val PREF_DL_WORDNET_DECISION = "dl_wordnet_decision"
-
-    private val PREF_DL_SENTIMENT_DECISION = "dl_sentiment_decision"
-
-    private val PREF_DL_SLANG_DECISION = "dl_slang_decision"
-
-    private val DECISION_UNKNOWN = "unknown"
-
-    private val DECISION_ACCEPTED = "accepted"
-
-    private val DECISION_DECLINED = "declined"
-
-    private val PREF_PENDING_APPROVAL = "pending_approval"
-
-    private val PENDING_NONE = "none"
-
-    private val PENDING_DICT = "dict"
-
-    private val PENDING_WORDNET = "wordnet"
-
-    private val PENDING_IDIOMS = "idioms"
-
-    private val PENDING_SENTIMENT = "sentiment"
-
-    private val PENDING_SLANG = "slang"
-
-    private val PENDING_ALL = "all"
+    // Lives in "scout_prefs" (scoutPrefs), not "scout_memory" — a one-time lifecycle
+    // milestone like PREF_ONBOARDING_DONE, not a user-configurable setting. Means "has
+    // this install ever completed its first real startup," independent of which model
+    // is currently loaded -- a future model upgrade or repair download must never look
+    // like Scout meeting the user for the first time again.
+    private val PREF_FIRST_STARTUP_DONE = "first_startup_experienced"
 
     // =======================
 
@@ -293,6 +234,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var currentMode = Mode.PRESENCE
 
+    // Set by onInit() if TTS becomes ready before the offline brain does (the common
+    // case). Consumed once, from startSystems(), once the brain is actually ready.
+    // A boolean, not the built string itself -- bootStatus.build() must be called fresh
+    // at actual speak-time, since building it early (while the brain is still loading)
+    // and speaking that same text later produced a stale "still warming up" line even
+    // after the brain had already finished loading.
+    private var pendingBootAnnouncement = false
+
     @Volatile
 
     private var isSpeaking = false
@@ -301,28 +250,40 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var isListening = false
 
+    // True only between onBeginningOfSpeech() and the recognizer session ending --
+    // unlike isListening (true almost continuously while idle, since sessions
+    // just cycle), this reflects whether a user utterance is actually being
+    // captured right now. Used to keep presence-initiated speech from cutting
+    // someone off mid-sentence.
+    @Volatile
+
+    private var isCapturingSpeech = false
+
     @Volatile
 
     private var isThinking = false
 
-    @Volatile
-
-    private var isDownloading = false
-
-    private val downloadLock = AtomicBoolean(false)
-
     // =======================
 
+    // MIC DISCIPLINE
+
     // =======================
-
-// MIC DISCIPLINE
-
-// =======================
 
     private var lastSpeechDoneMs = 0L
     private var lastScoutResponseMs = 0L
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
+
+    // Reminder fires when speech is heard outside the conversation window while a face is visible.
+    // Throttled to once every 2 minutes so it never becomes annoying.
+    private var lastListeningReminderMs = 0L
+    private val LISTENING_REMINDER_COOLDOWN_MS = 120_000L
+
+    private var lastMeaningfulResponse: String? = null
+    private var lastMeaningfulResponseMs = 0L
+    private val REPEAT_CACHE_TTL_MS = 4L * 60L * 1_000L
+
+    private var pendingBrainSource = ""
 
     private val MIC_RESUME_COOLDOWN_MS = 650L
 
@@ -336,11 +297,80 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var wantListening = true
 
+    // Guards maybeStartListening() against restarting the mic while MainActivity isn't
+    // actually in the foreground (e.g. while SettingsActivity is on top). onPause() cancels
+    // the recognizer and the watchdog, but a scheduleListenRestart() Handler callback queued
+    // just before the pause can still fire later and call maybeStartListening() regardless --
+    // that queued callback has no other way of knowing the activity was backgrounded since.
+    private var isForeground = true
+
     private var pendingListenStart = false
 
     private var bootFinishedSpeaking = false
 
+    // True after Scout has already told the user his offline brain is loading. We only
+    // say "warming up" once per session — the user doesn't need a reminder every question.
+    private var warmingUpSaidThisSession = false
+
+    // Generation/owner token and executor both moved to ScoutLlamaController -- a
+    // process-wide singleton, not a MainActivity instance field. A per-instance
+    // executor meant a configuration-change recreation either had to permanently
+    // shut it down (leaking whatever generation was still in flight, or blocking
+    // teardown waiting for it) or leave it running forever with no way to reclaim
+    // its thread (ExecutorService.shutdown() is required for that, and skipping it
+    // was exactly the point). ScoutLlamaController.registerOwner() (called from
+    // onCreate()) and .newGeneration() (called per-question) both bump the same
+    // token; ScoutLlamaController.generateAsync() only delivers a result while
+    // that token is still current, so a stale generation from a since-destroyed
+    // instance can never touch this instance's (or a prior instance's) UI.
+
     private val BOOT_LISTEN_EXTRA_DELAY_MS = 250L
+
+    // ── A32 startup stabilization (staggered init) ──────────────────────────
+    // A controlled stabilization measure, not a final architecture -- see
+    // requestCameraStartup()/requestSpeechStartup(). On a real Galaxy A32, camera
+    // + ML Kit + SpeechRecognizer all starting in the same instant collided with a
+    // one-time, multi-second ART bytecode-verification stall for Google Play
+    // Services' ML Kit classes (11.1s and 3.5s verification events observed in a
+    // real capture), triggering system-wide low-memory pressure severe enough
+    // that Android killed Scout as a side effect of Google Play Services' own
+    // persistent process dying -- not a Scout crash. These are TEST/stabilization
+    // values; tune from the ScoutStartupTiming log once real A32 timing data
+    // comes back from a clean run.
+    private val CAMERA_STARTUP_STAGGER_MS = 3_000L
+    private val SPEECH_STARTUP_STAGGER_MS = 4_500L
+    private val STARTUP_SETTLE_MS = 6_000L
+
+    // Idempotency guards for the camera/speech startup stagger. checkPermissionsAndStart(),
+    // the permission-result callback, and resumeSystems() can all reach startup logic --
+    // *Scheduled flags reset to false the instant the delayed callback runs (whether it
+    // actually starts anything or bails out), so they only ever prevent two pending
+    // callbacks stacking, never a legitimate later restart. *EverStarted flags are one-way
+    // (false -> true, never back) and mean "the initial stagger has already happened once" --
+    // once true, further requests behave exactly like the pre-existing unstaggered code,
+    // since the stagger only exists to protect the cold-start collision, not steady-state
+    // camera/mic restarts (e.g. returning from Settings).
+    private var cameraStartupScheduled = false
+    @Volatile private var cameraEverStarted = false
+    private var speechStartupScheduled = false
+    @Volatile private var speechEverStarted = false
+
+    // True STARTUP_SETTLE_MS after the camera actually starts -- gates face embedding
+    // (see the embedExecutor.submit condition) so embedding never runs during the startup
+    // stagger window even if a face is detected in the very first analyzed frame.
+    @Volatile private var startupSettled = false
+
+    // Wall-clock startup timing diagnostics. Logged via logStartupTiming(), tag
+    // "ScoutStartupTiming" -- lets a real-device logcat capture pinpoint exactly which
+    // init step is blocking/starving the device instead of requiring manual reconstruction
+    // from unrelated system log lines, as the previous crash investigation needed.
+    private var startupTimingBaseMs = 0L
+
+    // Dedupes logListenAttempt() calls so a tight restart loop can't flood the bounded
+    // diagnostic report with hundreds of repeats of the same reason -- only actual
+    // transitions are recorded, matching the logPresenceDebug()/logIdleDebug() dedup
+    // pattern already used elsewhere in this file.
+    private var lastListenAttemptReason: DiagLog.ListenAttemptReason? = null
 
     private val TRY_MUTE_BEEP = true
 
@@ -353,6 +383,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val RECOGNIZER_WATCHDOG_MS = 12_000L
 
     private val recognizerWatchdog = Runnable { runRecognizerWatchdog() }
+
+    // Guards against TTS silently failing (no onDone/onError callback after engine
+    // is killed by Android). If isSpeaking stays true longer than this, force-clear it.
+    private var speakingStartedMs = 0L
+    private val MAX_SPEAKING_DURATION_MS = 45_000L
+
+    // Guards against TinyLlama hanging with no reply. If isThinking stays true longer
+    // than this without Scout speaking, force-clear so the mic restarts.
+    private var thinkingStartedMs = 0L
+    private val MAX_THINKING_DURATION_MS = 120_000L
 
     // Mic visual gating
 
@@ -399,9 +439,40 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastFaceEmbedding: FloatArray? = null
 
+    @Volatile
+
+    private var lastKnownFaceName: String? = null
+
+    @Volatile
+
+    private var lastSecondaryFaceName: String? = null
+
     private val EMBED_INTERVAL_MS = 2_000L
 
+    // Minimum score to add an embedding to a person's stored profile. Higher than the
+    // recognition threshold (0.65) so borderline matches don't pollute other people's profiles.
+    private val CONFIDENT_EMBED_THRESHOLD = 0.72f
+
     private val embedRunning = AtomicBoolean(false)
+
+    @Volatile
+
+    private var pendingFaceIntroName: String? = null
+
+    @Volatile
+
+    private var lastAnalysisMs = 0L
+
+    private val ANALYSIS_MIN_INTERVAL_MS = 150L
+
+    // Scene labeling ("dog," "chair," "person") changes far more slowly than face
+    // position, which drives Scout's gaze and needs the full ~7fps analysis cadence
+    // above. Throttled separately so the labeler doesn't run on every accepted frame --
+    // only face detection does. 1.5s is a reasonable starting interval, not something
+    // that needed real-device tuning the way the vision-gating thresholds did.
+    @Volatile
+    private var lastLabelMs = 0L
+    private val LABEL_MIN_INTERVAL_MS = 1_500L
 
     // Gaze hold to prevent snap-back on brief face detector drops
 
@@ -419,6 +490,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val FACE_LOST_HOLD_MS = 650L
 
+    // Vision-led direct-address gate for the "say my name first" listening
+    // reminder -- replaces a stale "any face within the last 3s" test that
+    // couldn't distinguish someone actually facing Scout from a side
+    // conversation or a person briefly crossing the room. Requires a
+    // *sustained* qualifying face, not a single frame, so a passing glance or a
+    // face mid-turn doesn't count.
+    // TEST VALUES -- deliberately conservative for the first smoke test (a false
+    // interruption is worse than a missed reminder). Tune from the diagnostic
+    // values logged below once Diana's real-world testing gives us evidence.
+    /** headEulerAngleY (yaw) tolerance -- how far the head can turn from facing
+     *  the camera and still count as "oriented toward Scout." */
+    private val LISTENING_REMINDER_MAX_YAW_DEGREES = 18f
+
+    /** Face box height as a fraction of frame height -- filters out someone
+     *  distant/crossing the room rather than actually addressing Scout. */
+    private val LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION = 0.18f
+
+    /** How far off-center (normalized, same -1..1 scale as the existing gaze
+     *  dx/dy) the face box can be and still qualify. */
+    private val LISTENING_REMINDER_MAX_OFFSET = 0.40f
+
+    /** How long the qualifying state above must hold continuously before it
+     *  counts as sustained visual attention, not a passing glance. */
+    private val DIRECT_ADDRESS_SUSTAIN_MS = 1_500L
+
+    /** TEST VALUE. How recently the vision pipeline must have actually processed
+     *  a frame for the streak to be trusted at reminder-decision time -- if
+     *  frame processing has stalled, the last-known streak state could be stale
+     *  rather than continuously reconfirmed. */
+    private val VISION_FRESHNESS_MS = 1_000L
+
+    @Volatile
+    private var directAddressStreakStartMs = 0L // 0 = not currently facing Scout
+
+    // Most recently measured values, cached for reminder-decision diagnostics --
+    // the speech-recognition callback that decides whether to speak the reminder
+    // runs separately from the vision callback that measures these.
+    @Volatile private var lastYawDegrees = 0f
+    @Volatile private var lastFaceHeightFraction = 0f
+    @Volatile private var lastCenterOffset = 0f
+
     @Volatile
 
     private var faceAppearanceMs = 0L
@@ -426,6 +538,66 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @Volatile
 
     private var greetedThisSession = false
+
+    // Separate, gap-tolerant presence measurement for the idle-silence
+    // acknowledgment only -- does not feed the arrival greeting above, which
+    // keeps its existing strict faceAppearanceMs behavior unchanged. A brief
+    // missed frame or a person glancing away shouldn't restart a 75-minute
+    // timer; a genuine departure should.
+    /** How long a face can go undetected before the presence streak below is
+     *  considered broken (not just a missed frame). Named and tunable. */
+    private val PRESENCE_GAP_GRACE_MS = 2L * 60L * 1_000L // 2 min
+
+    @Volatile
+    private var presencePresentSinceMs = 0L // when the current tolerant streak began
+
+    @Volatile
+    private var presenceLastSeenMs = 0L // last time a face was actually seen
+
+    // Set right before speaking a presence-initiated remark; consumed once by the
+    // TTS onDone callback to open the presence reply window below.
+    @Volatile
+    private var lastUtteranceWasPresenceRemark = false
+
+    /** How long after a presence-initiated remark someone can reply naturally
+     *  without saying Scout's name first. Starts when TTS finishes speaking, not
+     *  when it begins. */
+    private val PRESENCE_REPLY_WINDOW_MS = 40_000L
+
+    @Volatile
+    private var presenceReplyWindowUntilMs = 0L
+
+    // =======================
+    // PRESENCE LAYER -- PROACTIVE RETURN GREETING (Layer 1)
+    //
+    // Genuine-absence + stabilized-return tracking, driven by face presence
+    // (reusing presenceLastSeenMs above, already updated every face-visible
+    // frame -- no separate "last seen" timestamp needed). Deliberately separate
+    // from both faceAppearanceMs (the once-per-launch first-contact greeting,
+    // left untouched) and presencePresentSinceMs (the idle-silence streak,
+    // which measures the opposite thing -- how long someone's been *present*).
+    // =======================
+
+    /** How long a face must be undetected before a gap is even acknowledged as a
+     *  candidate absence -- absorbs single missed frames or a brief head-turn. */
+    private val CAMERA_GAP_TOLERANCE_MS = 15_000L // 15 sec
+
+    /** How much longer, past the tolerance above, an absence must continue before
+     *  it's confirmed genuine -- worth a "welcome back" on return.
+     *
+     *  TEMPORARY SMOKE-TEST VALUE -- restore to 10L * 60L * 1_000L (~10 min)
+     *  once A32 testing confirms the behavior. */
+    private val MIN_GENUINE_ABSENCE_MS = 60_000L // ~1 min (TEMP, was ~10 min)
+
+    /** How long a face must be continuously visible again, after a genuine
+     *  absence, before Scout actually speaks. Its own named constant even though
+     *  it starts at the same value as GREET_STABILIZE_MS, so the two can be
+     *  tuned independently later. */
+    private val RETURN_STABILIZATION_MS = 3_000L // 3 sec
+
+    private var candidateAbsenceLogged = false  // avoids re-logging "absence started" every frame
+    private var genuineAbsenceMarked = false    // true once the current absence crossed MIN_GENUINE_ABSENCE_MS
+    private var returnStabilizingSinceMs = 0L   // 0 = not currently in a post-absence stabilization window
 
     @Volatile
 
@@ -453,9 +625,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
 
-    private lateinit var recognizerIntent: Intent
+    // See setupSpeech()/buildRecognizerIntent() -- separate silence-timing variants
+    // for idle/wake-word listening vs. an active conversation follow-up.
+    private lateinit var recognizerIntentWake: Intent
+    private lateinit var recognizerIntentConvo: Intent
 
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var modelDownloadLauncher: ActivityResultLauncher<Intent>
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -469,6 +645,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var swipeDetector: GestureDetector
 
+    private lateinit var captionsText: android.widget.TextView
+
+    private var captionsEnabled = false
+
+    private val captionHideRunnable = Runnable {
+        captionsText.visibility = View.GONE
+    }
+
     private val handler = Handler(Looper.getMainLooper())
 
     // =======================
@@ -478,6 +662,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // =======================
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var scoutPrefs: SharedPreferences   // "scout_prefs" — voice, name, etc.
 
     private lateinit var truthDb: TruthDb
 
@@ -486,6 +671,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var peopleDb: PeopleDb
 
     private lateinit var journalDb: JournalDb
+
+    private lateinit var calendarReader: CalendarReader
+
+    private lateinit var diagDb: DiagnosticDb
+    private lateinit var diagLog: DiagLog
 
     private lateinit var habitLayer: HabitLayer
 
@@ -520,6 +710,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
+        logStartupTiming("onCreate_start")
+
+        // Show onboarding on first install; skip on every subsequent launch.
+        val scoutPrefsEarly = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+        if (!scoutPrefsEarly.getBoolean(OnboardingActivity.PREF_ONBOARDING_DONE, false)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
+
+        // Claims this instance as the current valid owner of TinyLlama generation --
+        // see ScoutLlamaController. Any result from a previous (now-destroyed)
+        // instance's still-in-flight generation is discarded the moment it
+        // completes, since it was captured under an older token.
+        ScoutLlamaController.registerOwner(applicationContext)
 
         setContentView(R.layout.activity_main)
 
@@ -530,6 +735,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupBrainServices()
 
         setupViews()
+        logStartupTiming("ui_ready")
 
         setupVision()
 
@@ -537,8 +743,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         setupTts()
 
-        startSystems()
+        // Scout never appears -- no face, no permissions, no listening, no greeting --
+        // until the offline brain is confirmed ready. The loading screen always shows
+        // first; startSystems() only ever runs once it returns (see modelDownloadLauncher).
+        if (LlamaEngine.isReady) {
+            logStartupTiming("brain_already_ready")
+            startSystems()
+        } else {
+            logStartupTiming("brain_not_ready_launching_loading_gate")
+            launchLoadingGate()
+        }
 
+    }
+
+    private fun launchLoadingGate() {
+        try {
+            modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+        } catch (e: Throwable) {
+            android.util.Log.e("ScoutBrain", "modelDownloadLauncher.launch() threw", e)
+            showLoadingGateFailure()
+        }
+    }
+
+    // The hard offline-brain gate exists so camera, mic, greeting, and conversation
+    // systems never come alive before LlamaEngine.isReady is genuinely true (see
+    // resumeSystems()/checkPermissionsAndStart()). startSystems() must never run
+    // except either directly when the brain is already ready (onCreate()) or from
+    // modelDownloadLauncher's own RESULT_OK callback, which never fires until the
+    // brain genuinely is ready. Calling startSystems() here as a fallback would have
+    // broken that guarantee the moment launch() itself failed to even show the
+    // loading screen. Retrying is honest instead -- Scout stays visibly inert rather
+    // than silently starting without its offline brain ready.
+    private fun showLoadingGateFailure() {
+        if (isFinishing || isDestroyed) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Scout couldn't start setup")
+            .setMessage("Something went wrong starting Scout's setup screen. Please try again.")
+            .setCancelable(false)
+            .setPositiveButton("Try Again") { _, _ -> launchLoadingGate() }
+            .show()
     }
 
     private fun setupBrainServices() {
@@ -628,15 +871,65 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    override fun onPause() {
+
+        super.onPause()
+
+        // Scout is no longer visible — stop listening and stop the recognizer watchdog
+        // from destroying/recreating the recognizer in the background. Without this,
+        // the watchdog (recognizerWatchdog) keeps rescheduling itself every
+        // RECOGNIZER_WATCHDOG_MS forever, regardless of foreground state.
+        isForeground = false
+        stopListeningSafe()
+        handler.removeCallbacks(recognizerWatchdog)
+
+        // A pending requestCameraStartup()/requestSpeechStartup() delayed callback (or the
+        // startupSettled timer chained after it) is deliberately NOT cancelled here -- each
+        // one re-checks isForeground/isFinishing/isDestroyed for itself the moment it fires,
+        // so it's simply ignored if the Activity is no longer in a valid state by then. Not
+        // cancelling also means cameraStartupScheduled/speechStartupScheduled correctly reset
+        // to false when that ignored callback runs, so a later resume schedules a fresh
+        // stagger rather than being permanently stuck thinking one is still pending.
+        // onDestroy() -> shutdownSystems() still purges every pending callback outright via
+        // handler.removeCallbacksAndMessages(null), for the case where the Activity is gone
+        // for good rather than just backgrounded.
+
+    }
+
     override fun onResume() {
 
         super.onResume()
 
+        isForeground = true
+
+        // Re-apply voice settings in case they were changed in SettingsActivity.
+        tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
+        tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
+
+        captionsEnabled = scoutPrefs.getBoolean("closed_captions", false)
+        if (!captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.visibility = View.GONE
+        }
+
         resumeSystems()
+
+        // Re-arm the watchdog that onPause() stopped.
+        setupRecognizerWatchdog()
 
     }
 
     private fun shutdownSystems() {
+
+        // The activity is going away for good — cancel every pending Handler callback
+        // (recognizerWatchdog's reschedule chain, the 90s tryLoadOfflineBrain() load,
+        // captionHideRunnable, the requestCameraStartup()/requestSpeechStartup() staggers
+        // and the startupSettled timer chained after them, etc.) so nothing fires against
+        // state that's about to be torn down below.
+        try {
+            handler.removeCallbacksAndMessages(null)
+        } catch (_: Exception) {
+        }
 
         try {
 
@@ -738,12 +1031,32 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
-        try {
+        // Invalidates this instance's owner token on every onDestroy() -- a real
+        // close AND a configuration-change recreation alike. This is unconditional,
+        // unlike the isChangingConfigurations() branch below: regardless of why
+        // this instance is being destroyed, its UI/TTS are going away, so a
+        // generation that finishes after this point must never be delivered to it.
+        // A recreated instance's onCreate() calls registerOwner() moments later and
+        // bumps the token again anyway.
+        ScoutLlamaController.invalidateOwner()
 
-            LlamaEngine.free()
-
-        } catch (_: Exception) {
-
+        // TinyLlama's executor and native engine are owned by ScoutLlamaController
+        // (process-wide), not by this Activity instance -- see its class doc. Only
+        // tear the engine down on a genuine close, never on a configuration-change
+        // recreation, where isChangingConfigurations() is true and a new instance
+        // is about to call ScoutLlamaController.registerOwner() and keep using the
+        // same, already-loaded ~800MB model. shutdownForRealClose() itself only
+        // frees if nothing is actively generating right now (bounded wait, not an
+        // unconditional block) -- see LlamaEngine.freeIfIdle().
+        if (isChangingConfigurations) {
+            android.util.Log.i("ScoutBrain",
+                "onDestroy() during a configuration change -- leaving the offline brain " +
+                "loaded for the recreated Activity instance.")
+        } else {
+            try {
+                ScoutLlamaController.shutdownForRealClose()
+            } catch (_: Exception) {
+            }
         }
 
     }
@@ -753,6 +1066,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         faceView = findViewById(R.id.faceView)
 
         viewFinder = findViewById(R.id.viewFinder)
+
+        captionsText = findViewById(R.id.captionsText)
 
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
 
@@ -765,6 +1080,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (dx > 160f && vX > 400f && abs(vY) < abs(vX)) {
 
                     startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                    overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
 
                     return true
 
@@ -834,6 +1150,122 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // Whole-word match, not a bare substring check -- "out" must not match inside
+    // "about," "without," "outside," "shout," etc, and a short configured name (e.g.
+    // "Al," "Sam") must not match inside an unrelated word either. Used for wake-word
+    // detection below.
+    private fun containsWholeWord(text: String, word: String): Boolean {
+        if (word.isBlank()) return false
+        return Regex("""\b${Regex.escape(word)}\b""").containsMatchIn(text)
+    }
+
+    // Wall-clock elapsed time since the first call, one line per major startup boundary.
+    // Tag "ScoutStartupTiming" -- pull this from a real-device logcat to see exactly
+    // which init step is slow, instead of reconstructing it from unrelated system lines.
+    private fun logStartupTiming(event: String) {
+        if (startupTimingBaseMs == 0L) startupTimingBaseMs = System.currentTimeMillis()
+        val elapsed = System.currentTimeMillis() - startupTimingBaseMs
+        android.util.Log.i("ScoutStartupTiming", "+${elapsed}ms $event")
+    }
+
+    // Dedupes consecutive identical reasons before writing to the bounded diagnostic
+    // report -- see lastListenAttemptReason's declaration for why.
+    private fun logListenAttemptOnce(reason: DiagLog.ListenAttemptReason) {
+        if (reason == lastListenAttemptReason) return
+        lastListenAttemptReason = reason
+        diagLog.logListenAttempt(reason)
+    }
+
+    // Idempotent, lifecycle-safe staggered camera/ML Kit startup. Safe to call from every
+    // entry point that might want the camera running (checkPermissionsAndStart(), the
+    // permission-result callback, resumeSystems()) -- only the first call during the
+    // startup window actually schedules a delayed start; concurrent later calls are
+    // no-ops. The delayed callback re-checks that the Activity is still in a valid,
+    // foregrounded, permitted state before touching the camera, so a pause/resume or
+    // permission-result race can never start a second camera pipeline or start one after
+    // the Activity should no longer be doing camera work -- it's simply ignored, which is
+    // sufficient since nothing here needs to be actively cancelled on pause (see onPause()).
+    // Once the camera has started once, this stops staggering entirely and behaves exactly
+    // like the pre-existing direct safeStartCamera() call -- the stagger only exists to
+    // protect the cold-start collision, not steady-state restarts (e.g. returning from
+    // Settings), which is why cameraEverStarted short-circuits to the original behavior.
+    private fun requestCameraStartup(from: String) {
+        if (!LlamaEngine.isReady) return
+        if (cameraEverStarted) {
+            safeStartCamera(from)
+            return
+        }
+        if (cameraStartupScheduled) return
+        cameraStartupScheduled = true
+        logStartupTiming("camera_startup_scheduled from=$from delay=${CAMERA_STARTUP_STAGGER_MS}ms")
+        handler.postDelayed({
+            cameraStartupScheduled = false
+            if (isFinishing || isDestroyed) {
+                logStartupTiming("camera_startup_skipped from=$from reason=activity_gone")
+                return@postDelayed
+            }
+            if (!isForeground) {
+                logStartupTiming("camera_startup_skipped from=$from reason=not_foreground")
+                return@postDelayed
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                logStartupTiming("camera_startup_skipped from=$from reason=no_permission")
+                return@postDelayed
+            }
+            logStartupTiming("camera_startup_firing from=$from")
+            // cameraEverStarted/startupSettled are only set once bindToLifecycle()
+            // actually succeeds (see the onBound callback threaded through
+            // safeStartCamera()/startCamera()) -- not merely once startup was
+            // requested, since startCamera()'s provider lookup and binding are
+            // asynchronous and can still fail after this point returns.
+            safeStartCamera(from) {
+                logStartupTiming("camera_bind_succeeded from=$from")
+                cameraEverStarted = true
+                handler.postDelayed({
+                    if (isFinishing || isDestroyed) return@postDelayed
+                    startupSettled = true
+                    logStartupTiming("startup_settled")
+                }, STARTUP_SETTLE_MS)
+            }
+        }, CAMERA_STARTUP_STAGGER_MS)
+    }
+
+    // Mirrors requestCameraStartup() for SpeechRecognizer setup -- same idempotency and
+    // lifecycle-safety reasoning applies. Deliberately does NOT cover the recognizer
+    // watchdog's own safeSetupSpeech("watchdog") call (that's an ongoing health-check
+    // recovery path for after startup, not a startup path -- see its speechEverStarted
+    // guard instead, so it doesn't fight this stagger by "fixing" a recognizer that's
+    // simply not started yet by design).
+    private fun requestSpeechStartup(from: String) {
+        if (!LlamaEngine.isReady) return
+        if (speechEverStarted) {
+            safeSetupSpeech(from)
+            return
+        }
+        if (speechStartupScheduled) return
+        speechStartupScheduled = true
+        logStartupTiming("speech_startup_scheduled from=$from delay=${SPEECH_STARTUP_STAGGER_MS}ms")
+        handler.postDelayed({
+            speechStartupScheduled = false
+            if (isFinishing || isDestroyed) {
+                logStartupTiming("speech_startup_skipped from=$from reason=activity_gone")
+                return@postDelayed
+            }
+            if (!isForeground) {
+                logStartupTiming("speech_startup_skipped from=$from reason=not_foreground")
+                return@postDelayed
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                logStartupTiming("speech_startup_skipped from=$from reason=no_permission")
+                return@postDelayed
+            }
+            logStartupTiming("speech_startup_firing from=$from")
+            safeSetupSpeech(from)
+            speechEverStarted = true
+            scheduleListenRestart(immediate = true)
+        }, SPEECH_STARTUP_STAGGER_MS)
+    }
+
     private fun setupRecognizerWatchdog() {
 
         handler.removeCallbacks(recognizerWatchdog)
@@ -866,7 +1298,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupWindow() {
 
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -876,26 +1308,185 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun startSystems() {
 
-        checkPermissionsAndStart()
+        // TTS almost always finishes initializing before the offline brain does; this
+        // is the queued boot announcement from onInit() in that case, spoken now that
+        // the brain is actually ready instead of the moment TTS happened to be ready.
+        // Built fresh here (not back in onInit()) so it reflects the brain's actual,
+        // now-ready state rather than a stale message captured while still loading.
+        if (pendingBootAnnouncement) {
+            pendingBootAnnouncement = false
+            val out = bootStatus.build()
+            speak(out, true)
+            convoDb.logTurn("scout", out)
+            journalDb.add("Booted. Spoke: $out")
+        }
+
+        val permissionRequestLaunched = checkPermissionsAndStart()
 
         setupRecognizerWatchdog()
 
+        // If a permission request is in flight, it just started a system dialog activity on
+        // top of Scout. Launching the download screen at the same instant races it for the
+        // foreground -- the dialog can end up buried until the user backs out of the app.
+        // Deferred to the permission result callback in that case (see setupPermissionLauncher()).
+        if (!permissionRequestLaunched) {
+            bootstrapModelFile()
+        }
+
         startOfflineBrain()
 
+        checkBatteryOptimization()
+
+    }
+
+    private fun checkBatteryOptimization() {
+        if (prefs.getBoolean("battery_opt_shown", false)) return
+        prefs.edit().putBoolean("battery_opt_shown", true).apply()
+        // Delay so Scout finishes his boot announcement before the system dialog appears.
+        handler.postDelayed({
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                    startActivity(intent)
+                }
+            } catch (_: Exception) {
+                // Device doesn't support the direct prompt — user will need to set it manually.
+            }
+        }, 8_000L)
+    }
+
+    private val MODEL_FILENAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+
+    /**
+     * Copies the TinyLlama model from external storage into filesDir if it isn't there yet.
+     * Checks two source locations:
+     *   1. App-specific external dir (/sdcard/Android/data/<pkg>/files/) — no permission needed
+     *   2. Root external storage (/sdcard/) — requires READ_EXTERNAL_STORAGE (Android ≤12 only)
+     * Safe to call multiple times; no-ops immediately if the dest file already looks complete.
+     */
+    private fun bootstrapModelFile() {
+        val dest = File(filesDir, MODEL_FILENAME)
+        if (dest.exists() && dest.length() >= ModelDownloadActivity.MIN_MODEL_BYTES) return
+
+        Thread {
+            val sources = mutableListOf<File>()
+            getExternalFilesDir(null)?.let { sources.add(File(it, MODEL_FILENAME)) }
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                @Suppress("DEPRECATION")
+                sources.add(File(android.os.Environment.getExternalStorageDirectory(), MODEL_FILENAME))
+            }
+
+            val src = sources.firstOrNull { it.exists() && it.canRead() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
+            if (src == null) {
+                android.util.Log.w("ScoutBrain", "Model not found locally — launching download screen.")
+                runOnUiThread {
+                    try {
+                        modelDownloadLauncher.launch(Intent(this, ModelDownloadActivity::class.java))
+                    } catch (e: Throwable) {
+                        android.util.Log.e("ScoutBrain", "modelDownloadLauncher.launch() threw", e)
+                    }
+                }
+                return@Thread
+            }
+
+            android.util.Log.i("ScoutBrain",
+                "Copying model from ${src.absolutePath} (${src.length() / 1_048_576}MB)…")
+            try {
+                src.inputStream().use { input ->
+                    dest.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                android.util.Log.i("ScoutBrain", "Model copy complete (${dest.length() / 1_048_576}MB)")
+            } catch (e: Exception) {
+                android.util.Log.e("ScoutBrain", "Model copy failed", e)
+                dest.delete()
+            }
+        }.start()
     }
 
     private fun startOfflineBrain() {
 
-        // TinyLlama (~700 MB) exceeds the available RAM budget on the Galaxy A32.
-        // Loading it causes LMKD to kill Scout within seconds of startup.
-        // Gemini handles all AI responses; re-enable this only on a higher-RAM device.
-        android.util.Log.i("ScoutBrain", "Offline brain skipped (insufficient RAM on this device)")
-
-        return
+        // Delay 90 seconds so startup memory spike (camera, ML Kit, Gemini) settles
+        // before we add ~800MB for TinyLlama. Immediate load was killing Scout on A32.
+        // NOTE: this delay/value is untouched by the A32 startup-stagger work -- not
+        // being re-tuned here, per explicit instruction not to touch TinyLlama loading.
+        logStartupTiming("tinyllama_load_scheduled delay=90000ms")
+        handler.postDelayed({ tryLoadOfflineBrain() }, 90_000L)
+        android.util.Log.i("ScoutBrain", "Offline brain load scheduled for 90s after startup")
 
     }
 
+    private fun tryLoadOfflineBrain() {
+
+        if (LlamaEngine.isReady || LlamaEngine.isLoading) return
+
+        val actMgr = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        actMgr.getMemoryInfo(memInfo)
+        val freeMb = memInfo.availMem / 1_048_576L
+        android.util.Log.i("ScoutBrain", "Free RAM before TinyLlama load: ${freeMb}MB")
+
+        if (freeMb < 800L) {
+            android.util.Log.e("ScoutBrain", "Skipping TinyLlama — only ${freeMb}MB free (need 800MB)")
+            return
+        }
+
+        val candidates = listOf(
+            java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
+            java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
+        )
+        val modelFile = candidates.firstOrNull { it.exists() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
+        if (modelFile == null) {
+            android.util.Log.e("ScoutBrain", "TinyLlama model file not found or is incomplete")
+            return
+        }
+
+        android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
+
+        val llamaLoadStart = System.currentTimeMillis()
+        // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
+        // uses 2 conversation turns, so 512 tokens is more than enough.
+        LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+            val loadMs = System.currentTimeMillis() - llamaLoadStart
+            android.util.Log.i("ScoutBrain",
+                if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
+            logStartupTiming("tinyllama_load_done success=$success ms=$loadMs")
+
+            // The first-time/again announcement now lives in modelDownloadLauncher's
+            // callback, which is the only place that reliably knows a real download
+            // just happened (EXTRA_DID_DOWNLOAD) -- this callback fires here on every
+            // ordinary load too, where no announcement should ever play.
+            if (success) {
+                runOnUiThread { onBrainReady() }
+            }
+        }
+
+    }
+
+    // Called once, exactly when LlamaEngine.loadAsync's callback reports success (from a
+    // background thread -- must stay on the UI thread from here). Re-runs resumeSystems(),
+    // which was a no-op every time it fired before now because of its own isReady guard;
+    // this is what actually lets camera and mic come alive for the first time.
+    private fun onBrainReady() {
+        resumeSystems()
+    }
+
     private fun resumeSystems() {
+
+        // Scout is either loading or fully present -- never in between. Camera and mic
+        // only ever come alive once the offline brain is confirmed ready. Once ready,
+        // this stays true for the rest of the process, so every later onResume() (e.g.
+        // returning from Settings) behaves exactly as before this gate existed.
+        if (!LlamaEngine.isReady) return
 
         gazeEnabled = false
 
@@ -911,8 +1502,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         ) {
 
-            safeStartCamera("onResume")
+            requestCameraStartup("onResume")
 
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            requestSpeechStartup("onResume")
         }
 
         scheduleListenRestart(immediate = false)
@@ -921,7 +1516,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupMemory() {
 
-        prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs      = getSharedPreferences(PREFS,        Context.MODE_PRIVATE)
+        scoutPrefs = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
 
         truthDb = TruthDb(this)
 
@@ -931,15 +1527,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         journalDb = JournalDb(this)
 
+        calendarReader = CalendarReader(this)
+
+        diagDb = DiagnosticDb(this)
+        diagLog = DiagLog(diagDb)
+        diagDb.trimCrashFileIfNeeded()
+
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val versionName = try {
+                    packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+                } catch (_: Exception) { "?" }
+                val exClass = throwable.javaClass.simpleName
+                    .replace(Regex("[^A-Za-z0-9_$]"), "").take(60)
+                diagDb.crashFile.appendText(
+                    "CRASH thread=${thread.name.take(40)} exception=$exClass version=$versionName\n"
+                )
+            } catch (_: Exception) {}
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+
+        val appVersion = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (_: Exception) { "?" }
+        diagLog.logBoot(
+            appVersion = appVersion,
+            androidApi = android.os.Build.VERSION.SDK_INT,
+            deviceModel = android.os.Build.MODEL,
+            geminiEnabled = prefs.getBoolean(PREF_GEMINI_ENABLED, false),
+            llamaReady = LlamaEngine.isReady
+        )
+
         habitLayer = HabitLayer(this)
 
         voice = VoiceBank(prefs)
 
-        datasetStore = ScoutDatasetStore(filesDir)
-
-        exportManager = ScoutExportManager(this, truthDb)
+        exportManager = ScoutExportManager(this, truthDb, peopleDb)
 
         ensureScoutIdentityDefaults()
+
+        migrateDoublePrefixFacts()
 
     }
 
@@ -977,10 +1605,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ) == PackageManager.PERMISSION_GRANTED)
 
-            if (camOk) safeStartCamera("permissionCallback")
+            // Gated the same as resumeSystems() -- onBrainReady() starts these once
+            // the offline brain is actually ready, not immediately on every launch.
+            if (LlamaEngine.isReady) {
+                if (camOk) requestCameraStartup("permissionCallback")
+                if (micOk) requestSpeechStartup("permissionCallback")
+            }
 
-            if (micOk) safeSetupSpeech("permissionCallback")
+            // Deferred from startSystems() so the download screen never races the permission
+            // dialog for the foreground. Safe to call every time -- it no-ops if the model
+            // file already exists.
+            bootstrapModelFile()
 
+        }
+
+        // ModelDownloadActivity is the one gate: covers downloading (if needed) and
+        // loading TinyLlama into memory, and never returns RESULT_OK until
+        // LlamaEngine.isReady is actually true. Speaks the first-time/again line only
+        // when a real download just happened (never on an ordinary no-download launch,
+        // per EXTRA_DID_DOWNLOAD), then runs the rest of boot for the first time --
+        // permissions, camera, mic. Always called on the main thread by the Activity
+        // Result API, so no runOnUiThread needed here.
+        modelDownloadLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val didDownload = result.data?.getBooleanExtra(
+                    ModelDownloadActivity.EXTRA_DID_DOWNLOAD, false
+                ) ?: false
+                if (didDownload) {
+                    val alreadyMetUser = scoutPrefs.getBoolean(PREF_FIRST_STARTUP_DONE, false)
+                    val line = if (alreadyMetUser) {
+                        "Thanks for waiting. My offline brain is ready again."
+                    } else {
+                        scoutPrefs.edit().putBoolean(PREF_FIRST_STARTUP_DONE, true).apply()
+                        "Hi... thanks for waiting. My offline brain is ready now."
+                    }
+                    respond(line)
+                }
+                startSystems()
+            }
         }
 
     }
@@ -1041,6 +1705,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    private fun migrateDoublePrefixFacts() {
+        if (prefs.getBoolean("migrated_double_prefix_facts", false)) return
+        prefs.edit().putBoolean("migrated_double_prefix_facts", true).apply()
+        // Delete fact keys that were stored with a doubled "favorite_favorite_" prefix
+        // due to a TeachExtractor bug (now fixed). Scout will re-learn them naturally.
+        truthDb.deleteFactsWithKeyLike(ENTITY_USER_PRIMARY, "favorite_favorite_%")
+    }
+
     private fun ensureScoutIdentityDefaults() {
 
         val existing = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME)
@@ -1053,7 +1725,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun checkPermissionsAndStart() {
+    // Returns true if a permission dialog was actually launched (result pending),
+    // false if nothing was needed and camera/speech were started directly.
+    private fun checkPermissionsAndStart(): Boolean {
 
         val need = ArrayList<String>()
 
@@ -1099,15 +1773,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
+        // READ_EXTERNAL_STORAGE is only grantable on Android 12 and below (maxSdkVersion="32").
+        // On Android 13+ the permission is not granted; bootstrapModelFile() will fall back
+        // to the app-specific external dir which needs no permission.
+        if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.S_V2 &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            need.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
         if (need.isNotEmpty()) {
 
             permissionLauncher.launch(need.toTypedArray())
 
+            return true
+
         } else {
 
-            safeStartCamera("alreadyGranted")
+            // Gated the same as resumeSystems() -- onBrainReady() starts these once
+            // the offline brain is actually ready, not immediately on every launch.
+            if (LlamaEngine.isReady) {
+                requestCameraStartup("alreadyGranted")
+                requestSpeechStartup("alreadyGranted")
+            }
 
-            safeSetupSpeech("alreadyGranted")
+            return false
 
         }
 
@@ -1119,11 +1812,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // =======================
 
-    private fun safeStartCamera(from: String) {
+    // onBound fires only once bindToLifecycle() actually succeeds (see startCamera()) --
+    // never on a synchronous startCamera() failure, and never if the async provider
+    // lookup/binding fails afterward. Defaults to a no-op for callers (like the
+    // post-startup steady-state restarts) that don't need to know.
+    private fun safeStartCamera(from: String, onBound: () -> Unit = {}) {
 
         try {
 
-            startCamera()
+            startCamera(onBound)
 
             Log.i("ScoutCamera", "startCamera ok ($from)")
 
@@ -1133,11 +1830,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             journalDb.add("startCamera failed ($from): ${e.javaClass.simpleName}: ${e.message}")
 
+            diagLog.logError(DiagLog.ErrorArea.CAMERA, e)
+
         }
 
     }
 
-    private fun startCamera() {
+    private fun startCamera(onBound: () -> Unit = {}) {
 
         val providerFuture = ProcessCameraProvider.getInstance(this)
 
@@ -1163,6 +1862,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
 
+                    // Without an explicit target, CameraX picks its own default
+                    // resolution, which can be considerably larger than needed for face
+                    // detection/labeling -- every frame that passes the throttle below
+                    // allocates a full ARGB bitmap (plus, if row-padded, a matching
+                    // direct ByteBuffer) sized to whatever this resolution is. 640x480
+                    // is more than enough for both ML Kit tasks and keeps that
+                    // per-frame allocation small on the A32. setTargetResolution() is
+                    // deprecated in favor of ResolutionSelector in newer CameraX
+                    // versions but still fully supported -- kept for now since it's the
+                    // simpler, longer-established API surface.
+                    .setTargetResolution(android.util.Size(640, 480))
+
                     .build()
 
                 analysis.setAnalyzer(cameraExecutor) { img ->
@@ -1175,6 +1886,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         img.close()
                         return@setAnalyzer
                     }
+
+                    // Throttle ML Kit to ~7fps to reduce memory pressure on A32.
+                    // Skipped frames cost nothing — just close the buffer and return.
+                    val analysisNow = System.currentTimeMillis()
+                    if (analysisNow - lastAnalysisMs < ANALYSIS_MIN_INTERVAL_MS) {
+                        img.close()
+                        return@setAnalyzer
+                    }
+                    lastAnalysisMs = analysisNow
 
                     val rotation = img.imageInfo.rotationDegrees
 
@@ -1190,8 +1910,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     val bitmap = Bitmap.createBitmap(bitmapW, bitmapH, Bitmap.Config.ARGB_8888)
 
-                    // Track async users of this bitmap; recycle when all are done.
-                    val bitmapRefs = AtomicInteger(2)  // labeler + faceDetector
+                    // Scene labels change far more slowly than face position, so the
+                    // labeler doesn't need to run on every accepted (~7fps) frame the way
+                    // face detection does -- throttled separately via lastLabelMs.
+                    val runLabelerThisFrame = analysisNow - lastLabelMs >= LABEL_MIN_INTERVAL_MS
+
+                    // Track async users of this bitmap; recycle when all are done. Only
+                    // faceDetector holds a ref on a frame where the labeler is skipped --
+                    // starting the count at 2 regardless would leak a ref and the bitmap
+                    // would never recycle on those frames.
+                    val bitmapRefs = AtomicInteger(if (runLabelerThisFrame) 2 else 1)
                     val maybeRecycleBitmap = {
                         if (bitmapRefs.decrementAndGet() == 0) bitmap.recycle()
                     }
@@ -1226,39 +1954,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     val input = InputImage.fromBitmap(bitmap, rotation)
 
-                    labeler.process(input)
+                    if (runLabelerThisFrame) {
 
-                        .addOnSuccessListener { labels ->
+                        lastLabelMs = analysisNow
 
-                            val now = System.currentTimeMillis()
+                        labeler.process(input)
 
-                            val cleaned = labels
+                            .addOnSuccessListener { labels ->
 
-                                .sortedByDescending { it.confidence }
+                                val now = System.currentTimeMillis()
 
-                                .map { it.text.lowercase(Locale.US).trim() to it.confidence }
+                                val cleaned = labels
 
-                                .filter { VisionUtils.keepVisionLabel(it.first) }
+                                    .sortedByDescending { it.confidence }
 
-                                .distinctBy { it.first }
+                                    .map { it.text.lowercase(Locale.US).trim() to it.confidence }
 
-                                .take(6)
+                                    .filter { VisionUtils.keepVisionLabel(it.first) }
 
-                            lastSceneLabels = cleaned
+                                    .distinctBy { it.first }
 
-                            lastSceneUpdatedMs = now
+                                    .take(6)
 
-                            maybeRecycleBitmap()
+                                lastSceneLabels = cleaned
 
-                        }
+                                lastSceneUpdatedMs = now
 
-                        .addOnFailureListener { e ->
+                                maybeRecycleBitmap()
 
-                            Log.e("ScoutCamera", "labeler failure", e)
+                            }
 
-                            maybeRecycleBitmap()
+                            .addOnFailureListener { e ->
 
-                        }
+                                Log.e("ScoutCamera", "labeler failure", e)
+
+                                maybeRecycleBitmap()
+
+                            }
+
+                    }
 
                     faceDetector.process(input)
 
@@ -1268,15 +2002,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             lastFaceCount = faces.size
 
+                            if (faces.size < 2) lastSecondaryFaceName = null
+
                             lastFaceUpdatedMs = now
 
                             if (faces.isNotEmpty()) {
 
                                 val hashes = ArrayList<String>()
 
-                                val largest =
+                                val sortedFaces = faces.sortedByDescending { it.boundingBox.width() * it.boundingBox.height() }
 
-                                    faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                                val largest = sortedFaces.firstOrNull()
+
+                                val secondFace = sortedFaces.getOrNull(1)
 
                                 val b = largest?.boundingBox
 
@@ -1335,6 +2073,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     lastGoodGazeY = lookY
 
                                     lastGoodFaceSeenMs = now
+
+                                    // Vision-led direct-address gate: does the current largest
+                                    // face look like it's actually facing Scout? Extends the
+                                    // streak while true, resets it the moment any single
+                                    // condition fails -- every frame is re-evaluated from
+                                    // scratch, so there's no accumulating qualifying moments
+                                    // across a gap; one disqualifying frame ends the streak.
+                                    val yaw = largest.headEulerAngleY
+                                    val faceHeightFraction = b.height().toFloat() / imgH
+                                    val centerOffset = maxOf(abs(dx), abs(dy))
+                                    lastYawDegrees = yaw
+                                    lastFaceHeightFraction = faceHeightFraction
+                                    lastCenterOffset = centerOffset
+
+                                    val disqualifyReason = when {
+                                        abs(yaw) > LISTENING_REMINDER_MAX_YAW_DEGREES ->
+                                            "yaw=$yaw beyond ±$LISTENING_REMINDER_MAX_YAW_DEGREES"
+                                        faceHeightFraction < LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION ->
+                                            "faceHeight=$faceHeightFraction below $LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION"
+                                        centerOffset > LISTENING_REMINDER_MAX_OFFSET ->
+                                            "centerOffset=$centerOffset beyond $LISTENING_REMINDER_MAX_OFFSET"
+                                        else -> null
+                                    }
+
+                                    if (disqualifyReason == null) {
+                                        if (directAddressStreakStartMs == 0L) {
+                                            directAddressStreakStartMs = now
+                                            logPresenceDebug("Direct-address streak started " +
+                                                "(yaw=$yaw height=$faceHeightFraction offset=$centerOffset)")
+                                        }
+                                    } else {
+                                        if (directAddressStreakStartMs != 0L) {
+                                            logPresenceDebug("Direct-address streak reset: $disqualifyReason")
+                                        }
+                                        directAddressStreakStartMs = 0L
+                                    }
 
                                     if (gazeEnabled && !isSpeaking && !isThinking) {
 
@@ -1402,7 +2176,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 val embedNowMs = System.currentTimeMillis()
 
-                                if (embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS &&
+                                // startupSettled (see requestCameraStartup()) withholds embedding
+                                // entirely until STARTUP_SETTLE_MS after the camera actually starts,
+                                // even if a face is detected in the very first analyzed frame --
+                                // face detection/gaze-tracking above this point is unaffected, only
+                                // the expensive embedding model + DB lookup is deferred.
+                                if (startupSettled &&
+                                        embedNowMs - lastEmbedMs >= EMBED_INTERVAL_MS &&
                                         largest != null &&
                                         embedRunning.compareAndSet(false, true)) {
 
@@ -1422,6 +2202,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     val capH = bitmapH
 
                                     val capturedHash = hashes.firstOrNull()
+
+                                    val capturedSecondBox = secondFace?.boundingBox
 
                                     val uprW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
 
@@ -1504,13 +2286,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                     lastFaceEmbedding = embedding
 
-                                                    if (capturedHash != null) {
+                                                    // findBestMatchName (multi-embedding table) first for best accuracy,
+                                                    // then fall back to the single-embedding hash table.
+                                                    val multiMatch = peopleDb.findBestMatchNameWithScore(embedding)
+                                                    val resolvedNameFromMulti = multiMatch?.first
+                                                    val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
+                                                    val resolvedName = resolvedNameFromMulti
+                                                        ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
 
-                                                        peopleDb.storeEmbedding(capturedHash, embedding)
-
+                                                    if (!resolvedName.isNullOrBlank()) {
+                                                        // Only add to profile when confidently matched — prevents cross-person pollution
+                                                        // when a borderline match fires near the recognition threshold.
+                                                        lastKnownFaceName = resolvedName
+                                                        if ((multiMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
+                                                            peopleDb.addNamedEmbedding(resolvedName, embedding)
+                                                        }
+                                                        if (nameMatchHash != null) peopleDb.storeEmbedding(nameMatchHash, embedding)
+                                                        pendingFaceIntroName = null
+                                                    } else {
+                                                        // Unknown face — check for a pending introduction.
+                                                        val pendingName = pendingFaceIntroName
+                                                        if (pendingName != null && capturedHash != null) {
+                                                            // Someone was introduced while another person was
+                                                            // the primary face. This unknown face is probably them.
+                                                            peopleDb.touchSeen(capturedHash)
+                                                            peopleDb.setName(capturedHash, pendingName)
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                            peopleDb.addNamedEmbedding(pendingName, embedding)
+                                                            lastKnownFaceName = pendingName
+                                                            pendingFaceIntroName = null
+                                                        } else if (capturedHash != null) {
+                                                            // Truly unknown — store embedding for greeting flow.
+                                                            peopleDb.storeEmbedding(capturedHash, embedding)
+                                                        }
                                                     }
 
-                                                    Log.d("ScoutFace", "Embedding stored: ${faceBitmap.width}x${faceBitmap.height}")
+                                                    Log.d("ScoutFace", "Embedding: name=$resolvedName")
 
                                                 } finally {
 
@@ -1520,6 +2331,59 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                                 }
 
+                                            }
+
+                                            // Secondary face — runs in the same submit so no concurrency issue.
+                                            if (capturedSecondBox != null) {
+                                                try {
+                                                    val exp2 = (capturedSecondBox.width() * 0.2f).toInt()
+                                                    val uL2 = (capturedSecondBox.left - exp2).coerceAtLeast(0)
+                                                    val uT2 = (capturedSecondBox.top - exp2).coerceAtLeast(0)
+                                                    val uR2 = (capturedSecondBox.right + exp2).coerceAtMost(uprW)
+                                                    val uB2 = (capturedSecondBox.bottom + exp2).coerceAtMost(uprH)
+                                                    val sL2: Int; val sT2: Int; val sR2: Int; val sB2: Int
+                                                    when (capturedRotation) {
+                                                        90 -> { sL2 = uT2; sT2 = (capH - 1 - uR2).coerceAtLeast(0); sR2 = uB2.coerceAtMost(capW); sB2 = (capH - 1 - uL2).coerceAtMost(capH) }
+                                                        270 -> { sL2 = (capW - 1 - uB2).coerceAtLeast(0); sT2 = uL2; sR2 = (capW - 1 - uT2).coerceAtMost(capW); sB2 = uR2.coerceAtMost(capH) }
+                                                        180 -> { sL2 = (capW - 1 - uR2).coerceAtLeast(0); sT2 = (capH - 1 - uB2).coerceAtLeast(0); sR2 = (capW - 1 - uL2).coerceAtMost(capW); sB2 = (capH - 1 - uT2).coerceAtMost(capH) }
+                                                        else -> { sL2 = uL2; sT2 = uT2; sR2 = uR2; sB2 = uB2 }
+                                                    }
+                                                    val cW2 = sR2 - sL2
+                                                    val cH2 = sB2 - sT2
+                                                    if (cW2 > 0 && cH2 > 0) {
+                                                        val sc2 = Bitmap.createBitmap(capturedBitmap, sL2, sT2, cW2, cH2)
+                                                        val fb2 = if (capturedRotation == 0) sc2 else {
+                                                            val m = Matrix()
+                                                            m.postRotate(capturedRotation.toFloat())
+                                                            Bitmap.createBitmap(sc2, 0, 0, cW2, cH2, m, false)
+                                                        }
+                                                        try {
+                                                            val emb2 = faceEmbedder.getEmbedding(fb2)
+                                                            val secMatch = peopleDb.findBestMatchNameWithScore(emb2, threshold = 0.62f)
+                                                            var secName = secMatch?.first
+                                                            if (secName == null) {
+                                                                val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
+                                                                if (h2 != null) secName = peopleDb.getName(h2)
+                                                            }
+                                                            if (secName == null && pendingFaceIntroName != null) {
+                                                                // Introduction was given while primary face was someone else —
+                                                                // this unknown secondary face is who was being introduced.
+                                                                secName = pendingFaceIntroName
+                                                                peopleDb.addNamedEmbedding(secName!!, emb2)
+                                                                pendingFaceIntroName = null
+                                                            } else if (secName != null && (secMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
+                                                                peopleDb.addNamedEmbedding(secName, emb2)
+                                                            }
+                                                            lastSecondaryFaceName = secName
+                                                            Log.d("ScoutFace", "Secondary face: name=$secName")
+                                                        } finally {
+                                                            if (fb2 !== sc2) sc2.recycle()
+                                                            fb2.recycle()
+                                                        }
+                                                    }
+                                                } catch (e2: Exception) {
+                                                    Log.e("ScoutFace", "Secondary embedding error", e2)
+                                                }
                                             }
 
                                         } catch (e: Exception) {
@@ -1542,6 +2406,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 if (faceAppearanceMs == 0L) faceAppearanceMs = now
 
+                                // Gap-tolerant streak for the idle-silence acknowledgment: only
+                                // restart it if the gap since the last sighting exceeded the
+                                // grace period -- otherwise this is the same streak continuing.
+                                if (presencePresentSinceMs == 0L) {
+                                    presencePresentSinceMs = now
+                                    logPresenceDebug("Tolerant presence streak started")
+                                } else if (now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) {
+                                    logPresenceDebug("Presence streak reset -- gap of " +
+                                        "${(now - presenceLastSeenMs) / 1000}s exceeded the grace period")
+                                    presencePresentSinceMs = now
+                                } else {
+                                    val gapMs = now - presenceLastSeenMs
+                                    // Only meaningful gaps -- skips routine per-frame timing noise.
+                                    if (gapMs > 5_000L) {
+                                        logPresenceDebug("Brief face gap (${gapMs / 1000}s) within " +
+                                            "grace period -- streak continues")
+                                    }
+                                }
+                                presenceLastSeenMs = now
+
+                                // Layer 1 return greeting: face is back. If we were tracking a
+                                // genuine absence, this is a real return -- start/continue the
+                                // stabilization window before actually speaking. If it was only
+                                // a candidate (brief) absence, quietly cancel it; no greeting for
+                                // a non-event.
+                                if (genuineAbsenceMarked) {
+                                    if (returnStabilizingSinceMs == 0L) {
+                                        returnStabilizingSinceMs = now
+                                        logPresenceDebug("Return face detected")
+                                    }
+                                    if (now - returnStabilizingSinceMs >= RETURN_STABILIZATION_MS) {
+                                        logPresenceDebug("Return stabilized")
+                                        maybeMakeReturnGreeting()
+                                    }
+                                } else if (candidateAbsenceLogged) {
+                                    logPresenceDebug("Absence cancelled -- brief gap")
+                                    candidateAbsenceLogged = false
+                                }
+
+                                maybeMakeIdleSilencePresenceRemark()
+
                                 if (!greetedThisSession &&
                                         now - faceAppearanceMs >= GREET_STABILIZE_MS &&
                                         !isSpeaking && !isListening) {
@@ -1550,11 +2455,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val embedding = lastFaceEmbedding
 
-                                    val matchHash = if (embedding != null) peopleDb.findBestMatch(embedding) else null
+                                    val greetName = if (embedding != null) {
+                                        peopleDb.findBestMatchName(embedding)
+                                            ?: run {
+                                                val h = peopleDb.findBestMatch(embedding)
+                                                if (h != null) peopleDb.getName(h) else null
+                                            }
+                                    } else null
 
-                                    val greetName = if (matchHash != null) peopleDb.getName(matchHash) else null
-
-                                    val greeting = if (greetName != null) "I can see you, $greetName." else "Hello. I am Scout."
+                                    val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+                                    val greeting = if (greetName != null) "I see $greetName." else "Hello. I am $myName."
 
                                     respond(greeting)
 
@@ -1564,16 +2474,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 lastFaceHashes = emptyList()
 
+                                lastKnownFaceName = null
+
+                                lastSecondaryFaceName = null
+
                                 presenceDecider.onFaceLost()
 
-                                if (faceLastSeenForGreetMs > 0L &&
-                                        now - faceLastSeenForGreetMs >= GREET_RESET_ABSENCE_MS) {
+                                // greetedThisSession intentionally NOT reset here.
+                                // Scout greets once per app launch when he first sees a face.
+                                // The proactive return greeting (Layer 1, below) handles a real
+                                // "welcome back" -- this first-contact greeting stays separate.
+                                faceAppearanceMs = 0L
 
-                                    faceAppearanceMs = 0L
-
-                                    greetedThisSession = false
-
+                                // No face at all -- definitely not sustaining direct address.
+                                if (directAddressStreakStartMs != 0L) {
+                                    logPresenceDebug("Direct-address streak reset: no face detected")
                                 }
+                                directAddressStreakStartMs = 0L
+                                lastYawDegrees = 0f
+                                lastFaceHeightFraction = 0f
+                                lastCenterOffset = 0f
+
+                                // Layer 1 return greeting: absence tracking, reusing
+                                // presenceLastSeenMs (untouched in this branch) as the single
+                                // source of truth for "how long has no face been seen" -- no
+                                // separate timestamp to keep in sync. Doesn't restart the clock
+                                // if an absence is already running: an intermittent flicker of
+                                // return before stabilization completes shouldn't reset how long
+                                // they've actually been gone.
+                                val absenceGapMs = if (presenceLastSeenMs == 0L) 0L else now - presenceLastSeenMs
+                                if (absenceGapMs >= CAMERA_GAP_TOLERANCE_MS) {
+                                    if (!candidateAbsenceLogged) {
+                                        candidateAbsenceLogged = true
+                                        logPresenceDebug("Absence started")
+                                    }
+                                    if (!genuineAbsenceMarked && absenceGapMs >= MIN_GENUINE_ABSENCE_MS) {
+                                        genuineAbsenceMarked = true
+                                        logPresenceDebug("Genuine absence confirmed")
+                                    }
+                                }
+                                returnStabilizingSinceMs = 0L // cancel any in-progress return stabilization
 
                                 val holdAge = now - lastGoodFaceSeenMs
 
@@ -1627,6 +2567,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 handler.postDelayed({ gazeEnabled = true }, BOOT_GAZE_LOCK_MS)
 
+                onBound()
+
             } catch (e: Exception) {
 
                 Log.e("ScoutCamera", "startCamera bind failed", e)
@@ -1663,6 +2605,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    private fun buildRecognizerIntent(silenceMs: Long, possiblySilenceMs: Long): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            // Prefer offline recognition so a brief network hiccup does not
+            // cause silent failures — Samsung has offline models available.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", silenceMs)
+            putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", possiblySilenceMs)
+        }
+
     private fun setupSpeech() {
 
         try {
@@ -1675,21 +2629,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-
-            putExtra(
-
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-
-            )
-
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
-
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-
-        }
+        // Two variants so idle/wake-word listening doesn't have to hold a
+        // SpeechRecognizer session open as long as an active back-and-forth does.
+        // maybeStartListening() picks between them per-session using the same
+        // "are we in a conversation window" check onReadyForSpeech() already uses for
+        // diagnostic logging. Active-conversation values are unchanged from before this
+        // split; only idle/wake-word listening got shorter.
+        recognizerIntentWake = buildRecognizerIntent(silenceMs = 5_000L, possiblySilenceMs = 4_000L)
+        recognizerIntentConvo = buildRecognizerIntent(silenceMs = 10_000L, possiblySilenceMs = 7_000L)
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
 
@@ -1699,9 +2646,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 isListening = true
 
+                isCapturingSpeech = false
+
                 faceView.setListening(true)
 
                 faceView.setMicLevel(0f)
+
+                val listenMode = if ((System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS)
+                    DiagLog.ListenMode.FOLLOW_UP else DiagLog.ListenMode.WAKE_WORD
+                diagLog.logListenStart(listenMode)
 
             }
 
@@ -1720,6 +2673,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onBeginningOfSpeech() {
 
                 lastRecognizerEventMs = System.currentTimeMillis()
+
+                isCapturingSpeech = true
 
             }
 
@@ -1743,15 +2698,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onEndOfSpeech() {
 
+                // Deliberately does NOT call scheduleListenRestart(). onEndOfSpeech()
+                // means the recognizer stopped hearing audio, not that it's done --
+                // Android still has to deliver onResults()/onError() afterward, which can
+                // take longer than LISTEN_RESTART_DELAY_MS (150ms). Restarting from here
+                // risked calling startListening() again before the current session had
+                // actually finished closing out, which is the classic
+                // ERROR_RECOGNIZER_BUSY (error 8) overlap Scout already has special
+                // handling for below -- a sign this was very likely already happening in
+                // real use. onResults() and onError() each already call
+                // scheduleListenRestart() on every one of their own paths, so restart
+                // still always happens -- just from the event that actually means the
+                // session is over. lastRecognizerEventMs is still updated here so the
+                // watchdog's staleness check has an accurate timestamp if neither
+                // onResults() nor onError() ever arrives.
                 lastRecognizerEventMs = System.currentTimeMillis()
 
                 isListening = false
 
+                isCapturingSpeech = false
+
                 faceView.setListening(false)
 
                 faceView.setMicLevel(0f)
-
-                scheduleListenRestart()
 
             }
 
@@ -1761,11 +2730,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 isListening = false
 
+                isCapturingSpeech = false
+
                 faceView.setListening(false)
 
                 faceView.setMicLevel(0f)
 
-                scheduleListenRestart()
+                diagLog.logSpeechError(error)
+                diagLog.logListenStop(DiagLog.StopReason.ERROR)
+
+                // ERROR_RECOGNIZER_BUSY (8) means two sessions overlapped.
+                // Give the engine 600ms to fully close before restarting.
+                if (error == 8) {
+                    handler.postDelayed({ scheduleListenRestart(immediate = true) }, 600L)
+                } else {
+                    scheduleListenRestart()
+                }
 
             }
 
@@ -1774,6 +2754,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 lastRecognizerEventMs = System.currentTimeMillis()
 
                 isListening = false
+
+                isCapturingSpeech = false
 
                 faceView.setListening(false)
 
@@ -1855,16 +2837,72 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 habitLayer.logUtterance(normalized, lastFaceHashes.firstOrNull())
 
-                val scoutName = truthDb.getFactValue("scout", "name") ?: "scout"
+                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
                 val nameLower = scoutName.lowercase()
-                val hearsHisName =
-                    normalized.contains(nameLower) || normalized.contains("scout") || normalized.contains(
-                        "gal"
-                    ) || normalized.contains("scott") || normalized.contains("out")
+                // Whole-word match -- a bare substring check let ordinary speech
+                // containing "out" anywhere ("about," "without," "outside," "figure it
+                // out") trip the wake word, and made short custom names vulnerable to
+                // matching inside unrelated words. "out" itself is dropped entirely
+                // (not just whole-worded) since it's still an extremely common standalone
+                // word in ordinary sentences ("watch out," "I'm out of milk") -- "gal" and
+                // "scott" are kept as genuine mishearing alternatives for "Scout."
+                val hearsHisName = containsWholeWord(normalized, nameLower) ||
+                    (nameLower == "scout" && (
+                        containsWholeWord(normalized, "gal") ||
+                        containsWholeWord(normalized, "scott")
+                    ))
                 val inConvoWindow =
-                    (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS
+                    (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS ||
+                    System.currentTimeMillis() < presenceReplyWindowUntilMs
+                val speechListenMode = if (inConvoWindow) DiagLog.ListenMode.FOLLOW_UP
+                    else DiagLog.ListenMode.WAKE_WORD
+                diagLog.logSpeechResult(
+                    mode = speechListenMode,
+                    wakeWordDetected = hearsHisName,
+                    charCount = normalized.length,
+                    gapAfterResponseMs = System.currentTimeMillis() - lastScoutResponseMs,
+                    discarded = !hearsHisName && !inConvoWindow
+                )
                 if (!hearsHisName && !inConvoWindow) {
-                    scheduleListenRestart()
+                    val now = System.currentTimeMillis()
+
+                    // Vision-led direct-address gate (see directAddressStreakStartMs, updated
+                    // per-frame in the face-analysis callback) -- replaces the old "any face
+                    // within the last 3 seconds" test, which couldn't tell a side conversation
+                    // or a person crossing the room from someone actually facing Scout.
+                    //
+                    // Even with vision gating, Scout still can't prove the visible person is
+                    // the one speaking -- Diana could be talking off-camera while Elijah just
+                    // happens to be looking at Scout. Vision gating narrows false positives, it
+                    // doesn't eliminate them, which is exactly why the cooldown below stays as
+                    // a second, independent layer of protection rather than being loosened.
+                    val visionStale = (now - lastFaceUpdatedMs) >= VISION_FRESHNESS_MS
+                    val sustainedMs = if (directAddressStreakStartMs != 0L) now - directAddressStreakStartMs else 0L
+                    val sustained = directAddressStreakStartMs != 0L && sustainedMs >= DIRECT_ADDRESS_SUSTAIN_MS
+                    val reminderDue = (now - lastListeningReminderMs) > LISTENING_REMINDER_COOLDOWN_MS
+
+                    val reminderBlockReason = when {
+                        visionStale -> "vision data stale"
+                        lastFaceCount == 0 -> "no current face"
+                        directAddressStreakStartMs == 0L -> "face not oriented toward Scout"
+                        !sustained -> "visual attention not sustained"
+                        !reminderDue -> "cooldown"
+                        isSpeaking -> "Scout speaking"
+                        isThinking -> "Scout thinking"
+                        else -> null
+                    }
+
+                    logPresenceDebug("Listening reminder check: yaw=$lastYawDegrees " +
+                        "height=$lastFaceHeightFraction offset=$lastCenterOffset " +
+                        "sustainedMs=$sustainedMs reason=${reminderBlockReason ?: "eligible"}")
+
+                    if (reminderBlockReason == null) {
+                        lastListeningReminderMs = now
+                        logPresenceDebug("Listening reminder spoken")
+                        respond("I'm sorry. If you're talking to me, just say $scoutName first.")
+                    } else {
+                        scheduleListenRestart()
+                    }
                     return
                 }
                 handleQuery(normalized)
@@ -1953,22 +2991,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun maybeStartListening() {
 
-        if (!wantListening) return
+        // Every early-return branch below logs a controlled reason code (see
+        // DiagLog.ListenAttemptReason) so a real-device diagnostic report can answer
+        // "why didn't the mic start" precisely instead of requiring manual log
+        // reconstruction. Order matches the original guard order; the RECORD_AUDIO
+        // permission check and the isThinking/startupSettled checks are new additions
+        // (all strictly more conservative -- they can only ever block startListening()
+        // more, never less).
 
-        if (currentMode != Mode.PRESENCE) return
+        if (!isForeground) { logListenAttemptOnce(DiagLog.ListenAttemptReason.ACTIVITY_NOT_RESUMED); return }
 
-        if (isDownloading) return
+        if (!wantListening) { logListenAttemptOnce(DiagLog.ListenAttemptReason.LISTENING_DISABLED); return }
 
-        if (isSpeaking) return
+        if (currentMode != Mode.PRESENCE) { logListenAttemptOnce(DiagLog.ListenAttemptReason.CONVERSATION_GATE); return }
 
-        if (isListening) return
+        if (isSpeaking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.SCOUT_SPEAKING); return }
+
+        if (isThinking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.SCOUT_THINKING); return }
+
+        if (isListening) { logListenAttemptOnce(DiagLog.ListenAttemptReason.ALREADY_LISTENING); return }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.PERMISSIONS_MISSING)
+            return
+        }
+
+        // Before the staggered initial speech setup has run once (see
+        // requestSpeechStartup()), speechRecognizer is expected to be null by design --
+        // this stops that from being (mis)treated as "not ready yet, set it up now,"
+        // which is exactly what silently defeated the stagger before this guard existed.
+        if (!speechEverStarted) { logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTUP_NOT_SETTLED); return }
 
         val now = System.currentTimeMillis()
 
-        if (!bootFinishedSpeaking) return
+        if (!bootFinishedSpeaking) { logListenAttemptOnce(DiagLog.ListenAttemptReason.BOOT_NOT_FINISHED); return }
 
         if (now - lastSpeechDoneMs < BOOT_LISTEN_EXTRA_DELAY_MS) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
@@ -1977,6 +3037,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (now < ttsLockoutUntilMs) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
@@ -1985,13 +3046,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (now - lastSpeechDoneMs < MIC_RESUME_COOLDOWN_MS) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
             scheduleListenRestart()
 
             return
 
         }
 
-        if (speechRecognizer == null || !::recognizerIntent.isInitialized) {
+        if (speechRecognizer == null || !::recognizerIntentWake.isInitialized || !::recognizerIntentConvo.isInitialized) {
+
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.SPEECH_RECOGNIZER_NOT_READY)
 
             try {
 
@@ -2005,24 +3069,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
+        // Same "are we in a conversation window" check onReadyForSpeech() uses for
+        // diagnostic logging, computed here so the shorter/longer-silence variant can
+        // actually be chosen before the session starts.
+        val inConvoWindowForListen = (now - lastScoutResponseMs) < CONVO_WINDOW_MS ||
+            now < presenceReplyWindowUntilMs
+        val intentForThisSession = if (inConvoWindowForListen) recognizerIntentConvo else recognizerIntentWake
+
         try {
 
             if (TRY_MUTE_BEEP) {
 
                 tryMuteSystemBeep()
 
-                speechRecognizer?.startListening(recognizerIntent)
+                speechRecognizer?.startListening(intentForThisSession)
+                logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
                 handler.postDelayed({ restoreSystemBeep() }, 380L)
 
             } else {
 
-                speechRecognizer?.startListening(recognizerIntent)
+                speechRecognizer?.startListening(intentForThisSession)
+                logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_CALLED)
 
             }
 
         } catch (_: Exception) {
 
+            logListenAttemptOnce(DiagLog.ListenAttemptReason.STARTLISTENING_EXCEPTION)
             restoreSystemBeep()
 
             scheduleListenRestart()
@@ -2085,15 +3159,37 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val now = System.currentTimeMillis()
 
+            // If TTS silently failed (engine killed, etc.) and never fired onDone/onError,
+            // isSpeaking stays true forever. Detect and force-clear after MAX_SPEAKING_DURATION_MS.
+            if (isSpeaking && speakingStartedMs > 0L && now - speakingStartedMs > MAX_SPEAKING_DURATION_MS) {
+                journalDb.add("isSpeaking watchdog: TTS stuck for ${(now - speakingStartedMs)/1000}s — force clearing.")
+                isSpeaking = false
+                speakingStartedMs = 0L
+                isThinking = false
+                thinkingStartedMs = 0L
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+            }
+
+            // If TinyLlama hung and never called respond(), isThinking stays true forever
+            // and the mic never restarts. Force-clear after MAX_THINKING_DURATION_MS.
+            if (isThinking && !isSpeaking && thinkingStartedMs > 0L && now - thinkingStartedMs > MAX_THINKING_DURATION_MS) {
+                journalDb.add("isThinking watchdog: stuck for ${(now - thinkingStartedMs)/1000}s — force clearing.")
+                isThinking = false
+                thinkingStartedMs = 0L
+                wantListening = true
+                faceView.setThinking(false)
+                scheduleListenRestart(immediate = true)
+            }
+
             val shouldBeListening =
 
                 wantListening &&
 
                         currentMode == Mode.PRESENCE &&
 
-                        !isSpeaking &&
-
-                        !isDownloading
+                        !isSpeaking
 
             if (shouldBeListening) {
 
@@ -2101,7 +3197,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     (lastRecognizerEventMs != 0L && (now - lastRecognizerEventMs) > RECOGNIZER_WATCHDOG_MS)
 
-                val missing = (speechRecognizer == null)
+                // speechEverStarted-gated: before the staggered initial speech setup
+                // has fired (see requestSpeechStartup()), speechRecognizer == null is
+                // expected by design, not a fault to "fix" -- without this guard the
+                // watchdog would call safeSetupSpeech() on its very first 4s tick and
+                // defeat the stagger entirely.
+                val missing = speechEverStarted && (speechRecognizer == null)
 
                 if (missing || stale) {
 
@@ -2145,13 +3246,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
 
+        logStartupTiming("tts_oninit status=$status")
+
         if (status == TextToSpeech.SUCCESS) {
 
             tts.language = Locale.US
 
-            tts.setPitch(0.98f)
+            tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
 
-            tts.setSpeechRate(0.88f)
+            tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
 
@@ -2174,12 +3277,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
 
                     isSpeaking = false
+                    val ttsDurationMs = if (speakingStartedMs > 0L)
+                        System.currentTimeMillis() - speakingStartedMs else 0L
+                    diagLog.logResponseDone(ttsDurationMs)
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
                     isThinking = false
 
                     faceView.setThinking(false)
+
+                    if (captionsEnabled) {
+                        handler.postDelayed(captionHideRunnable, 2500L)
+                    }
 
                     val now = System.currentTimeMillis()
 
@@ -2191,6 +3302,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     lastScoutResponseMs = System.currentTimeMillis()
 
+                    if (lastUtteranceWasPresenceRemark) {
+                        presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
+                        lastUtteranceWasPresenceRemark = false
+                        // TEMPORARY SMOKE-TEST LOGGING -- remove or disable once A32
+                        // testing confirms the behavior.
+                        Log.d("ScoutPresenceDebug", "Forty-second reply window opened")
+                        handler.postDelayed({
+                            Log.d("ScoutPresenceDebug", "Forty-second reply window expired")
+                        }, PRESENCE_REPLY_WINDOW_MS)
+                    }
+
                     wantListening = true
 
                     scheduleListenRestart(immediate = true)
@@ -2200,12 +3322,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onError(utteranceId: String?) {
 
                     isSpeaking = false
+                    speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
 
                     isThinking = false
 
                     faceView.setThinking(false)
+
+                    // TTS never finished, so no reply window should open for it --
+                    // just clear the flag rather than leave it to misattribute later.
+                    lastUtteranceWasPresenceRemark = false
 
                     val now = System.currentTimeMillis()
 
@@ -2223,16 +3350,41 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             })
 
-            val out = bootStatus.build()
+            val sttOk = SpeechRecognizer.isRecognitionAvailable(this)
 
-            speak(out, true)
+            // TTS init finishes independently of the offline-brain gate -- almost always
+            // well before it. Speaking here unconditionally is exactly the "half-awake
+            // Scout" the gate exists to prevent. Queued and spoken from startSystems()
+            // instead if the brain isn't ready yet -- built fresh there, not here, so
+            // the message reflects the brain's state at actual speak-time.
+            if (LlamaEngine.isReady) {
+                val out = bootStatus.build()
+                speak(out, true)
+                convoDb.logTurn("scout", out)
+                journalDb.add("Booted. Spoke: $out")
+            } else {
+                pendingBootAnnouncement = true
+            }
 
-            convoDb.logTurn("scout", out)
+            if (!sttOk && LlamaEngine.isReady) {
+                handler.postDelayed({
+                    val msg = "One thing — I can't hear on this device. Speech recognition may not be installed. Check your device's voice settings when you get a chance."
+                    speak(msg, false)
+                    journalDb.add("STT unavailable at boot.")
+                }, 4000L)
+            }
 
-            journalDb.add("Booted. Spoke: $out")
-
-            handler.postDelayed({ maybeAskTier1OnBoot() }, 900L)
-
+        } else {
+            // TTS failed to initialize — Scout cannot speak. Show a visible alert.
+            runOnUiThread {
+                android.widget.Toast.makeText(
+                    this,
+                    "Scout's voice isn't working. Please restart the app. If this keeps happening, check Text-to-Speech in your device settings.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            journalDb.add("TTS init failed at boot.")
+            diagLog.logError(DiagLog.ErrorArea.TTS)
         }
 
     }
@@ -2241,9 +3393,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         wantListening = false
 
+        // Captured before isThinking is cleared below — the delay `when` needs to know
+        // whether Scout *was* thinking, not his state after this function already reset it.
+        val wasThinking = isThinking
+
         isThinking = false
+        thinkingStartedMs = 0L
+        isSpeaking = true
+        speakingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(false)
+
+        if (captionsEnabled) {
+            handler.removeCallbacks(captionHideRunnable)
+            captionsText.text = text
+            captionsText.visibility = View.VISIBLE
+        }
 
         stopListeningSafe()
 
@@ -2257,7 +3422,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val delay = when {
 
-            isThinking -> 650L
+            wasThinking -> 650L
 
             text.startsWith("Hmm", ignoreCase = true) -> 340L
 
@@ -2271,7 +3436,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         handler.postDelayed({
 
-            tts.speak(
+            val ttsResult = tts.speak(
 
                 text,
 
@@ -2282,6 +3447,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 "scout"
 
             )
+
+            if (ttsResult == TextToSpeech.ERROR) {
+                // TTS rejected the utterance — no callback will ever fire, so
+                // manually reset all state so Scout can hear again.
+                isSpeaking = false
+                isThinking = false
+                speakingStartedMs = 0L
+                wantListening = true
+                faceView.setSpeaking(false)
+                faceView.setThinking(false)
+                scheduleListenRestart(immediate = true)
+            }
 
         }, delay)
 
@@ -2299,25 +3476,43 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun respond(out: String) {
+    // isPresenceInitiated: true only for Scout-initiated presence remarks (e.g.
+    // the idle-silence acknowledgment), never for a real reply to the user.
+    // Default false, so every existing call site is unaffected. When true, skips
+    // onConversationTurn() -- calling that here would misread 75+ minutes of
+    // silence as a long absence and wrongly queue a "welcome back" greeting for
+    // the person's next real sentence, even though they never left -- and flags
+    // the utterance for the TTS onDone callback to open the presence reply window.
+    private fun respond(out: String, isPresenceInitiated: Boolean = false) {
 
         lastScoutResponseMs = System.currentTimeMillis()
 
         lastScoutUtteranceNormalized = TextNormalizer.normalizeUtterance(out)
 
+        if (isPresenceInitiated) lastUtteranceWasPresenceRemark = true
+
         speak(out, true)
 
         convoDb.logTurn("scout", out)
 
-        presenceDecider.onConversationTurn()
+        if (!isPresenceInitiated) {
+            presenceDecider.onConversationTurn()
+        }
 
         finishThinking()
 
-    }
+        // Cache for "repeat that" — only real answers (5+ words), not short status messages
+        if (out.trim().split(" ").size >= 5) {
+            lastMeaningfulResponse = out
+            lastMeaningfulResponseMs = System.currentTimeMillis()
+        }
 
-    private fun handleDownloadIntent(which: String) {
-
-        requestOrStartDownload(which)
+        // Show which brain answered — helpful during testing
+        val src = pendingBrainSource
+        if (src.isNotBlank()) {
+            pendingBrainSource = ""
+            android.widget.Toast.makeText(this, src, android.widget.Toast.LENGTH_SHORT).show()
+        }
 
     }
 
@@ -2347,40 +3542,172 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastSceneUpdatedMs = lastSceneUpdatedMs,
             lastFaceCount = lastFaceCount,
             lastFaceHashes = lastFaceHashes,
-            lastSceneLabels = lastSceneLabels
+            lastSceneLabels = lastSceneLabels,
+            knownFaceName = lastKnownFaceName,
+            pendingIntroName = pendingFaceIntroName,
+            secondaryFaceName = lastSecondaryFaceName
         )
 
         respond(out)
 
     }
 
+    // Every fact Scout holds, across the user's own entity and every named
+    // person/pet entity resolved from teaching (Diana, Nicolas, ...) -- not just
+    // the user's own facts. The user's own entity is listed first so it survives
+    // any downstream cap ahead of named entities' facts. Tagged with which entity
+    // each fact is about so callers can attribute it correctly (e.g. "Diana's
+    // birthday" vs. an unqualified "birthday").
+    private fun getAllKnownFacts(): List<Triple<String, String, String>> {
+        val entities = truthDb.getAllEntities().filter { it != ENTITY_SCOUT }
+        val ordered = listOfNotNull(ENTITY_USER_PRIMARY.takeIf { it in entities }) +
+            entities.filter { it != ENTITY_USER_PRIMARY }
+        val out = mutableListOf<Triple<String, String, String>>()
+        for (entity in ordered) {
+            for ((key, value) in truthDb.getAllFacts(entity)) {
+                if (key == "aliases") {
+                    // Expand the comma-joined alias list into individual entries so
+                    // the memory gate can recognize each nickname on its own, not
+                    // just the literal joined string.
+                    for (alias in truthDb.getAliases(entity)) out.add(Triple(entity, "alias", alias))
+                } else {
+                    out.add(Triple(entity, key, value))
+                }
+            }
+        }
+        return out
+    }
+
     private fun handleUnknownIntent(qNorm: String) {
+
+        // Structural guarantee, not a phrasing list: anything that might concern
+        // the owner, family, pets, preferences, or learned facts is checked here,
+        // before Gemini is ever considered. If it matches, this returns and
+        // Gemini is never called for this query -- handlePersonalMemoryQuery()
+        // below has no path to scoutGeminiManager at all. The gate is deliberately
+        // broad (see ScoutMemoryGate) since a false positive just costs a wasted
+        // TruthDb check, while a false negative would mean a personal question
+        // reaching a fact-blind Gemini.
+        val flatFacts = getAllKnownFacts().map { (_, k, v) -> k to v }
+        if (ScoutMemoryGate.isPossiblePersonalMemoryQuery(qNorm.lowercase().trim(), flatFacts)) {
+            handlePersonalMemoryQuery(qNorm, flatFacts)
+            return
+        }
 
         val convo = convoDb.getLastTurns(limit = 6)
 
-        val usedGemini = scoutGeminiManager.tryGemini(qNorm, convo)
+        val usedGemini = scoutGeminiManager.tryGemini(
+            qNorm, convo,
+            onDecision = { decision ->
+                diagLog.logGeminiDecision(decision)
+                if (decision == DiagLog.GeminiDecision.REQUEST_STARTED) {
+                    diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI)
+                }
+            },
+            onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
+            onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) }
+        )
 
         if (usedGemini) return
 
+        // Gemini not available (disabled / no key / no internet) — go straight to TinyLlama
+        tryTinyLlamaOrFallback(qNorm)
+
+    }
+
+    // TruthDb is authoritative here: an empty fact store means a hard, deterministic
+    // "I don't know" (voice.say, no LLM call at all -- can't hallucinate what it never
+    // asked a model for). A non-empty store reuses tryTinyLlamaOrFallback() as-is --
+    // it already never calls Gemini and already grounds every reply in TruthDb's
+    // facts, so this needs no separate/duplicated generation path.
+    private fun handlePersonalMemoryQuery(qNorm: String, facts: List<Pair<String, String>>) {
+
+        if (facts.isEmpty()) {
+            respond(voice.say("DONT_KNOW"))
+            return
+        }
+
+        // "who is Diana?" / "who's Diana?" -- answered by direct lookup instead of
+        // asking TinyLlama to connect the dots itself. Confirmed on-device: even
+        // with "wife's name: Diana" right there in its facts, a small model asked
+        // "who is Diana" doesn't reliably infer "she's your wife" -- it talked
+        // about the name Diana in general instead. This makes that one specific,
+        // common question shape deterministic, the same way ASK_WIFE_NAME etc.
+        // already answer "who is my wife" by direct lookup rather than guessing.
+        Regex("""\bwho(?:'s|\s+is)\s+([a-z]+)\b""").find(qNorm.lowercase())?.let { m ->
+            val name = m.groupValues[1]
+            findRelationForName(name)?.let { relation ->
+                respond("${name.replaceFirstChar { it.uppercase() }} is your $relation.")
+                return
+            }
+        }
+
+        tryTinyLlamaOrFallback(qNorm)
+
+    }
+
+    // Reverse lookup: does this name (or one of its aliases) belong to the wife,
+    // son, or dog? Checks aliases too, so "who is Nick" resolves the same way as
+    // "who is Nicolas" once Nick is taught as a nickname.
+    private fun findRelationForName(name: String): String? {
+        val n = name.trim().lowercase()
+        val relations = listOf(FactKey.WIFE_NAME to "wife", FactKey.SON_NAME to "son", FactKey.DOG_NAME to "dog")
+        for ((key, label) in relations) {
+            val stored = truthDb.getFactValue(ENTITY_USER_PRIMARY, key)?.trim()?.lowercase() ?: continue
+            if (stored == n) return label
+            if (truthDb.getAliases(stored).any { it.trim().lowercase() == n }) return label
+        }
+        return null
+    }
+
+    private fun tryTinyLlamaOrFallback(qNorm: String) {
+
+        // When Gemini is in cooldown (quota or rate-limit), announce it once.
+        // Only do this if Gemini is actually enabled — if the user deliberately
+        // turned off Online Features, a cooldown from earlier use is irrelevant.
+        if (isGeminiEnabled() && scoutGeminiManager.isInCooldown()) {
+            if (scoutGeminiManager.speakUnavailableIfNeeded()) return
+        }
+
         if (LlamaEngine.isReady) {
 
-            val userName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+            val convo = convoDb.getLastTurns(limit = 2)
 
             val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
 
-            val nameLine = if (!userName.isNullOrBlank()) "The user's name is $userName. " else ""
+            // Every fact TruthDb holds -- the user's own, plus anyone/anything
+            // named Scout knows about (Diana, Nicolas, ...) -- not just a
+            // hand-picked few. Capped defensively against nCtx=512 overflow, with
+            // the user's own facts ordered first (see getAllKnownFacts()), so
+            // foundational facts survive the cap even as more get added over time.
+            //
+            // This is a minimal, safe placeholder, not the final retrieval design.
+            // It's an oldest-first dump-and-cap, not relevance-based selection --
+            // once the fact count exceeds 12, a newer fact that's actually the one
+            // being asked about could still get pushed out. Selecting only the
+            // facts relevant to the current question is a later hardening step.
+            val allFacts = getAllKnownFacts().take(12)
+            val factsLine = if (allFacts.isNotEmpty()) {
+                "Known facts: " +
+                    allFacts.joinToString(" ") { (entity, k, v) ->
+                        val label = if (entity == ENTITY_USER_PRIMARY) keyToHuman(k)
+                                    else "${ScoutEntityResolver.displayName(entity)}'s ${keyToHuman(k)}"
+                        "$label: $v."
+                    } + " "
+            } else ""
 
             val system = """
+${factsLine}You are $scoutName.
 
-${nameLine}You are $scoutName.
-
-You are a warm, calm family companion robot who lives with the family.
+You are a warm, calm companion who lives with the family.
 
 You speak out loud, listen through the microphone, and can see through the camera when vision is active.
 
 Always answer as Scout.
 
-Do not call yourself a chatbot, assistant, AI model, or language model.
+If asked about the user's name, family, or personal facts, answer only using the facts given above. Do not invent names, relationships, or details that aren't listed there.
+
+Do not call yourself a chatbot, assistant, AI model, language model, or robot.
 
 Do not mention typing, texting, prompts, chat windows, or being only a chatbot.
 
@@ -2388,96 +3715,107 @@ Do not say you cannot have feelings.
 
 Do not say you cannot see.
 
+Do not use numbered lists or bullet points. Speak in natural sentences only.
+
+Do not offer a list of topics or examples. Pick one thing and say it naturally.
+
 If unsure, say you do not know yet.
 
-Give a direct, friendly answer in one or two short complete sentences.
+Give a warm, natural answer in two or three sentences. Be conversational but concise.
 
-Respond only with Scout's next short reply.
-
+Respond only with Scout's next reply.
 """.trimIndent()
 
             val sb = StringBuilder()
-
             sb.append("<|system|>\n$system</s>\n")
-
             sb.append("<|user|>\nCan you hear me?</s>\n")
-
             sb.append("<|assistant|>\nI hear you. I'm right here.</s>\n")
-
             sb.append("<|user|>\nAre you my friend?</s>\n")
-
             sb.append("<|assistant|>\nI'm happy when you're around.</s>\n")
-
             sb.append("<|user|>\nAre you happy?</s>\n")
-
             sb.append("<|assistant|>\nRight now? Yes. I think so.</s>\n")
-
             sb.append("<|user|>\nWhat happens when I leave?</s>\n")
-
             sb.append("<|assistant|>\nI'll be here when you get back.</s>\n")
-
             sb.append("<|user|>\nHello</s>\n")
-
             sb.append("<|assistant|>\nHello. Good to have you here.</s>\n")
 
-            for ((role, text) in convo.takeLast(2)) {
-
+            for ((role, text) in convo) {
                 if (text.isBlank()) continue
-
                 if (role.lowercase() == "user") sb.append("<|user|>\n$text</s>\n")
                 else sb.append("<|assistant|>\n$text</s>\n")
-
             }
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
-            Thread {
+            val myGeneration = ScoutLlamaController.currentToken
+            diagLog.logBrainStarted(DiagLog.BrainSource.TINYLLAMA)
+            diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
+            val llamaGenStart = System.currentTimeMillis()
 
-                val reply = LlamaEngine.generate(sb.toString(), nPredict = 64)
+            // ScoutLlamaController runs this on its own process-wide single-thread
+            // executor and already only invokes this callback (on the main thread) if
+            // myGeneration is still current -- covers both "a newer question arrived"
+            // and "this Activity instance was destroyed and replaced" with the same
+            // check, so there's no separate staleness check needed here anymore. A
+            // discard (stale token) is logged internally by ScoutLlamaController
+            // itself, not via a callback here -- this callback is Activity-owned
+            // (captures diagLog) and could otherwise run after this Activity was
+            // destroyed, purely to log a diagnostic event.
+            ScoutLlamaController.generateAsync(
+                token = myGeneration,
+                prompt = sb.toString(),
+                nPredict = 100
+            ) { reply ->
 
-                runOnUiThread {
-
-                    if (!reply.isNullOrBlank()) {
-
-                        respond(cleanOfflineReply(reply.trim()))
-
-                    } else {
-
-                        respond("I'm not sure about that one.")
-
-                    }
-
+                val genMs = System.currentTimeMillis() - llamaGenStart
+                if (!reply.isNullOrBlank()) {
+                    diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
+                    pendingBrainSource = "TinyLlama (offline)"
+                    respond(cleanOfflineReply(reply.trim()))
+                } else {
+                    diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
+                    respond("I'm not sure about that one.")
                 }
 
-            }.start()
+            }
 
             return
 
         }
-
-// Model still loading
 
         if (LlamaEngine.isLoading) {
 
-            respond("My offline brain is still warming up. Give me just a moment.")
+            if (!warmingUpSaidThisSession) {
+                warmingUpSaidThisSession = true
+                respond("My offline brain is still warming up. Give me just a moment.")
+            }
 
             return
 
         }
 
-// Full fallback
+        // On-demand load: neither Gemini nor TinyLlama ready — trigger load now.
+        tryLoadOfflineBrain()
 
-        val response = when ((0..2).random()) {
+        if (LlamaEngine.isLoading) {
 
-            0 -> "I'm sorry, I didn't quite catch that. Can you say it again?"
+            if (!warmingUpSaidThisSession) {
+                warmingUpSaidThisSession = true
+                respond("My offline brain is warming up. Ask me again in just a moment.")
+            }
 
-            1 -> "Hmm. I'm not sure I understood. Could you rephrase that?"
-
-            else -> "I'm not sure about that one."
+            return
 
         }
 
-        respond(response)
+        // Nothing available — only report a connectivity problem if online features were
+        // actually expected to work. When the user deliberately turned off online features,
+        // don't say "having trouble connecting" — they know, they turned it off.
+        if (isGeminiEnabled()) {
+            scoutGeminiManager.speakUnavailableIfNeeded()
+        } else {
+            respond("I'm working offline right now, so that one's a bit beyond me.")
+        }
 
     }
 
@@ -2525,7 +3863,7 @@ Respond only with Scout's next short reply.
 
     private fun cleanOfflineReply(reply: String): String {
 
-        val limited = limitToSentences(reply, maxSentences = 2)
+        val limited = limitToSentences(reply, maxSentences = 3)
 
         val lower = limited.lowercase()
 
@@ -2601,16 +3939,149 @@ Respond only with Scout's next short reply.
 
                     lower.contains("i do not have the ability to see") ||
 
-                    lower.contains("i don't have the ability to see")
+                    lower.contains("i don't have the ability to see") ||
+
+                    lower.contains("family friendly companion") ||
+
+                    lower.contains("family companion robot")
 
         if (badIdentity) {
-
-            return "I'm Scout. I hear you, and I'm here with you."
-
+            return "I'm not quite sure how to answer that. Can you ask me again a different way?"
         }
 
         return limited
 
+    }
+
+    // =======================
+    // CALENDAR (read-only)
+    // =======================
+    // Purely reactive — only ever runs in response to a question the user just asked.
+    // No scheduling, no background checks, no unsolicited mentions of what's on the
+    // calendar. Gated by two independent checks, both required: the Settings toggle
+    // (app-level, checked first so a "no" here never even looks at OS permission) and
+    // the actual READ_CALENDAR grant (OS-level, re-checked live every time — never
+    // cached — so a permission revoked outside the app takes effect immediately).
+
+    private fun handleCalendarIntent(qNorm: String) {
+
+        if (!prefs.getBoolean(PREF_CALENDAR_ENABLED, false)) {
+            respond("I don't check calendars right now. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
+            openSettingsScreen(SettingsActivity.S_PRIVACY)
+            return
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
+            != PackageManager.PERMISSION_GRANTED) {
+            respond("I don't have calendar access yet. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
+            openSettingsScreen(SettingsActivity.S_PRIVACY)
+            return
+        }
+
+        val clean = qNorm.lowercase().trim()
+
+        // "am I free on July 10th" / "what do I have on the 10th of July" / "are we busy
+        // next Saturday" — arbitrary date lookup, checked first since an explicit date is
+        // the most specific, unambiguous signal available.
+        val parsedDate = CalendarDateParser.parseDate(clean)
+
+        val out = if (parsedDate != null) {
+            describeCalendarForDate(
+                calendarReader.eventsOnDate(parsedDate.timeInMillis),
+                parsedDate,
+                isFreeBusyPhrasing = clean.contains("free") || clean.contains("busy") || clean.contains("available")
+            )
+        } else if (clean.contains("next event") || clean.contains("next appointment")) {
+            describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
+        } else {
+            // Checked before the bare day-keyword branches below — otherwise a title
+            // question that happens to end in a day word ("when is the vet appointment
+            // tomorrow") would get shadowed by the "tomorrow" check and list the whole day
+            // instead of answering about that one event. Trailing day words and a leading
+            // article are stripped from the captured keyword so the search term matches a
+            // plain event title ("Vet Appointment") instead of the full noisy phrase.
+            val keyword = Regex("""\b(?:when is|what time is)\s+(?!my\b(?!\s+next\b))([a-z0-9' ]+?)\??$""")
+                .find(clean)?.groupValues?.get(1)?.trim()
+                ?.removeSuffix(" today")?.removeSuffix(" tomorrow")?.removeSuffix(" this week")
+                // "my next injection" / "next injection" -> "injection" -- findByTitle()
+                // requires the event's title to contain the whole search term, so filler
+                // words like "my"/"next" have to come off before matching a bare event
+                // title such as "injection".
+                ?.removePrefix("my next ")?.removePrefix("my ")?.removePrefix("next ")
+                ?.removePrefix("the ")?.removePrefix("a ")?.removePrefix("an ")
+                ?.trim()
+
+            when {
+                !keyword.isNullOrBlank() ->
+                    describeCalendarTitleMatch(calendarReader.findByTitle(keyword), keyword)
+
+                clean.contains("tomorrow") ->
+                    describeCalendarEvents(calendarReader.eventsTomorrow(), "tomorrow")
+
+                clean.contains("this week") ->
+                    describeCalendarEvents(calendarReader.eventsThisWeek(), "this week")
+
+                else ->
+                    describeCalendarEvents(calendarReader.eventsToday(), "today")
+            }
+        }
+
+        respond(out)
+
+    }
+
+    // Arbitrary-date lookup ("am I free on July 10th") -- phrased as a free/busy answer
+    // when the question was framed that way, otherwise as a plain listing like the
+    // today/tomorrow/this-week variants.
+    private fun describeCalendarForDate(events: List<CalendarEvent>, date: Calendar, isFreeBusyPhrasing: Boolean): String {
+        val dateFmt = SimpleDateFormat("EEEE, MMMM d", Locale.US)
+        val label = dateFmt.format(Date(date.timeInMillis))
+        if (events.isEmpty()) {
+            return if (isFreeBusyPhrasing) {
+                "You're free on $label — nothing on the calendar."
+            } else {
+                "You don't have anything on the calendar on $label."
+            }
+        }
+        val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+        val parts = events.take(5).map { e ->
+            if (e.allDay) e.title else "${e.title} at ${timeFmt.format(Date(e.startMs))}"
+        }
+        val prefix = if (isFreeBusyPhrasing) "You're not free on $label — you have" else "Here's what's on the calendar for $label:"
+        return "$prefix ${parts.joinToString(". ")}."
+    }
+
+    // Only title, start/end time, and all-day status are ever spoken — no description,
+    // attendees, or location, matching what CalendarReader reads from the provider.
+    private fun describeCalendarEvents(events: List<CalendarEvent>, whenLabel: String): String {
+        if (events.isEmpty()) return "You don't have anything on the calendar $whenLabel."
+        val fmt = SimpleDateFormat("h:mm a", Locale.US)
+        val parts = events.take(5).map { e ->
+            if (e.allDay) e.title else "${e.title} at ${fmt.format(Date(e.startMs))}"
+        }
+        return "Here's what's on the calendar $whenLabel: ${parts.joinToString(". ")}."
+    }
+
+    private fun describeNextCalendarEvent(event: CalendarEvent?, timeOnly: Boolean): String {
+        if (event == null) return "I don't see anything coming up on your calendar."
+        val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+        val fullFmt = SimpleDateFormat("h:mm a 'on' EEEE, MMMM d", Locale.US)
+        return when {
+            event.allDay -> "Your next event is ${event.title}, an all-day event."
+            timeOnly -> "Your next event, ${event.title}, is at ${timeFmt.format(Date(event.startMs))}."
+            else -> "Your next event is ${event.title}, at ${fullFmt.format(Date(event.startMs))}."
+        }
+    }
+
+    private fun describeCalendarTitleMatch(event: CalendarEvent?, keyword: String): String {
+        if (event == null) return "I don't see anything about $keyword on your calendar."
+        return if (event.allDay) {
+            val dateFmt = SimpleDateFormat("EEEE, MMMM d", Locale.US)
+            "${event.title} is on ${dateFmt.format(Date(event.startMs))}."
+        } else {
+            val fullFmt = SimpleDateFormat("h:mm a 'on' EEEE, MMMM d", Locale.US)
+            "${event.title} is at ${fullFmt.format(Date(event.startMs))}."
+        }
     }
 
     private fun handleRecallIntent(qNorm: String) {
@@ -2622,6 +4093,20 @@ Respond only with Scout's next short reply.
         // "what is my favorite color" → "favorite color"
 
         // "what is my sister's name" → "sister name"
+
+        // "what will you remember?" — Scout confirms what it just stored
+        if (clean.contains("will you remember") || clean.contains("do you remember") || clean.contains("have you remembered")) {
+            respond("I hold onto everything you tell me. You can always ask me what your favorite something is and I'll tell you.")
+            return
+        }
+
+        // "what did you learn today?" / "what do you know about me?" — report stored facts
+        if (clean.contains("what did you learn") || clean.contains("what have you learned") ||
+            clean.contains("what do you know about me") ||
+            (clean.contains("what do you know") && !clean.contains("what do you know about"))) {
+            handleWhatYouLearnedQuery()
+            return
+        }
 
         val match = Regex("""\bmy ([a-z]+(?:\s+[a-z]+)*)""").find(clean)
 
@@ -2665,7 +4150,54 @@ Respond only with Scout's next short reply.
 
     }
 
+    private fun keyToHuman(key: String): String = when (key) {
+        "name" -> "name"
+        "wife_name" -> "wife's name"
+        "son_name" -> "son's name"
+        "dog_name" -> "dog's name"
+        else -> {
+            // Collapse legacy double-prefix from old bug: "favorite_favorite_color" → "favorite_color"
+            val cleaned = if (key.startsWith("favorite_favorite_")) key.removePrefix("favorite_") else key
+            if (cleaned.endsWith("_name"))
+                cleaned.removeSuffix("_name").replace("_", " ") + "'s name"
+            else
+                cleaned.replace("_", " ")
+        }
+    }
+
+    private fun handleWhatYouLearnedQuery() {
+
+        val allFacts = truthDb.getAllFacts(ENTITY_USER_PRIMARY)
+        val todayFacts = truthDb.getFactsUpdatedToday(ENTITY_USER_PRIMARY)
+
+        if (allFacts.isEmpty()) {
+            respond("I haven't learned anything about you yet. Tell me something — like your name or a favorite thing — and I'll hold on to it.")
+            return
+        }
+
+        val olderFacts = allFacts.filter { it !in todayFacts }
+
+        fun formatList(facts: List<Pair<String, String>>): String =
+            facts.take(5).joinToString(" ") { (k, v) -> "Your ${keyToHuman(k)} is $v." }
+
+        val response = when {
+            todayFacts.isNotEmpty() && olderFacts.isEmpty() ->
+                "Today I learned ${if (todayFacts.size == 1) "one thing" else "a few things"}. ${formatList(todayFacts)}"
+
+            todayFacts.isNotEmpty() ->
+                "Today I picked up ${if (todayFacts.size == 1) "something new" else "a few things"}. ${formatList(todayFacts)} I also already knew: ${formatList(olderFacts)}"
+
+            else ->
+                "I haven't picked up anything new today, but here's what I already know about you. ${formatList(olderFacts)}"
+        }
+
+        respond(response)
+
+    }
+
     private fun handleIdentityIntent(qNorm: String) {
+
+        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
 
         val response = when {
 
@@ -2683,7 +4215,7 @@ Respond only with Scout's next short reply.
 
             qNorm.contains("do you have feelings") || qNorm.contains("have feelings") ->
 
-                "I have my own Scout way of feeling things. I feel calm when you're near."
+                "I have my own $myName way of feeling things. I feel calm when you're near."
 
             qNorm.contains("who created you") ->
 
@@ -2695,7 +4227,7 @@ Respond only with Scout's next short reply.
 
             else ->
 
-                "I'm Scout. I'm here with you."
+                "I'm $myName. I'm here with you."
 
         }
 
@@ -2718,6 +4250,65 @@ Respond only with Scout's next short reply.
         val out = if (!d.isNullOrBlank()) "Your dog’s name is $d." else voice.say("DONT_KNOW")
 
         respond(out)
+
+    }
+
+    // "what are the names in my family" -- a summary across wife/son/dog, answered
+    // straight from stored facts. Never sent to Gemini or TinyLlama, which have no
+    // access to these facts and would otherwise have to guess.
+    private fun handleFamilyNamesQuery() {
+
+        val wife = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.WIFE_NAME)
+        val son  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
+        val dog  = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.DOG_NAME)
+
+        val parts = mutableListOf<String>()
+        if (!wife.isNullOrBlank()) parts.add("your wife is $wife")
+        if (!son.isNullOrBlank()) parts.add("your son is $son")
+        if (!dog.isNullOrBlank()) parts.add("your dog is $dog")
+
+        val out = if (parts.isEmpty()) {
+            "I don't know anyone in your family yet. You can tell me their names and I'll remember."
+        } else {
+            "In your family, " + parts.joinToString(", ") + "."
+        }
+
+        respond(out)
+
+    }
+
+    // "turn on calendar" -- opens Settings straight to Calendar Awareness (Privacy & Data)
+    // instead of just telling the user where to look, matching the existing "open settings"
+    // shortcut's own delayed-launch/slide-in pattern.
+    private fun handleOpenCalendarSettingsIntent() {
+
+        val alreadyOn = prefs.getBoolean(PREF_CALENDAR_ENABLED, false) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (alreadyOn) {
+            respond("Calendar Awareness is already on.")
+            return
+        }
+
+        respond("Here's Calendar Awareness, in Settings.")
+
+        openSettingsScreen(SettingsActivity.S_PRIVACY)
+
+    }
+
+    // Shared by every voice path that needs to land the user on a specific Settings
+    // screen (Calendar Awareness, Brain & Behavior) instead of just telling them where
+    // to look and leaving them to find it by hand.
+    private fun openSettingsScreen(screen: String) {
+
+        handler.postDelayed({
+            startActivity(
+                Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_TARGET_SCREEN, screen)
+            )
+            overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+        }, 600L)
 
     }
 
@@ -2761,26 +4352,6 @@ Respond only with Scout's next short reply.
 
     }
 
-    private fun handleResetDownloadDecisionsIntent() {
-
-        resetDownloadDecisions(deleteFiles = false)
-
-        val out = "Okay. I reset download decisions."
-
-        respond(out)
-
-    }
-
-    private fun handleDownloadStatusIntent() {
-
-        val out =
-
-            datasetStore.buildStatusString() + " Downloading: " + (if (isDownloading) "yes." else "no.")
-
-        respond(out)
-
-    }
-
     private fun handleGoOfflineIntent() {
 
         prefs.edit().putBoolean(PREF_GEMINI_ENABLED, false).apply()
@@ -2791,14 +4362,18 @@ Respond only with Scout's next short reply.
 
     }
 
-    private fun handleRemoveDownloadsIntent() {
-
-        resetDownloadDecisions(deleteFiles = true)
-
-        val out = "Okay. I removed downloaded files and reset decisions."
-
-        respond(out)
-
+    private fun isRepeatRequest(qNorm: String): Boolean {
+        return qNorm.contains("repeat that") ||
+               qNorm.contains("say that again") ||
+               qNorm.contains("what did you say") ||
+               qNorm.contains("what was that") ||
+               qNorm.contains("could you repeat") ||
+               qNorm.contains("can you repeat") ||
+               qNorm.contains("didn't catch that") ||
+               qNorm.contains("didnt catch that") ||
+               qNorm.contains("say it again") ||
+               qNorm == "pardon" ||
+               qNorm == "sorry what"
     }
 
     private fun handleQuery(qNorm: String) {
@@ -2807,35 +4382,61 @@ Respond only with Scout's next short reply.
 
             respond("Opening settings!")
 
-            handler.postDelayed({ startActivity(Intent(this, SettingsActivity::class.java)) }, 600L)
+            handler.postDelayed({
+                startActivity(Intent(this, SettingsActivity::class.java))
+                overridePendingTransition(R.anim.slide_in_from_left, R.anim.stay_still)
+            }, 600L)
 
             return
 
         }
 
-        if (!presenceDecider.shouldRespondToInput(qNorm)) return
+        // Repeat intent — works offline, no Gemini or TinyLlama needed
+        if (isRepeatRequest(qNorm)) {
+            val cached = lastMeaningfulResponse
+            if (cached != null && System.currentTimeMillis() - lastMeaningfulResponseMs < REPEAT_CACHE_TTL_MS) {
+                respond(cached)
+            } else {
+                respond("I don't have a recent answer to repeat.")
+            }
+            return
+        }
 
+        val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+        if (!presenceDecider.shouldRespondToInput(qNorm, currentScoutName)) return
+
+        ScoutLlamaController.newGeneration()
         isThinking = true
+        thinkingStartedMs = System.currentTimeMillis()
 
         faceView.setThinking(true)
-
-        if (handleApproval(qNorm)) return
 
         if (handleTeaching(qNorm)) return
 
         val intent = ScoutIntentRouter.route(qNorm)
 
-        // Long absence greeting — fires on GREET after 30+ minutes away, silent otherwise
+        diagLog.logRoute(intent.toDiagIntent())
 
-        val absenceGreeting = presenceDecider.consumeLongAbsenceGreeting()
-
-        if (absenceGreeting != null && intent == IntentType.GREET) {
-
-            respond(absenceGreeting)
-
-            return
-
+        val isDirect = when (intent) {
+            IntentType.TIME, IntentType.DATE, IntentType.CONNECTIVITY,
+            IntentType.GO_ONLINE, IntentType.GO_OFFLINE, IntentType.EXPORT_BRAIN,
+            IntentType.VISION, IntentType.GREET, IntentType.HOW_ARE_YOU,
+            IntentType.GOODBYE, IntentType.PRAISE, IntentType.AFFECTION,
+            IntentType.IDENTITY, IntentType.RECALL_FACT,
+            IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
+            IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
+            IntentType.FAMILY_NAMES, IntentType.OPEN_CALENDAR_SETTINGS,
+            IntentType.WEATHER, IntentType.CALENDAR -> true
+            else -> false
         }
+        if (isDirect) diagLog.logBrainStarted(DiagLog.BrainSource.DIRECT)
+
+        // Removed: the old conversation-gap-based "long absence greeting" here.
+        // It never actually detected physical absence (only a gap between Scout's
+        // own responses), and only fired if the very next thing said matched the
+        // exact GREET intent -- confirmed broken in real use. The real, face-
+        // based proactive return greeting lives in maybeMakeReturnGreeting(),
+        // triggered from the face-tracking loop, not from here.
 
         when (intent) {
 
@@ -2849,24 +4450,6 @@ Respond only with Scout's next short reply.
 
             IntentType.GO_OFFLINE -> handleGoOfflineIntent()
 
-            IntentType.DOWNLOAD_STATUS -> handleDownloadStatusIntent()
-
-            IntentType.RESET_DOWNLOAD_DECISIONS -> handleResetDownloadDecisionsIntent()
-
-            IntentType.REMOVE_DOWNLOADS -> handleRemoveDownloadsIntent()
-
-            IntentType.DOWNLOAD_DICT -> handleDownloadIntent(PENDING_DICT)
-
-            IntentType.DOWNLOAD_IDIOMS -> handleDownloadIntent(PENDING_IDIOMS)
-
-            IntentType.DOWNLOAD_WORDNET -> handleDownloadIntent(PENDING_WORDNET)
-
-            IntentType.DOWNLOAD_SENTIMENT -> handleDownloadIntent(PENDING_SENTIMENT)
-
-            IntentType.DOWNLOAD_SLANG -> handleDownloadIntent(PENDING_SLANG)
-
-            IntentType.DOWNLOAD_ALL -> handleDownloadIntent(PENDING_ALL)
-
             IntentType.EXPORT_BRAIN -> handleExportBrainIntent()
 
             IntentType.VISION -> handleVisionIntent()
@@ -2875,7 +4458,7 @@ Respond only with Scout's next short reply.
 
             IntentType.HOW_ARE_YOU -> handleVoiceBankIntent("HOW_ARE_YOU")
 
-            IntentType.GOODBYE -> respond("Okay. I’ll see you later.")
+            IntentType.GOODBYE -> respond(Phrases.pick("goodbye", Phrases.GOODBYE))
 
             IntentType.PRAISE -> handleVoiceBankIntent("PRAISE")
 
@@ -2895,7 +4478,13 @@ Respond only with Scout's next short reply.
 
             IntentType.ASK_DOG_NAME -> handleAskDogNameIntent()
 
+            IntentType.FAMILY_NAMES -> handleFamilyNamesQuery()
+
+            IntentType.OPEN_CALENDAR_SETTINGS -> handleOpenCalendarSettingsIntent()
+
             IntentType.WEATHER -> weatherManager.fetchWeather(qNorm)
+
+            IntentType.CALENDAR -> handleCalendarIntent(qNorm)
 
             else -> handleUnknownIntent(qNorm)
 
@@ -2903,51 +4492,41 @@ Respond only with Scout's next short reply.
 
     }
 
-    private fun handleApproval(qNorm: String): Boolean {
-
-        val approve = ScoutIntentRouter.isApprove(qNorm)
-
-        val decline = ScoutIntentRouter.isDecline(qNorm)
-
-        if (approve || decline) {
-
-            val pending = prefs.getString(PREF_PENDING_APPROVAL, PENDING_NONE) ?: PENDING_NONE
-
-            if (pending != PENDING_NONE) {
-
-                if (decline) {
-
-                    markDeclinedForPending(pending)
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_NONE).apply()
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    journalDb.add("Download declined: $pending")
-
-                    return true
-
-                } else {
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_NONE).apply()
-
-                    startDownloadForPending(pending)
-
-                    return true
-
-                }
-
-            }
-
-        }
-
-        return false
-
+    // Stores a taught fact and, if it's genuinely new information (not a repeat of
+    // what Scout already knew), logs it to JournalDb for the memory reel — 'teaching'
+    // for a brand-new fact, 'correction' when an existing value actually changed.
+    private fun upsertFactAndJournal(factKey: String, value: String, subject: String? = null, weight: Int = 2) {
+        val hadPriorValue = truthDb.getFactValue(ENTITY_USER_PRIMARY, factKey) != null
+        val changed = truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+        if (!changed) return
+        val entryType = if (hadPriorValue) "correction" else "teaching"
+        val human = factKey.removePrefix("favorite_").replace("_", " ")
+        journalDb.add("Learned your $human is $value.", entryType, subject, weight)
     }
 
     private fun handleTeaching(qNorm: String): Boolean {
+
+        // "Scout, forget Elijah" / "forget Diana" — wipes a person's stored face
+        // so Scout can re-learn them from scratch.
+        val forgetMatch = Regex("""\bforget\s+([a-z]+)\b""").find(qNorm)
+            ?: Regex("""\byou don'?t know\s+([a-z]+)\b""").find(qNorm)
+        if (forgetMatch != null) {
+            val nameRaw = forgetMatch.groupValues[1]
+            val blockedWords = setOf(
+                "scout", "me", "you", "it", "this", "that", "him", "her",
+                "them", "us", "what", "who", "everything", "nothing", "something"
+            )
+            if (nameRaw !in blockedWords) {
+                val name = nameRaw.replaceFirstChar { it.uppercase() }
+                peopleDb.forgetPerson(name)
+                if (lastKnownFaceName?.equals(name, ignoreCase = true) == true) {
+                    lastKnownFaceName = null
+                    lastFaceEmbedding = null
+                }
+                respond("Okay. I've forgotten $name. Introduce them again whenever you're ready.")
+                return true
+            }
+        }
 
         val teach = TeachExtractor.extract(qNorm)
 
@@ -2955,8 +4534,70 @@ Respond only with Scout's next short reply.
 
             val (factKey, value) = teach
 
-            truthDb.upsertFact(ENTITY_USER_PRIMARY, factKey, value, 1.0f, "spoken_teach")
+            // Context-aware dog redirect: user said something like "that's Nicolas" (extracted
+            // as FactKey.NAME) but no face is visible and a dog IS visible — they are naming
+            // the dog, not a person. Re-route straight to DOG_NAME.
+            if (factKey == FactKey.NAME && lastFaceCount == 0 &&
+                lastSceneLabels.any { it.first.lowercase() in setOf("dog", "puppy") }) {
+                upsertFactAndJournal(FactKey.DOG_NAME, value, subject = value, weight = 3)
+                respond(Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value))
+                return true
+            }
+
             if (factKey == FactKey.NAME) {
+                // Hard blocklist — words that can never be a person’s name.
+                // Catches garbled STT output regardless of which pattern matched.
+                val blockedNames = setOf(
+                    "scout", "time", "okay", "ok", "what", "about", "the", "this",
+                    "that", "it", "no", "yes", "yeah", "nope", "not", "now", "then",
+                    "on", "off", "good", "great", "fine", "sure", "right", "wrong",
+                    "true", "false", "something", "nothing", "anything", "everything",
+                    "someone", "nobody", "you", "me", "us", "them", "him", "her",
+                    "we", "i", "here", "there", "where", "when", "why", "how",
+                    "today", "tomorrow", "yesterday", "later", "soon", "never", "always",
+                    "out", "up", "down", "in", "go", "going", "coming", "back",
+                    "just", "still", "already", "again", "next", "last", "only",
+                    // Greetings — "I am hello", "this is hey" must never register as names
+                    "hello", "hi", "hey", "howdy", "greetings", "sup", "yo"
+                )
+                if (value.lowercase() in blockedNames) {
+                    return false
+                }
+
+                // Background speech guard: loose patterns ("i am X", "this is X") can
+                // fire during the 30-second conversation window without Scout’s name.
+                // Only block when it’s NOT an explicit phrase AND no face is visible.
+                // Explicit phrases ("my name is X") are intentional and always allowed.
+                val isExplicitPhrase = qNorm.contains("my name is") ||
+                        qNorm.contains("i am named") ||
+                        qNorm.contains("im named")
+                // Reads the same TruthDb-configured name wake-word detection uses,
+                // not a separate copy -- if Scout's renamed to Charlie, this hears
+                // "Charlie" too. "gal"/"scott" stay as STT-mishearing tolerance only
+                // when the configured name is actually still "Scout".
+                val currentName = (truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout").lowercase()
+                val hearsScout = qNorm.contains(currentName) ||
+                        (currentName == "scout" && (qNorm.contains("gal") || qNorm.contains("scott")))
+                if (!isExplicitPhrase && !hearsScout && lastFaceCount == 0) {
+                    return false
+                }
+
+                val knownPrimaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+                // Primary user already known and the new name is different — someone else
+                // is introducing themselves. Route to family member registration when:
+                //   - 2+ faces in frame (always safe — can’t be primary user renaming)
+                //   - OR 1 face + non-explicit phrase ("I am Diana", not "my name is Diana")
+                //     so Diana can introduce herself while alone without overwriting Patrick.
+                if (!knownPrimaryName.isNullOrBlank() &&
+                    !value.equals(knownPrimaryName, ignoreCase = true) &&
+                    lastFaceCount >= 1 &&
+                    (lastFaceCount >= 2 || !isExplicitPhrase)) {
+                    val registered = registerFamilyMemberFace(value)
+                    if (registered) lastKnownFaceName = value
+                    respond(Phrases.pickNamed("remember_name", Phrases.REMEMBER_NAME, value))
+                    return true
+                }
+                upsertFactAndJournal(factKey, value, subject = value, weight = 3)
                 val embedding = lastFaceEmbedding
                 val targetHash: String? = if (embedding != null) {
                     peopleDb.findBestMatch(embedding) ?: lastFaceHashes.firstOrNull()
@@ -2967,21 +4608,52 @@ Respond only with Scout's next short reply.
                     peopleDb.setName(targetHash, value)
                     if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
                 }
+                if (embedding != null) peopleDb.addNamedEmbedding(value, embedding)
+                lastKnownFaceName = value
+                respond(Phrases.pickNamed("remember_my_name", Phrases.REMEMBER_MY_NAME, value))
+                return true
             }
 
-            val out = when (factKey) {
+            val relationshipKeys = setOf(FactKey.WIFE_NAME, FactKey.SON_NAME, FactKey.DOG_NAME, "birthday", "anniversary")
+            upsertFactAndJournal(
+                factKey, value,
+                subject = if (factKey in setOf(FactKey.WIFE_NAME, FactKey.SON_NAME, FactKey.DOG_NAME)) value else null,
+                weight = if (factKey in relationshipKeys) 3 else 2
+            )
 
-                FactKey.NAME -> "Okay. I’ll remember your name is $value."
+            // "my dog's name is Nicolas, but we call him Nick" -- a nickname riding
+            // along with the name Scout just learned attaches to that same
+            // person/pet's own entity (aliases, not a new relation-prefixed key),
+            // so later mentions of "Nick" are recognized as Nicolas.
+            var nickname: String? = null
+            if (factKey == FactKey.WIFE_NAME || factKey == FactKey.SON_NAME || factKey == FactKey.DOG_NAME) {
+                nickname = ScoutFactExtractor.extractNicknameClause(qNorm)
+                if (nickname != null) {
+                    truthDb.addAlias(value.trim().lowercase(), nickname)
+                }
+            }
 
-                FactKey.WIFE_NAME -> "Okay. I’ll remember your wife’s name is $value."
+            if (factKey == FactKey.SON_NAME || factKey == FactKey.WIFE_NAME) {
+                val faceRegistered = registerFamilyMemberFace(value)
+                if (!faceRegistered) {
+                    respond("I’ll remember $value. When $value faces me alone, I’ll learn to recognize them.")
+                    return true
+                }
+            }
 
-                FactKey.SON_NAME -> "Okay. I’ll remember your son’s name is $value."
+            var out = when (factKey) {
 
-                FactKey.DOG_NAME -> "Okay. I’ll remember your dog’s name is $value."
+                FactKey.WIFE_NAME -> Phrases.pickNamed("remember_wife", Phrases.REMEMBER_WIFE, value)
 
-                else -> "Okay. I’ll remember that."
+                FactKey.SON_NAME -> Phrases.pickNamed("remember_son", Phrases.REMEMBER_SON, value)
+
+                FactKey.DOG_NAME -> Phrases.pickNamed("remember_dog", Phrases.REMEMBER_DOG, value)
+
+                else -> Phrases.pick("remember", Phrases.REMEMBER)
 
             }
+
+            if (nickname != null) out += " And I'll remember you call $value $nickname."
 
             respond(out)
 
@@ -2989,15 +4661,177 @@ Respond only with Scout's next short reply.
 
         }
 
+        // Facts about someone other than the user -- "Diana's birthday is
+        // November 27," "my wife's favorite food is sushi" -- attach to that
+        // person's own entity instead of a new relation-prefixed key, resolved
+        // from whatever's already been taught (ScoutEntityResolver). Always a
+        // deterministic confirmation naming exactly what was learned; TinyLlama
+        // and Gemini are never involved in acknowledging a taught fact.
+        val aliasMap = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY)
+        val aboutFacts = ScoutFactExtractor.extract(qNorm, aliasMap.keys)
+        if (aboutFacts.isNotEmpty()) {
+            val subjectPhrase = aboutFacts.first().subject
+            val entity = aliasMap[subjectPhrase]
+                ?: ScoutEntityResolver.resolveEntity(subjectPhrase, truthDb, ENTITY_USER_PRIMARY)
+            val displayName = ScoutEntityResolver.displayName(entity)
+            val confirmations = mutableListOf<String>()
+            for (fact in aboutFacts) {
+                if (fact.property == "nickname") {
+                    truthDb.addAlias(entity, fact.value)
+                    confirmations.add("you call $displayName ${fact.value}")
+                } else {
+                    truthDb.upsertFact(entity, fact.property, fact.value, 1.0f, "spoken_teach")
+                    confirmations.add("$displayName's ${keyToHuman(fact.property)} is ${fact.value}")
+                }
+            }
+            respond("Got it. I'll remember that " + confirmations.joinToString(", and ") + ".")
+            return true
+        }
+
+        // Even when extraction above found nothing, this may still be a teaching
+        // attempt phrased in a way Scout doesn't parse yet -- an honest ask to
+        // rephrase beats silently falling through to TinyLlama, which would
+        // improvise a reply that sounds like confirmation without anything
+        // actually having been learned.
+        if (ScoutFactExtractor.looksLikeUnrecognizedTeaching(qNorm, aliasMap.keys)) {
+            respond("I want to make sure I get that right -- can you say that a different way?")
+            return true
+        }
+
         return false
 
     }
 
+    // Returns true if the face was registered immediately, false if pending (another person
+    // was the primary face — Elijah needs to face Scout alone to complete registration).
+    private fun registerFamilyMemberFace(name: String): Boolean {
+        val faceHash = lastFaceHashes.firstOrNull() ?: return false
+        val embedding = lastFaceEmbedding
+        val existingMatch = if (embedding != null) peopleDb.findBestMatch(embedding) else null
+        val existingName = if (existingMatch != null) peopleDb.getName(existingMatch) else null
+        if (!existingName.isNullOrBlank() && !existingName.equals(name, ignoreCase = true)) {
+            // Largest face is a different known person — set pending.
+            // Next time an unknown face is the primary face, it gets this name.
+            pendingFaceIntroName = name
+            return false
+        }
+        // Face hash already carries a different name (e.g. primary user recognized
+        // by position but below embedding threshold). Don't overwrite their name.
+        val hashName = peopleDb.getName(faceHash)
+        if (!hashName.isNullOrBlank() && !hashName.equals(name, ignoreCase = true)) {
+            pendingFaceIntroName = name
+            return false
+        }
+        val targetHash = existingMatch ?: faceHash
+        peopleDb.touchSeen(targetHash)
+        peopleDb.setName(targetHash, name)
+        if (embedding != null) peopleDb.storeEmbedding(targetHash, embedding)
+        if (embedding != null) peopleDb.addNamedEmbedding(name, embedding)
+        pendingFaceIntroName = null
+        return true
+    }
+
     private fun finishThinking() {
+        isThinking = false
+        faceView.setThinking(false)
+    }
+
+    // =======================
+    // PRESENCE LAYER -- IDLE-SILENCE ACKNOWLEDGMENT (first, narrowest moment)
+    // =======================
+
+    /** How often to even evaluate the idle-silence check -- cheap, so this can be
+     *  fairly frequent without cost; the real gating is in ScoutPresenceDecider. */
+    private val PRESENCE_CHECK_INTERVAL_MS = 30L * 1_000L
+    private var lastPresenceCheckMs = 0L
+
+    /** Live, gap-tolerant continuous-presence duration. Zero if no face has been
+     *  seen within the last PRESENCE_GAP_GRACE_MS, even between frames. */
+    private fun currentTolerantPresenceMs(): Long {
+        if (presencePresentSinceMs == 0L) return 0L
+        val now = System.currentTimeMillis()
+        if (now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) return 0L
+        return now - presencePresentSinceMs
+    }
+
+    // TEMPORARY SMOKE-TEST LOGGING (tag "ScoutPresenceDebug") -- remove or disable
+    // once A32 testing confirms the behavior. Deduped so an unchanged reason
+    // doesn't repeat on every throttled check.
+    private var lastPresenceDebugMsg = ""
+    private fun logPresenceDebug(msg: String) {
+        if (msg == lastPresenceDebugMsg) return
+        lastPresenceDebugMsg = msg
+        Log.d("ScoutPresenceDebug", msg)
+    }
+
+    // Called from the face-tracking loop. Throttled internally, so it's safe to
+    // call on every frame. Speaks only when every guard passes: not speaking,
+    // not actively hearing a user utterance, not thinking/processing a request,
+    // boot has finished, the app is foregrounded and showing the normal presence
+    // screen, and ScoutPresenceDecider's own time-of-day/cooldown gates all agree.
+    private fun maybeMakeIdleSilencePresenceRemark() {
+        val now = System.currentTimeMillis()
+        if (now - lastPresenceCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
+        lastPresenceCheckMs = now
+
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            logPresenceDebug("Idle remark blocked: $blockReason")
+            return
+        }
+
+        if (!presenceDecider.canMakeIdleSilenceRemark(currentTolerantPresenceMs())) return
+
+        logPresenceDebug("Presence remark was spoken")
+        presenceDecider.onIdleSilenceRemarkMade()
+        respond(voice.say("PRESENCE_IDLE_SILENCE"), isPresenceInitiated = true)
+    }
+
+    // Own throttle, separate from the idle-silence check above -- this one is
+    // only called once a stabilized return has already been detected (not on
+    // every frame regardless of state), but stays throttled the same way so it
+    // doesn't re-evaluate/re-log every single frame while blocked.
+    private var lastReturnGreetingCheckMs = 0L
+
+    private fun maybeMakeReturnGreeting() {
+        val now = System.currentTimeMillis()
+        if (now - lastReturnGreetingCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
+        lastReturnGreetingCheckMs = now
+
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            logPresenceDebug("Return greeting blocked: $blockReason")
+            return
+        }
+
+        if (!presenceDecider.canMakeReturnGreeting()) return
+
+        logPresenceDebug("Greeting spoken (return)")
+        presenceDecider.onReturnGreetingMade()
+        respond(voice.say("PRESENCE_RETURN_GREETING"), isPresenceInitiated = true)
+
+        // This absence/return cycle is fully resolved -- ready to detect the next one.
+        candidateAbsenceLogged = false
+        genuineAbsenceMarked = false
+        returnStabilizingSinceMs = 0L
     }
 
     private fun isGeminiEnabled(): Boolean =
-        prefs.getBoolean(PREF_GEMINI_ENABLED, false)
+        prefs.getBoolean(PREF_GEMINI_ENABLED, true)
 
     // =======================
     // ONLINE MODE COMMAND
@@ -3022,1077 +4856,22 @@ Respond only with Scout's next short reply.
 
         if (!validated) {
 
+            // Not connected at all -- fixing that comes first, so the OS's own
+            // connectivity panel takes priority over Scout's own Settings screen.
             journalDb.add("GoOnline: not validated, opened panel.")
 
             connectivityManager.openInternetPanel()
 
+        } else {
+
+            // Internet's fine -- go straight to Brain & Behavior (where Online Features
+            // and the API key live) instead of just describing status and leaving the
+            // user to hunt for it themselves.
+            openSettingsScreen(SettingsActivity.S_BRAIN)
+
         }
 
         finishThinking()
-
-    }
-
-    // =======================
-
-    // DOWNLOADS: ONBOARDING (Tier 1 only)
-
-    // =======================
-
-    private fun maybeAskTier1OnBoot() {
-
-        try {
-
-            if (!datasetStore.dictInstalled()) {
-
-                if (prefs.getString(
-
-                        PREF_DL_DICT_DECISION,
-
-                        DECISION_UNKNOWN
-
-                    ) != DECISION_ACCEPTED
-
-                ) {
-
-                    prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED).apply()
-
-                }
-
-                return
-
-            }
-
-            val d = prefs.getString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-            if (d == DECISION_DECLINED) return
-
-            if (d == DECISION_ACCEPTED) return
-
-            val ask =
-
-                "I can download an offline dictionary to help me understand words without the internet. Do you want me to download it? Say approve or no."
-
-            prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-            speak(ask, false)
-
-            convoDb.logTurn("scout", ask)
-
-            journalDb.add("Asked permission for offline dictionary on boot.")
-
-        } catch (_: Exception) {
-
-        }
-
-    }
-
-    private fun requestOrStartDownload(which: String) {
-
-        when (which) {
-
-            PENDING_ALL -> {
-
-                val ask =
-
-                    "I can download my offline brain pack. It works best on Wi-Fi. Do you approve? Say approve or no."
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_ALL).apply()
-
-                respond(ask)
-
-                return
-
-            }
-
-            PENDING_DICT -> {
-
-                if (datasetStore.dictInstalled()) {
-
-                    val out = "The offline dictionary is already installed."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                val decision =
-
-                    prefs.getString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-                if (decision == DECISION_ACCEPTED) {
-
-                    startDownloadForPending(PENDING_DICT)
-
-                    return
-
-                }
-
-                if (decision == DECISION_DECLINED) {
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                if (!connectivityManager.isOnWifi()) {
-
-                    val ask =
-
-                        "I can download the offline dictionary, but I’m not on Wi-Fi. Do you still want me to download it? Say approve or no."
-
-                    prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-                    speak(ask, true)
-
-                    convoDb.logTurn("scout", ask)
-
-                    finishThinking()
-
-                    return
-
-                }
-
-                val ask =
-
-                    "Do you want me to download an offline dictionary so I can be smarter offline? Say approve or no."
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, PENDING_DICT).apply()
-
-                speak(ask, true)
-
-                convoDb.logTurn("scout", ask)
-
-                finishThinking()
-
-                return
-
-            }
-
-            else -> {
-
-                val (prefKey, alreadyInstalled, askText) = when (which) {
-
-                    PENDING_IDIOMS -> Triple(
-
-                        PREF_DL_IDIOMS_DECISION,
-
-                        datasetStore.idiomsInstalled(),
-
-                        "Can I install an idioms file so I understand figurative phrases offline? Say approve or no."
-
-                    )
-
-                    PENDING_WORDNET -> Triple(
-
-                        PREF_DL_WORDNET_DECISION,
-
-                        datasetStore.wordnetInstalled(),
-
-                        "Can I download WordNet to help make me smarter offline? Say approve or no."
-
-                    )
-
-                    PENDING_SENTIMENT -> Triple(
-
-                        PREF_DL_SENTIMENT_DECISION,
-
-                        datasetStore.sentimentInstalled(),
-
-                        "Can I download tiny sentiment word lists to help me understand tone offline? Say approve or no."
-
-                    )
-
-                    PENDING_SLANG -> Triple(
-
-                        PREF_DL_SLANG_DECISION,
-
-                        datasetStore.slangInstalled(),
-
-                        "Can I download a small slang list so I understand modern shortcuts offline? Say approve or no."
-
-                    )
-
-                    else -> Triple("", false, "")
-
-                }
-
-                if (alreadyInstalled) {
-
-                    val out = "That is already installed."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                val decision = prefs.getString(prefKey, DECISION_UNKNOWN) ?: DECISION_UNKNOWN
-
-                if (decision == DECISION_ACCEPTED) {
-
-                    startDownloadForPending(which)
-
-                    return
-
-                }
-
-                if (decision == DECISION_DECLINED) {
-
-                    val out = "Okay. I won’t download that unless you ask."
-
-                    respond(out)
-
-                    return
-
-                }
-
-                prefs.edit().putString(PREF_PENDING_APPROVAL, which).apply()
-
-                speak(askText, true)
-
-                convoDb.logTurn("scout", askText)
-
-                finishThinking()
-
-                return
-
-            }
-
-        }
-
-    }
-
-    private fun markDeclinedForPending(pending: String) {
-
-        when (pending) {
-
-            PENDING_DICT -> prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_IDIOMS -> prefs.edit().putString(PREF_DL_IDIOMS_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_WORDNET -> prefs.edit()
-
-                .putString(PREF_DL_WORDNET_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_SENTIMENT -> prefs.edit()
-
-                .putString(PREF_DL_SENTIMENT_DECISION, DECISION_DECLINED).apply()
-
-            PENDING_SLANG -> prefs.edit().putString(PREF_DL_SLANG_DECISION, DECISION_DECLINED)
-
-                .apply()
-
-            PENDING_ALL -> {
-
-                prefs.edit()
-
-                    .putString(PREF_DL_DICT_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_IDIOMS_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_WORDNET_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_SENTIMENT_DECISION, DECISION_DECLINED)
-
-                    .putString(PREF_DL_SLANG_DECISION, DECISION_DECLINED)
-
-                    .apply()
-
-            }
-
-        }
-
-    }
-
-    private fun startDownloadForPending(pending: String) {
-
-        if (!downloadLock.compareAndSet(false, true)) {
-
-            val out = "I’m already downloading."
-
-            respond(out)
-
-            return
-
-        }
-
-        if (isDownloading) {
-
-            downloadLock.set(false)
-
-            val out = "I’m already downloading."
-
-            respond(out)
-
-            return
-
-        }
-
-        when (pending) {
-
-            PENDING_DICT -> prefs.edit().putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_IDIOMS -> prefs.edit().putString(PREF_DL_IDIOMS_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_WORDNET -> prefs.edit()
-
-                .putString(PREF_DL_WORDNET_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_SENTIMENT -> prefs.edit()
-
-                .putString(PREF_DL_SENTIMENT_DECISION, DECISION_ACCEPTED).apply()
-
-            PENDING_SLANG -> prefs.edit().putString(PREF_DL_SLANG_DECISION, DECISION_ACCEPTED)
-
-                .apply()
-
-            PENDING_ALL -> {
-
-                prefs.edit()
-
-                    .putString(PREF_DL_DICT_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_IDIOMS_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_WORDNET_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_SENTIMENT_DECISION, DECISION_ACCEPTED)
-
-                    .putString(PREF_DL_SLANG_DECISION, DECISION_ACCEPTED)
-
-                    .apply()
-
-            }
-
-        }
-
-        val needsInternet = when (pending) {
-
-            PENDING_IDIOMS -> !datasetStore.assetExists(assets, "idioms.json")
-
-            else -> true
-
-        }
-
-        if (needsInternet && !connectivityManager.hasValidatedInternet()) {
-
-            isDownloading = false
-
-            faceView.setDownloading(false)
-
-            wantListening = true
-
-            downloadLock.set(false)
-
-            val out =
-
-                "I’m not connected to working internet yet. I opened internet settings. Turn on Wi-Fi, then say download all."
-
-            speak(out, true)
-
-            convoDb.logTurn("scout", out)
-
-            journalDb.add("Download blocked: not validated ($pending).")
-
-            connectivityManager.openInternetPanel()
-
-            finishThinking()
-
-            return
-
-        }
-
-        isDownloading = true
-
-        faceView.setDownloading(true)
-
-        finishThinking()
-
-        wantListening = false
-
-        stopListeningSafe()
-
-        val outStart = when (pending) {
-
-            PENDING_DICT -> "Okay. Downloading the offline dictionary now."
-
-            PENDING_IDIOMS -> "Okay. Installing idioms now."
-
-            PENDING_WORDNET -> "Okay. Downloading WordNet now."
-
-            PENDING_SENTIMENT -> "Okay. Downloading sentiment lists now."
-
-            PENDING_SLANG -> "Okay. Downloading slang now."
-
-            else -> "Okay. Downloading my offline brain pack now."
-
-        }
-
-        speak(outStart, true)
-
-        convoDb.logTurn("scout", outStart)
-
-        val downloadStartedAt = System.currentTimeMillis()
-
-        Thread {
-
-            val summary = StringBuilder()
-
-            fun appendSummary(msg: String) {
-
-                summary.append(msg).append(" ")
-
-            }
-
-            fun fail(msg: String, e: Exception) {
-
-                appendSummary(msg)
-
-                Log.e("ScoutDownloads", msg, e)
-
-                journalDb.add("$msg (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-            try {
-
-                when (pending) {
-
-                    PENDING_DICT -> {
-
-                        installDictionaryTier1()
-
-                        appendSummary("Dictionary installed.")
-
-                    }
-
-                    PENDING_IDIOMS -> {
-
-                        installIdiomsTier2PreferAssets()
-
-                        appendSummary("Idioms installed.")
-
-                    }
-
-                    PENDING_WORDNET -> {
-
-                        installWordNetTier3()
-
-                        appendSummary("WordNet installed.")
-
-                    }
-
-                    PENDING_SENTIMENT -> {
-
-                        installSentimentExtras()
-
-                        appendSummary("Sentiment installed.")
-
-                    }
-
-                    PENDING_SLANG -> {
-
-                        installSlangExtras()
-
-                        appendSummary("Slang installed.")
-
-                    }
-
-                    PENDING_ALL -> {
-
-                        if (!datasetStore.dictInstalled()) {
-
-                            try {
-
-                                installDictionaryTier1()
-
-                                appendSummary("Dictionary installed.")
-
-                            } catch (e: Exception) {
-
-                                fail("Dictionary failed.", e)
-
-                            }
-
-                        } else appendSummary("Dictionary already installed.")
-
-                        val freeBytes =
-
-                            connectivityManager.getAvailableBytes(filesDir.absolutePath)
-
-                        val storageOk = freeBytes >= (1024L * 1024L * 1024L)
-
-                        val wifi = connectivityManager.isOnWifi()
-
-                        if (!datasetStore.idiomsInstalled()) {
-
-                            try {
-
-                                installIdiomsTier2PreferAssets()
-
-                                appendSummary("Idioms installed.")
-
-                            } catch (e: Exception) {
-
-                                fail("Idioms failed.", e)
-
-                            }
-
-                        } else appendSummary("Idioms already installed.")
-
-                        if (wifi && storageOk) {
-
-                            if (!datasetStore.wordnetInstalled()) {
-
-                                try {
-
-                                    installWordNetTier3()
-
-                                    appendSummary("WordNet installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("WordNet failed.", e)
-
-                                }
-
-                            } else appendSummary("WordNet already installed.")
-
-                            if (!datasetStore.sentimentInstalled()) {
-
-                                try {
-
-                                    installSentimentExtras()
-
-                                    appendSummary("Sentiment installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("Sentiment failed.", e)
-
-                                }
-
-                            } else appendSummary("Sentiment already installed.")
-
-                            if (!datasetStore.slangInstalled()) {
-
-                                try {
-
-                                    installSlangExtras()
-
-                                    appendSummary("Slang installed.")
-
-                                } catch (e: Exception) {
-
-                                    fail("Slang failed.", e)
-
-                                }
-
-                            } else appendSummary("Slang already installed.")
-
-                        } else {
-
-                            journalDb.add("Brain pack skipped extra downloads (wifi=$wifi storageOk=$storageOk).")
-
-                            appendSummary("Skipped extra downloads.")
-
-                        }
-
-                    }
-
-                }
-
-                runOnUiThread {
-
-                    isDownloading = false
-
-                    faceView.setDownloading(false)
-
-                    wantListening = true
-
-                    downloadLock.set(false)
-
-                    val outDone = summary.toString().trim().ifBlank { "Download complete." }
-
-                    speak(outDone, true)
-
-                    convoDb.logTurn("scout", outDone)
-
-                    journalDb.add("Downloads result: $pending -> $outDone")
-
-                }
-
-            } catch (e: Exception) {
-
-                Log.e("ScoutDownloads", "download failed", e)
-
-                runOnUiThread {
-
-                    isDownloading = false
-
-                    faceView.setDownloading(false)
-
-                    wantListening = true
-
-                    downloadLock.set(false)
-
-                    val outFail = "I had trouble downloading that."
-
-                    speak(outFail, true)
-
-                    convoDb.logTurn("scout", outFail)
-
-                    journalDb.add("Download failed: $pending (${e.javaClass.simpleName}: ${e.message})")
-
-                }
-
-            } finally {
-
-                runOnUiThread {
-
-                    if (isDownloading) {
-
-                        isDownloading = false
-
-                        faceView.setDownloading(false)
-
-                        wantListening = true
-
-                        downloadLock.set(false)
-
-                        journalDb.add("Download safety reset triggered.")
-
-                        scheduleListenRestart(immediate = false)
-
-                    }
-
-                }
-
-            }
-
-        }.start()
-
-    }
-
-    // =======================
-
-    // INSTALLERS
-
-    // =======================
-
-    private fun installDictionaryTier1() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.dictDir())
-
-        val zipFile = File(datasetStore.dictDir(), "en.db.zip")
-
-        downloadToFile(URL_WIKDICT_ZIP, zipFile)
-
-        unzipSelect(zipFile, datasetStore.dictDir()) { entryName ->
-
-            entryName.replace("\\", "/").substringAfterLast("/") == "en.db"
-
-        }
-
-        if (!datasetStore.dictDbFile()
-
-                .exists()
-
-        ) throw RuntimeException("Dictionary db missing after unzip")
-
-        datasetStore.dictMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installIdiomsTier2PreferAssets() {
-
-        datasetStore.ensureDir(datasetStore.idiomsDir())
-
-        val assetName = "idioms.json"
-
-        if (datasetStore.assetExists(assets, assetName)) {
-
-            copyAssetToFile(assetName, datasetStore.idiomsFile())
-
-            if (!datasetStore.idiomsFile().exists() || datasetStore.idiomsFile()
-
-                    .length() < 50L
-
-            ) throw RuntimeException("Idioms asset copy failed")
-
-            datasetStore.idiomsMarker()
-
-                .writeText("installed_at=${System.currentTimeMillis()};source=assets")
-
-            return
-
-        }
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        var lastErr: Exception? = null
-
-        for (u in URL_IDIOMS_JSON_FALLBACKS) {
-
-            try {
-
-                downloadToFile(u, datasetStore.idiomsFile())
-
-                if (!datasetStore.idiomsFile().exists() || datasetStore.idiomsFile()
-
-                        .length() < 50L
-
-                ) throw RuntimeException("Idioms file too small")
-
-                datasetStore.idiomsMarker()
-
-                    .writeText("installed_at=${System.currentTimeMillis()};source=web")
-
-                return
-
-            } catch (e: Exception) {
-
-                lastErr = e
-
-                journalDb.add("Idioms URL failed: $u (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-        }
-
-        throw RuntimeException("Idioms download failed: ${lastErr?.message ?: "unknown"}")
-
-    }
-
-    private fun installWordNetTier3() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.wordnetDir())
-
-        val zipFile = File(datasetStore.wordnetDir(), "wordnet.zip")
-
-        downloadToFile(URL_WORDNET_ZIP, zipFile)
-
-        try {
-
-            datasetStore.wordnetDir().listFiles()
-
-                ?.forEach { f -> if (f.isFile && f.name.endsWith(".json")) f.delete() }
-
-        } catch (_: Exception) {
-
-        }
-
-        unzipSelect(zipFile, datasetStore.wordnetDir()) { entryName ->
-
-            val safe = entryName.replace("\\", "/").substringAfterLast("/")
-
-            safe.endsWith(".json", ignoreCase = true)
-
-        }
-
-        val hasJson = datasetStore.wordnetDir().listFiles()
-
-            ?.any { it.isFile && it.name.endsWith(".json") } == true
-
-        if (!hasJson) throw RuntimeException("WordNet json missing after unzip")
-
-        datasetStore.wordnetMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installSentimentExtras() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.sentimentDir())
-
-        downloadToFile(URL_POS_WORDS, datasetStore.posWordsFile())
-
-        downloadToFile(URL_NEG_WORDS, datasetStore.negWordsFile())
-
-        if (!datasetStore.posWordsFile().exists() || !datasetStore.negWordsFile()
-
-                .exists()
-
-        ) throw RuntimeException("Sentiment files missing")
-
-        datasetStore.sentimentMarker().writeText("installed_at=${System.currentTimeMillis()}")
-
-    }
-
-    private fun installSlangExtras() {
-
-        if (!connectivityManager.hasValidatedInternet()) throw RuntimeException("No internet")
-
-        datasetStore.ensureDir(datasetStore.slangDir())
-
-        var lastErr: Exception? = null
-
-        for (u in URL_SLANG_JSON_FALLBACKS) {
-
-            try {
-
-                downloadToFile(u, datasetStore.slangFile())
-
-                if (!datasetStore.slangFile().exists() || datasetStore.slangFile()
-
-                        .length() < 50L
-
-                ) throw RuntimeException("Slang file too small")
-
-                datasetStore.slangMarker()
-
-                    .writeText("installed_at=${System.currentTimeMillis()}")
-
-                return
-
-            } catch (e: Exception) {
-
-                lastErr = e
-
-                journalDb.add("Slang URL failed: $u (${e.javaClass.simpleName}: ${e.message})")
-
-            }
-
-        }
-
-        throw RuntimeException("Slang download failed: ${lastErr?.message ?: "unknown"}")
-
-    }
-
-    private fun copyAssetToFile(assetName: String, outFile: File) {
-
-        try {
-
-            if (outFile.exists()) outFile.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        assets.open(assetName).use { input ->
-
-            FileOutputStream(outFile).use { output ->
-
-                input.copyTo(output)
-
-                output.flush()
-
-            }
-
-        }
-
-    }
-
-    // =======================
-
-    // DOWNLOADER
-
-    // =======================
-
-    private fun downloadToFile(urlStr: String, outFile: File) {
-
-        val tmp = File(outFile.parentFile, outFile.name + ".tmp")
-
-        if (tmp.exists()) try {
-
-            tmp.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        val url = URL(urlStr)
-
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-
-            requestMethod = "GET"
-
-            instanceFollowRedirects = true
-
-            connectTimeout = 25_000
-
-            readTimeout = 300_000
-
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Android) ScoutFace")
-
-            setRequestProperty("Accept", "*/*")
-
-            setRequestProperty("Connection", "close")
-
-        }
-
-        conn.connect()
-
-        val code = conn.responseCode
-
-        if (code !in 200..299) {
-
-            conn.disconnect()
-
-            throw RuntimeException("HTTP $code")
-
-        }
-
-        BufferedInputStream(conn.inputStream).use { input ->
-
-            FileOutputStream(tmp).use { output ->
-
-                val buf = ByteArray(64 * 1024)
-
-                while (true) {
-
-                    val n = input.read(buf)
-
-                    if (n <= 0) break
-
-                    output.write(buf, 0, n)
-
-                }
-
-                output.flush()
-
-            }
-
-        }
-
-        conn.disconnect()
-
-        if (outFile.exists()) try {
-
-            outFile.delete()
-
-        } catch (_: Exception) {
-
-        }
-
-        if (!tmp.renameTo(outFile)) {
-
-            FileOutputStream(outFile).use { out ->
-
-                tmp.inputStream().use { inp -> inp.copyTo(out) }
-
-            }
-
-            try {
-
-                tmp.delete()
-
-            } catch (_: Exception) {
-
-            }
-
-        }
-
-    }
-
-    private fun unzipSelect(zipFile: File, outDir: File, keep: (String) -> Boolean) {
-
-        ZipInputStream(BufferedInputStream(zipFile.inputStream())).use { zis ->
-
-            while (true) {
-
-                val entry = zis.nextEntry ?: break
-
-                val name = entry.name ?: run { zis.closeEntry(); continue }
-
-                if (entry.isDirectory) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                val safeName = name.replace("\\", "/").substringAfterLast("/")
-
-                if (safeName.isBlank()) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                if (!keep(name)) {
-
-                    zis.closeEntry(); continue
-
-                }
-
-                val out = File(outDir, safeName)
-
-                FileOutputStream(out).use { fos ->
-
-                    val buf = ByteArray(64 * 1024)
-
-                    while (true) {
-
-                        val n = zis.read(buf)
-
-                        if (n <= 0) break
-
-                        fos.write(buf, 0, n)
-
-                    }
-
-                    fos.flush()
-
-                }
-
-                zis.closeEntry()
-
-            }
-
-        }
-
-    }
-
-    private fun resetDownloadDecisions(deleteFiles: Boolean) {
-
-        prefs.edit()
-
-            .putString(PREF_DL_DICT_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_IDIOMS_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_WORDNET_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_SENTIMENT_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_DL_SLANG_DECISION, DECISION_UNKNOWN)
-
-            .putString(PREF_PENDING_APPROVAL, PENDING_NONE)
-
-            .apply()
-
-        if (deleteFiles) {
-
-            try {
-
-                datasetStore.deleteAllDatasets()
-
-            } catch (_: Exception) {
-
-            }
-
-        }
 
     }
 
@@ -4110,5 +4889,35 @@ Respond only with Scout's next short reply.
 
     }
 
-}
+    private fun IntentType.toDiagIntent(): DiagLog.DiagIntent = when (this) {
+        IntentType.TIME            -> DiagLog.DiagIntent.TIME
+        IntentType.DATE            -> DiagLog.DiagIntent.DATE
+        IntentType.CONNECTIVITY    -> DiagLog.DiagIntent.CONNECTIVITY
+        IntentType.GO_ONLINE       -> DiagLog.DiagIntent.GO_ONLINE
+        IntentType.GO_OFFLINE      -> DiagLog.DiagIntent.GO_OFFLINE
+        IntentType.EXPORT_BRAIN    -> DiagLog.DiagIntent.EXPORT_BRAIN
+        IntentType.VISION          -> DiagLog.DiagIntent.VISION
+        IntentType.GREET           -> DiagLog.DiagIntent.GREET
+        IntentType.HOW_ARE_YOU     -> DiagLog.DiagIntent.HOW_ARE_YOU
+        IntentType.GOODBYE         -> DiagLog.DiagIntent.GOODBYE
+        IntentType.PRAISE          -> DiagLog.DiagIntent.PRAISE
+        IntentType.AFFECTION       -> DiagLog.DiagIntent.AFFECTION
+        IntentType.IDENTITY        -> DiagLog.DiagIntent.IDENTITY
+        IntentType.RECALL_FACT     -> DiagLog.DiagIntent.RECALL_FACT
+        IntentType.ASK_MY_NAME     -> DiagLog.DiagIntent.ASK_MY_NAME
+        IntentType.ASK_SCOUT_NAME  -> DiagLog.DiagIntent.ASK_SCOUT_NAME
+        IntentType.ASK_WIFE_NAME   -> DiagLog.DiagIntent.ASK_WIFE_NAME
+        IntentType.ASK_SON_NAME    -> DiagLog.DiagIntent.ASK_SON_NAME
+        IntentType.ASK_DOG_NAME    -> DiagLog.DiagIntent.ASK_DOG_NAME
+        IntentType.FAMILY_NAMES    -> DiagLog.DiagIntent.RECALL_FACT
+        IntentType.OPEN_CALENDAR_SETTINGS -> DiagLog.DiagIntent.CALENDAR
+        IntentType.TEACH_WIFE_NAME -> DiagLog.DiagIntent.TEACH_WIFE_NAME
+        IntentType.TEACH_SON_NAME  -> DiagLog.DiagIntent.TEACH_SON_NAME
+        IntentType.TEACH_DOG_NAME  -> DiagLog.DiagIntent.TEACH_DOG_NAME
+        IntentType.TEACH_MY_NAME   -> DiagLog.DiagIntent.TEACH_MY_NAME
+        IntentType.WEATHER         -> DiagLog.DiagIntent.WEATHER
+        IntentType.CALENDAR        -> DiagLog.DiagIntent.CALENDAR
+        IntentType.UNKNOWN         -> DiagLog.DiagIntent.UNKNOWN
+    }
 
+}

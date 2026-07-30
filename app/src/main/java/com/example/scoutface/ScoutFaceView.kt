@@ -10,6 +10,7 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -106,13 +107,21 @@ class ScoutFaceView @JvmOverloads constructor(
 
         lookX  = 0f; lookY  = 0f
         lookVX = 0f; lookVY = 0f
-        thinkGazeY     = 0f
+        thinkGazeY        = 0f
+        thinkGazeX        = 0f
+        thinkGlanceActive = false
+        thinkGlanceSideX  = 0f
+        nextThinkGlanceAt = 0L
+        thinkEndedAt      = 0L
         vergenceSmooth = 0f
 
         // FIX 1: reset listening bias smoother
         listeningBiasSmooth = 0f
 
         lowerLidSmooth = 0f
+        lowerLidExprL  = 0f
+        lowerLidExprR  = 0f
+        thinkLidSmooth = 0f
 
         blinking      = false
         blinkPhaseL   = 0f; blinkPhaseR   = 0f
@@ -134,6 +143,17 @@ class ScoutFaceView @JvmOverloads constructor(
         nextDriftChangeAt = 0L
 
         focusBreathPhase = 0f
+
+        microTremorX = 0f; microTremorY = 0f
+        microTremorTargetX = 0f; microTremorTargetY = 0f
+        nextMicroTremorAt = 0L
+        pendingDoubleBlink = false
+
+        faceIdleDriftX = 0f; faceIdleDriftY = 0f
+        faceIdleDriftTargetX = 0f; faceIdleDriftTargetY = 0f
+        nextFaceDriftAt = 0L
+        faceGazeDriftX = 0f; faceGazeDriftY = 0f
+        blinkDipY = 0f; blinkBrowRelax = 0f
 
         // FIX 3: reset wave gate
         waveActive = false
@@ -189,7 +209,10 @@ class ScoutFaceView @JvmOverloads constructor(
     private val lidTiredL = 0.54f + Random.nextFloat() * 0.08f
     private val lidTiredR = 0.54f + Random.nextFloat() * 0.08f
 
-    private var lowerLidSmooth = 0f
+    private var lowerLidSmooth  = 0f   // speech/breath base lower lid, both eyes
+    private var lowerLidExprL   = 0f   // expression layer, left eye (px, upward)
+    private var lowerLidExprR   = 0f   // expression layer, right eye (px, upward)
+    private var thinkLidSmooth  = 0f   // fast-responding right-eye droop during thinking
 
     private var vergenceSmooth    = 0f
     private val VERGENCE_MAX_BIAS = 18f
@@ -199,7 +222,12 @@ class ScoutFaceView @JvmOverloads constructor(
     // Tau 160ms — fast enough to feel responsive, slow enough to kill the twitch.
     private var listeningBiasSmooth = 0f
 
-    private var thinkGazeY = 0f
+    private var thinkGazeY       = 0f
+    private var thinkGazeX       = 0f   // X component of thinking glance
+    private var thinkGlanceActive = false
+    private var thinkGlanceSideX  = 0f
+    private var nextThinkGlanceAt = 0L
+    private var thinkEndedAt      = 0L  // timestamp thinking stopped; drives reconnect snap
 
     private var browMicroY      = 0f
     private var browMicroTarget = 0f
@@ -219,6 +247,33 @@ class ScoutFaceView @JvmOverloads constructor(
     private var focusBreathPhase      = Random.nextFloat() * (2f * Math.PI).toFloat()
     private val FOCUS_BREATH_PERIOD_MS = 3200f
     private val FOCUS_BREATH_AMPLITUDE = 0.65f
+
+    // Micro-tremor: sub-pixel constant random iris drift — eyes never completely still
+    private var microTremorX       = 0f
+    private var microTremorY       = 0f
+    private var microTremorTargetX = 0f
+    private var microTremorTargetY = 0f
+    private var nextMicroTremorAt  = 0L
+
+    // Double-blink: when set, nextBlinkAt fires quickly for a follow-up blink
+    private var pendingDoubleBlink = false
+
+    // Whole-face gentle drift — every feature moves together as one unit (the "alive" feel)
+    private var faceIdleDriftX       = 0f
+    private var faceIdleDriftY       = 0f
+    private var faceIdleDriftTargetX = 0f
+    private var faceIdleDriftTargetY = 0f
+    private var nextFaceDriftAt      = 0L
+
+    // Gaze-driven face drift — whole face slowly follows the gaze direction.
+    // Eyes arrive at target first (spring physics); face lags ~900ms behind.
+    // Creates a "head turning to look" feel instead of just eyeballs rolling.
+    private var faceGazeDriftX = 0f
+    private var faceGazeDriftY = 0f
+
+    // Secondary blink motion: face dips + brows relax when a blink fires
+    private var blinkDipY      = 0f
+    private var blinkBrowRelax = 0f
 
     private var saccadeX       = 0f
     private var saccadeY       = 0f
@@ -372,6 +427,21 @@ class ScoutFaceView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    // 3-D depth: gradient lid, lash-line shadow, lower-lid rim light, socket AO
+    private val pLidGrad = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val pLashLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 5f
+        strokeCap = Paint.Cap.ROUND
+        maskFilter = BlurMaskFilter(3f, BlurMaskFilter.Blur.NORMAL)
+    }
+    private val pLowerLidRim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val pSocketAO = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
     // ======================================================
     //  REUSABLE GEOMETRY — allocated once, never inside draw
     // ======================================================
@@ -431,9 +501,10 @@ class ScoutFaceView @JvmOverloads constructor(
     //  DRAW FACE
     // ======================================================
     private fun drawFace(c: Canvas, now: Long) {
-        val breathOffset = sin(breathPhase) * BREATH_AMPLITUDE
-        val faceCy       = VH * 0.46f + breathOffset
-        val faceCx       = VW * 0.50f
+        val breathOffset  = sin(breathPhase) * BREATH_AMPLITUDE
+        val breathOffsetX = sin(breathPhase * 0.618f + 1.1f) * 1.5f  // gentle X sway on a different phase
+        val faceCy = VH * 0.46f + breathOffset  + faceIdleDriftY + blinkDipY + faceGazeDriftY
+        val faceCx = VW * 0.50f + breathOffsetX + faceIdleDriftX + faceGazeDriftX
 
         val eyeW      = 510f
         val eyeH      = 394f
@@ -478,8 +549,11 @@ class ScoutFaceView @JvmOverloads constructor(
         rightGeom.cx = rightCx
         rightGeom.cy = faceCy
 
-        drawEye(c, leftGeom, blinkL, lidDroopL, now)
-        drawEye(c, rightGeom, blinkR, lidDroopR, now)
+        // Per-eye lower lid: base (speech/breath) + expression layer + blink rise
+        val lowerL = (lowerLidSmooth + lowerLidExprL + blinkL * 6f).coerceIn(0f, 20f)
+        val lowerR = (lowerLidSmooth + lowerLidExprR + blinkR * 6f).coerceIn(0f, 20f)
+        drawEye(c, leftGeom,  blinkL, lidDroopL,                lowerL, now)
+        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, lowerR, now)
         drawBrow(c, leftGeom, side = -1)
         drawBrow(c, rightGeom, side = 1)
         drawMouth(c, faceCx, faceCy + 240f)
@@ -490,7 +564,7 @@ class ScoutFaceView @JvmOverloads constructor(
     //  EYE
     // ======================================================
     private fun drawEye(c: Canvas, eye: EyeGeom, blinkAmount: Float,
-                        lidDroop: Float, now: Long) {
+                        lidDroop: Float, lowerLid: Float, now: Long) {
 
         val pxSocket = lookX * 0.03f
         val pySocket = lookY * 0.03f
@@ -545,6 +619,18 @@ class ScoutFaceView @JvmOverloads constructor(
         c.drawOval(tmpParallaxRect, pScleraSheen)
         pScleraSheen.shader = null
 
+        // Ambient occlusion ring: darkens sclera perimeter → socket-wall shadow, eye looks recessed
+        pSocketAO.shader = RadialGradient(
+            tmpParallaxRect.centerX(),
+            tmpParallaxRect.centerY() - tmpParallaxRect.height() * 0.06f,
+            tmpParallaxRect.width() * 0.56f,
+            intArrayOf(Color.TRANSPARENT, Color.argb(95, 3, 6, 14)),
+            floatArrayOf(0.40f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        c.drawOval(tmpParallaxRect, pSocketAO)
+        pSocketAO.shader = null
+
         val irisR  = min(eye.eyeRect.width(), eye.eyeRect.height()) * 0.34f
         val isLeft = eye.cx < VW * 0.5f
         val sign   = if (isLeft) 1f else -1f
@@ -564,8 +650,8 @@ class ScoutFaceView @JvmOverloads constructor(
 
 // Wider, more obvious travel.
 // Slightly wider X travel, a little more visible Y travel.
-        val irisCx = eye.cx + inwardBias + lookX * 1.10f + saccadeX + focusBreath
-        val irisCy = eye.cy + lookY * 0.88f + saccadeY + thinkGazeY + focusBreath * 0.35f
+        val irisCx = eye.cx + inwardBias + lookX * 1.10f + saccadeX + focusBreath + microTremorX
+        val irisCy = eye.cy + lookY * 0.88f + saccadeY + thinkGazeY + focusBreath * 0.35f + microTremorY
 
         drawIris(c, irisCx, irisCy, irisR, lookX, lookY)
 
@@ -590,11 +676,51 @@ class ScoutFaceView @JvmOverloads constructor(
                 tmpParallaxRect.right + 4f,
                 lidBottom
             )
-            c.drawRect(tmpLidRect, pLid)
+            // Gradient lid: surface-catch-light at top → face-bg → shadow crease at edge
+            val gradBot = lidBottom.coerceAtLeast(tmpParallaxRect.top + 2f)
+            pLidGrad.shader = LinearGradient(
+                eye.cx, tmpParallaxRect.top,
+                eye.cx, gradBot,
+                intArrayOf(
+                    Color.parseColor("#2C3E50"),
+                    Color.parseColor("#1E2B38"),
+                    Color.argb(255, 10, 16, 24)
+                ),
+                floatArrayOf(0f, 0.55f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            c.drawRect(tmpLidRect, pLidGrad)
+            pLidGrad.shader = null
+            // Dome highlight: radial soft spot near top-center → lid reads as convex/rounded bump
+            val lidSpan = (lidBottom - tmpParallaxRect.top).coerceAtLeast(4f)
+            val domeAlpha = (b * 58f).toInt().coerceIn(0, 58)
+            if (domeAlpha > 6) {
+                pLidGrad.shader = RadialGradient(
+                    eye.cx,
+                    tmpParallaxRect.top + lidSpan * 0.20f,
+                    lidSpan * 1.05f,
+                    intArrayOf(Color.argb(domeAlpha, 95, 135, 172), Color.TRANSPARENT),
+                    floatArrayOf(0f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                c.drawRect(tmpLidRect, pLidGrad)
+                pLidGrad.shader = null
+            }
+            // Lash-line shadow at the lid's closing edge
+            if (b > 0.06f) {
+                pLashLine.color = Color.argb((b * 155).toInt().coerceIn(0, 155), 6, 10, 18)
+                // During thinking, right eye lash-line angles down toward inner (nose) corner
+                val lashAngle = if (!isLeft) thinkLidSmooth * 22f else 0f
+                c.drawLine(
+                    tmpParallaxRect.left + 16f, lidBottom + lashAngle,
+                    tmpParallaxRect.right - 16f, lidBottom,
+                    pLashLine
+                )
+            }
         }
 
-        if (lowerLidSmooth > 0.5f) {
-            val lowerLidTop = tmpParallaxRect.bottom - lowerLidSmooth
+        if (lowerLid > 0.5f) {
+            val lowerLidTop = tmpParallaxRect.bottom - lowerLid
             tmpLidRect.set(
                 tmpParallaxRect.left - 4f,
                 lowerLidTop,
@@ -602,6 +728,26 @@ class ScoutFaceView @JvmOverloads constructor(
                 tmpParallaxRect.bottom + 8f
             )
             c.drawRect(tmpLidRect, pLid)
+        }
+
+        // Lower lid rim: subtle cool-light arc — lower lid catching ambient light
+        val rimAlpha = ((1f - b) * 48f).toInt().coerceIn(0, 48)
+        if (rimAlpha > 4) {
+            pLowerLidRim.shader = LinearGradient(
+                tmpParallaxRect.left, tmpParallaxRect.bottom - 4f,
+                tmpParallaxRect.right, tmpParallaxRect.bottom - 4f,
+                intArrayOf(Color.TRANSPARENT, Color.argb(rimAlpha, 185, 215, 255), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            tmpLidRect.set(
+                tmpParallaxRect.left,
+                tmpParallaxRect.centerY(),
+                tmpParallaxRect.right,
+                tmpParallaxRect.bottom + 6f
+            )
+            c.drawArc(tmpLidRect, 0f, 180f, false, pLowerLidRim)
+            pLowerLidRim.shader = null
         }
 
         c.restore()
@@ -707,31 +853,36 @@ class ScoutFaceView @JvmOverloads constructor(
 
         val listeningLift = if (vListening) 20f else 0f
         val browAsym = if (side < 0) 30f else 4f
-        val thinkingLift  = if (vThinking) {
-            (if (side < 0) 34f else 0f) + sin(System.currentTimeMillis() / 700.0).toFloat() * 3f
+        val thinkingLift = if (vThinking) {
+            if (side > 0) 38f + sin(System.currentTimeMillis() / 900.0).toFloat() * 3f else 0f
         } else 0f
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
-        val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop + browMicroY
+        val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)
+        val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop +
+                browMicroY + blinkBrowRelax - speechBrowLift
 
         val bw   = eye.eyeRect.width() * 0.40f
         val tilt = 22f
         val x1   = eye.cx - bw
         val x2   = eye.cx + bw
 
+        // Curious look: inner edges raise slightly, outer edges relax → questioning arch
         val thinkInward = if (vThinking) {
-            if (side < 0) 6f else -6f
+            if (side < 0) 2f else -2f
         } else 0f
+        val thinkInnerLift = if (vThinking && side < 0) 6f else 0f
 
-        val thinkTilt = if (vThinking && side > 0) 16f else 0f
+        // thinkTilt < 0 on right brow: inner end (x1) goes UP → curious arch
+        val thinkTilt = if (vThinking && side > 0) -18f else 0f
 
         val y1: Float
         val y2: Float
         if (side < 0) {
             y1 = browCy + tilt * 0.5f
-            y2 = browCy - tilt * 0.5f
+            y2 = browCy - tilt * 0.5f - thinkInnerLift  // inner edge of left brow rises when curious
         } else {
-            y1 = browCy - tilt * 0.5f
+            y1 = browCy - tilt * 0.5f + thinkTilt  // inner end of right brow rises (thinkTilt = -10f)
             y2 = browCy + tilt * 0.5f
         }
 
@@ -805,10 +956,15 @@ class ScoutFaceView @JvmOverloads constructor(
             pTShadow.shader    = null
 
         } else {
-            val mw = 80f
+            val mw    = 80f
+            val ctrY  = if (vThinking) cy + 11f else cy + 18f
+            val ctrXo = mw * 0.44f
+            val corYL = if (vThinking) cy - 2f else cy + 2f   // both corners rise → warm smile
+            val corYR = if (vThinking) cy - 4f else cy + 2f   // right corner slightly higher
             tmpPath.reset()
-            tmpPath.moveTo(cx - mw, cy)
-            tmpPath.quadTo(cx, cy + 20f, cx + mw, cy)
+            tmpPath.moveTo(cx - mw, corYL)
+            tmpPath.quadTo(cx - ctrXo, ctrY, cx, ctrY * 0.72f + cy * 0.28f)
+            tmpPath.quadTo(cx + ctrXo, ctrY, cx + mw, corYR)
             pMouthLine.strokeWidth = 10f
             c.drawPath(tmpPath, pMouthLine)
         }
@@ -940,25 +1096,60 @@ class ScoutFaceView @JvmOverloads constructor(
             focusBreathPhase -= (2f * Math.PI).toFloat()
         }
 
-        val thinkLid = if (vThinking) 0.22f else 0f
-        val targetL = (if (vBatteryPct < 20) lidTiredL else 0.07f) + thinkLid
-        val targetR = (if (vBatteryPct < 20) lidTiredR else 0.07f) + thinkLid
+        val targetL = if (vBatteryPct < 20) lidTiredL else 0.07f
+        val targetR = if (vBatteryPct < 20) lidTiredR else 0.07f
         lidDroopL += (targetL - lidDroopL) * smoothAlpha(dtMs, lidTauL)
         lidDroopR += (targetR - lidDroopR) * smoothAlpha(dtMs, lidTauR)
+        // Thinking lid: right-eye hint of concentration (7% — whisper, not focal point)
+        val thinkLidTarget = if (vThinking) 0.07f else 0f
+        thinkLidSmooth += (thinkLidTarget - thinkLidSmooth) * smoothAlpha(dtMs, 350f)
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
-            vThinking  -> maxOf(34f, smileLift)
+            vThinking  -> smileLift
             vListening -> maxOf(8f, smileLift)
             else       -> smileLift
         }
         lowerLidSmooth += (lowerLidTarget - lowerLidSmooth) * smoothAlpha(dtMs, 200f)
 
-        val vergenceTarget = if (vThinking) maxOf(vVergence, 0.7f) else vVergence
+        // Per-eye expression lower lids: emotions tighten/relax each cheek independently
+        val exprTargetL = when {
+            vThinking  -> 1f   // barely perceptible sympathetic tighten
+            vListening -> 1f
+            else       -> 0f
+        }
+        val exprTargetR = when {
+            vThinking  -> 2f   // subtle tighten — brow is the hero, this is support
+            vListening -> 1f
+            else       -> 0f
+        }
+        lowerLidExprL += (exprTargetL - lowerLidExprL) * smoothAlpha(dtMs, 250f)
+        lowerLidExprR += (exprTargetR - lowerLidExprR) * smoothAlpha(dtMs, 250f)
+
+        val vergenceTarget = if (vThinking) maxOf(vVergence, 0.3f) else vVergence
         vergenceSmooth += (vergenceTarget - vergenceSmooth) * smoothAlpha(dtMs, 280f)
 
-        val thinkTarget = if (vThinking) -34f else 0f
-        thinkGazeY += (thinkTarget - thinkGazeY) * smoothAlpha(dtMs, 300f)
+        if (vThinking) {
+            thinkEndedAt = 0L
+            if (nextThinkGlanceAt == 0L) {
+                thinkGlanceActive = true
+                thinkGlanceSideX  = -(35f + Random.nextFloat() * 15f)  // always left
+                nextThinkGlanceAt = 1L
+            }
+        } else {
+            if (thinkGlanceActive) thinkEndedAt = now  // record moment thinking stopped
+            thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
+        }
+        // Micro-drift: slow organic wandering around the upper-left anchor while thinking
+        val thinkMicroX = if (thinkGlanceActive) sin(now / 1400.0).toFloat() * 6f else 0f
+        val thinkMicroY = if (thinkGlanceActive) cos(now / 1100.0).toFloat() * 4f else 0f
+        val thinkGazeTargetY = if (thinkGlanceActive) -20f + thinkMicroY else 0f
+        val thinkGazeTargetX = if (thinkGlanceActive) thinkGlanceSideX + thinkMicroX else 0f
+        // Reconnect snap: fast tau for ~400ms after thinking ends so eyes return to user visibly
+        val reconnecting = !vThinking && thinkEndedAt > 0L && (now - thinkEndedAt) < 400L
+        val thinkGazeTau = if (reconnecting) 80f else 350f
+        thinkGazeY += (thinkGazeTargetY - thinkGazeY) * smoothAlpha(dtMs, thinkGazeTau)
+        thinkGazeX += (thinkGazeTargetX - thinkGazeX) * smoothAlpha(dtMs, thinkGazeTau)
 
         if (!vListening && !vThinking) {
             if (now >= nextBrowMicroAt) {
@@ -998,6 +1189,37 @@ class ScoutFaceView @JvmOverloads constructor(
         saccadeTargetX += (0f - saccadeTargetX) * smoothAlpha(dtMs, saccadeDecayMs)
         saccadeTargetY += (0f - saccadeTargetY) * smoothAlpha(dtMs, saccadeDecayMs)
 
+        // Micro-tremor: tiny constant random iris drift — active when Scout is engaged
+        val isEngaged = vListening || vSpeaking || vThinking || hasExternalGaze
+        if (isEngaged) {
+            if (now >= nextMicroTremorAt) {
+                microTremorTargetX = (Random.nextFloat() * 2f - 1f) * 0.9f
+                microTremorTargetY = (Random.nextFloat() * 2f - 1f) * 0.55f
+                nextMicroTremorAt  = now + Random.nextLong(500, 1600)
+            }
+        } else {
+            microTremorTargetX = 0f
+            microTremorTargetY = 0f
+        }
+        microTremorX += (microTremorTargetX - microTremorX) * smoothAlpha(dtMs, 380f)
+        microTremorY += (microTremorTargetY - microTremorY) * smoothAlpha(dtMs, 380f)
+
+        // Whole-face idle drift: slow wandering of the entire face position as one unit
+        if (now >= nextFaceDriftAt) {
+            faceIdleDriftTargetX = (Random.nextFloat() * 2f - 1f) * 3f
+            faceIdleDriftTargetY = (Random.nextFloat() * 2f - 1f) * 2f
+            nextFaceDriftAt      = now + Random.nextLong(3500, 7000)
+        }
+        faceIdleDriftX += (faceIdleDriftTargetX - faceIdleDriftX) * smoothAlpha(dtMs, 2800f)
+        faceIdleDriftY += (faceIdleDriftTargetY - faceIdleDriftY) * smoothAlpha(dtMs, 2800f)
+
+        // Gaze-driven face drift: face slowly follows where the eyes are pointing.
+        // Thinking uses 220ms tau so the face catches up within the short glance window.
+        // Face-tracking of a real person uses 900ms — natural "head turns to look" lag.
+        val gazeDriftTau = if (vThinking) 220f else 900f
+        faceGazeDriftX += (lookX * 0.32f - faceGazeDriftX) * smoothAlpha(dtMs, gazeDriftTau)
+        faceGazeDriftY += (lookY * 0.26f - faceGazeDriftY) * smoothAlpha(dtMs, gazeDriftTau)
+
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
         // dampK   0.83 → 0.80 — slightly less resistance, livelier feel.
@@ -1020,7 +1242,7 @@ class ScoutFaceView @JvmOverloads constructor(
         val targetX = if (vDownloading || vSpeaking) {
             0f
         } else {
-            if (vThinking) idleDriftX * 0.5f else if (vThinking) idleDriftX * 0.5f else vLookTargetX + idleDriftX + thinkingScanX
+            if (vThinking) thinkGazeX + idleDriftX * 0.3f else vLookTargetX + idleDriftX + thinkingScanX
         }
 
         val targetY = if (vDownloading || vSpeaking) {
@@ -1035,8 +1257,14 @@ class ScoutFaceView @JvmOverloads constructor(
             lookX += (targetX - lookX) * 0.08f
             lookY += (targetY - lookY) * 0.08f
         } else {
-            lookVX += ((targetX - lookX) * springK - lookVX * dampK) * dtScale
-            lookVY += ((targetY - lookY) * springK - lookVY * dampK) * dtScale
+            // Semi-implicit Euler: damping divided out rather than subtracted — stable at any
+            // frame time. Explicit Euler oscillates (velocity sign-flips) when dampK*dtScale > 1,
+            // which happens on any frame slower than ~20ms. A32 routinely exceeds that.
+            val ax  = (targetX - lookX) * springK * dtScale
+            val ay  = (targetY - lookY) * springK * dtScale
+            val div = 1f + dampK * dtScale
+            lookVX  = (lookVX + ax) / div
+            lookVY  = (lookVY + ay) / div
             lookX  += lookVX * dtScale
             lookY  += lookVY * dtScale
         }
@@ -1046,21 +1274,42 @@ class ScoutFaceView @JvmOverloads constructor(
 
         if (nextBlinkAt == 0L) nextBlinkAt = now + Random.nextLong(2800, 6500)
         if (now >= nextBlinkAt && !blinking) {
+            val isFollowUp = pendingDoubleBlink
+            pendingDoubleBlink = false
+
             blinking      = true
             blinkPhaseL   = 0f
             blinkPhaseR   = 0f
             blinkLead     = if (Random.nextBoolean()) -1 else 1
             blinkLagPhase = 0.12f + Random.nextFloat() * 0.16f
-            blinkSpeed    = if (vBatteryPct < 20) {
-                0.55f + Random.nextFloat() * 0.20f
-            } else {
-                0.85f + Random.nextFloat() * 0.40f
+            blinkSpeed    = when {
+                isFollowUp       -> 1.25f + Random.nextFloat() * 0.30f  // follow-up blinks are snappier
+                vBatteryPct < 20 -> 0.55f + Random.nextFloat() * 0.20f
+                else             -> 0.85f + Random.nextFloat() * 0.40f
             }
-            blinkMaxPhase = if (Random.nextFloat() < 0.18f) 1.35f else 2.0f
-            nextBlinkAt   = now + if (vBatteryPct < 20) {
-                Random.nextLong(8000, 15000)
+            blinkMaxPhase  = if (!isFollowUp && Random.nextFloat() < 0.18f) 1.35f else 2.0f
+            blinkDipY      = if (isFollowUp) 3f else 6f   // follow-up blinks have a shallower dip
+            blinkBrowRelax = 5f
+
+            if (isFollowUp) {
+                // Resume normal interval after the second blink of a double
+                nextBlinkAt = now + if (vBatteryPct < 20) {
+                    Random.nextLong(8000, 15000)
+                } else {
+                    Random.nextLong(3200, 7800)
+                }
             } else {
-                Random.nextLong(3200, 7800)
+                // 21% chance to schedule a quick follow-up double blink
+                if (Random.nextFloat() < 0.21f && vBatteryPct >= 20) {
+                    pendingDoubleBlink = true
+                    nextBlinkAt = now + Random.nextLong(130, 270)
+                } else {
+                    nextBlinkAt = now + if (vBatteryPct < 20) {
+                        Random.nextLong(8000, 15000)
+                    } else {
+                        Random.nextLong(3200, 7800)
+                    }
+                }
             }
         }
 
@@ -1093,6 +1342,10 @@ class ScoutFaceView @JvmOverloads constructor(
             blinkL *= 0.76f
             blinkR *= 0.76f
         }
+
+        // Secondary blink motion decays back to rest after each blink
+        blinkDipY      += (0f - blinkDipY)      * smoothAlpha(dtMs, 160f)
+        blinkBrowRelax += (0f - blinkBrowRelax) * smoothAlpha(dtMs, 200f)
 
         if (vSpeaking) {
             speechPhase += dtMs / 85f
@@ -1143,26 +1396,32 @@ class ScoutFaceView @JvmOverloads constructor(
         val movingSaccade  = abs(saccadeX) > 0.3f || abs(saccadeY) > 0.3f
         val movingBrow     = abs(browMicroY - browMicroTarget) > 0.3f
         val movingVergence = abs(
-            vergenceSmooth - (if (vThinking) maxOf(vVergence, 0.7f) else vVergence)
+            vergenceSmooth - (if (vThinking) maxOf(vVergence, 0.3f) else vVergence)
         ) > 0.01f
         val movingMouth    = abs(mouthOpen) > 0.01f
 
         val smileLift = (mouthOpen * 14f).coerceIn(0f, 10f)
         val lowerLidTarget = when {
-            vThinking  -> maxOf(34f, smileLift)
+            vThinking  -> smileLift
             vListening -> maxOf(8f, smileLift)
             else       -> smileLift
         }
-        val movingLowerLid   = abs(lowerLidSmooth - lowerLidTarget) > 0.3f
+        val movingLowerLid   = abs(lowerLidSmooth - lowerLidTarget) > 0.3f ||
+                               lowerLidExprL > 0.1f || lowerLidExprR > 0.1f
         // Keep ticking while listening bias is transitioning
         val movingListenBias = abs(listeningBiasSmooth - (if (vListening) 10f else 0f)) > 0.1f
         // Keep ticking while locked on so focus breathing renders each frame
         val isLockedOn       = abs(vLookTargetX) > 1f || abs(vLookTargetY) > 1f
 
+        val movingTremor    = (abs(microTremorX) + abs(microTremorY)) > 0.05f
+        val movingGazeDrift = (abs(faceGazeDriftX) + abs(faceGazeDriftY)) > 0.08f
+        val movingThinkLid  = thinkLidSmooth > 0.004f
+
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
-                movingLowerLid || movingListenBias || isLockedOn || micSmooth > 0.04f
+                movingLowerLid || movingListenBias || isLockedOn ||
+                micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid
 
         if (active) {
             idleMode = false

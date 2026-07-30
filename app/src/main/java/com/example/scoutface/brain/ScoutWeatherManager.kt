@@ -58,12 +58,16 @@ class ScoutWeatherManager(
 
         private const val KEY_CURRENT_TEXT     = "current_text"
         private const val KEY_CURRENT_AGE_MS   = "current_age_ms"
+        private const val KEY_CURRENT_DATE     = "current_date"
         private const val KEY_TONIGHT_TEXT     = "tonight_text"
         private const val KEY_TONIGHT_AGE_MS   = "tonight_age_ms"
+        private const val KEY_TONIGHT_DATE     = "tonight_date"
         private const val KEY_TOMORROW_TEXT    = "tomorrow_text"
         private const val KEY_TOMORROW_AGE_MS  = "tomorrow_age_ms"
+        private const val KEY_TOMORROW_DATE    = "tomorrow_date"
         private const val KEY_WEEK_TEXT        = "week_text"
         private const val KEY_WEEK_AGE_MS      = "week_age_ms"
+        private const val KEY_WEEK_DATE        = "week_date"
 
         // Gridpoint URL cache — avoids a /points call on every weather request
         private const val KEY_FORECAST_URL     = "nws_forecast_url"
@@ -127,23 +131,32 @@ class ScoutWeatherManager(
     // DISPATCH
     // =======================
 
+    private fun todayDateString(): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date())
+
     private fun dispatch(type: QueryType, specificDay: String?) {
 
-        val (textKey, ageKey, cacheDuration) = when (type) {
-            QueryType.CURRENT      -> Triple(KEY_CURRENT_TEXT,  KEY_CURRENT_AGE_MS,  CURRENT_CACHE_MS)
-            QueryType.TONIGHT      -> Triple(KEY_TONIGHT_TEXT,  KEY_TONIGHT_AGE_MS,  FORECAST_CACHE_MS)
-            QueryType.TOMORROW     -> Triple(KEY_TOMORROW_TEXT, KEY_TOMORROW_AGE_MS, FORECAST_CACHE_MS)
-            QueryType.SPECIFIC_DAY -> Triple(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     FORECAST_CACHE_MS)
-            QueryType.WEEK         -> Triple(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     FORECAST_CACHE_MS)
+        data class CacheKeys(val text: String, val age: String, val date: String, val duration: Long)
+
+        val keys = when (type) {
+            QueryType.CURRENT      -> CacheKeys(KEY_CURRENT_TEXT,  KEY_CURRENT_AGE_MS,  KEY_CURRENT_DATE,  CURRENT_CACHE_MS)
+            QueryType.TONIGHT      -> CacheKeys(KEY_TONIGHT_TEXT,  KEY_TONIGHT_AGE_MS,  KEY_TONIGHT_DATE,  FORECAST_CACHE_MS)
+            QueryType.TOMORROW     -> CacheKeys(KEY_TOMORROW_TEXT, KEY_TOMORROW_AGE_MS, KEY_TOMORROW_DATE, FORECAST_CACHE_MS)
+            QueryType.SPECIFIC_DAY -> CacheKeys(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     KEY_WEEK_DATE,     FORECAST_CACHE_MS)
+            QueryType.WEEK         -> CacheKeys(KEY_WEEK_TEXT,     KEY_WEEK_AGE_MS,     KEY_WEEK_DATE,     FORECAST_CACHE_MS)
         }
+
+        val today = todayDateString()
 
         if (!hasValidatedInternet()) {
             requestInFlight.set(false)
-            val cached = prefs.getString(textKey, null)
-            val cachedTimeMs = prefs.getLong(ageKey, 0L)
+            val cached = prefs.getString(keys.text, null)
+            val cachedTimeMs = prefs.getLong(keys.age, 0L)
+            val cachedDate = prefs.getString(keys.date, null)
             runOnMain {
                 if (cached != null) {
-                    respond("I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: $cached")
+                    val prefix = if (cachedDate != today) "The last weather I have is from an earlier day. " else "I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: "
+                    respond("$prefix$cached")
                 } else {
                     respond("I can't check the weather right now — I'm not connected to the internet.")
                 }
@@ -151,9 +164,11 @@ class ScoutWeatherManager(
             return
         }
 
-        val cacheAge = System.currentTimeMillis() - prefs.getLong(ageKey, 0L)
-        if (cacheAge < cacheDuration && type != QueryType.SPECIFIC_DAY) {
-            val cached = prefs.getString(textKey, null)
+        val cacheAge = System.currentTimeMillis() - prefs.getLong(keys.age, 0L)
+        val cachedDate = prefs.getString(keys.date, null)
+        val cacheIsToday = cachedDate == today
+        if (cacheIsToday && cacheAge < keys.duration && type != QueryType.SPECIFIC_DAY) {
+            val cached = prefs.getString(keys.text, null)
             if (cached != null) {
                 requestInFlight.set(false)
                 runOnMain { respond(cached) }
@@ -184,10 +199,13 @@ class ScoutWeatherManager(
                 val periods = fetchForecastPeriods(forecastUrl) ?: run {
                     runOnMain {
                         requestInFlight.set(false)
-                        val cached = prefs.getString(textKey, null)
-                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
-                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
-                        else respond("I wasn't able to reach the weather service right now.")
+                        val cached = prefs.getString(keys.text, null)
+                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
+                        val cDate = prefs.getString(keys.date, null)
+                        if (cached != null) {
+                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
+                            respond("$prefix$cached")
+                        } else respond("I wasn't able to reach the weather service right now.")
                     }
                     return@Thread
                 }
@@ -203,6 +221,7 @@ class ScoutWeatherManager(
                             prefs.edit()
                                 .putString(KEY_WEEK_TEXT, weekText)
                                 .putLong(KEY_WEEK_AGE_MS, System.currentTimeMillis())
+                                .putString(KEY_WEEK_DATE, today)
                                 .apply()
                         }
                         parseSpecificDayPeriods(periods, specificDay ?: "")
@@ -214,16 +233,20 @@ class ScoutWeatherManager(
                     if (result != null) {
                         if (type != QueryType.SPECIFIC_DAY) {
                             prefs.edit()
-                                .putString(textKey, result)
-                                .putLong(ageKey, System.currentTimeMillis())
+                                .putString(keys.text, result)
+                                .putLong(keys.age, System.currentTimeMillis())
+                                .putString(keys.date, today)
                                 .apply()
                         }
                         respond(result)
                     } else {
-                        val cached = prefs.getString(textKey, null)
-                        val cachedTimeMs = prefs.getLong(ageKey, 0L)
-                        if (cached != null) respond("I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: $cached")
-                        else respond("I wasn't able to reach the weather service right now.")
+                        val cached = prefs.getString(keys.text, null)
+                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
+                        val cDate = prefs.getString(keys.date, null)
+                        if (cached != null) {
+                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
+                            respond("$prefix$cached")
+                        } else respond("I wasn't able to reach the weather service right now.")
                     }
                 }
 
@@ -344,13 +367,22 @@ class ScoutWeatherManager(
                 val precipPct = p.optJSONObject("probabilityOfPrecipitation")
                     ?.let { if (it.isNull("value")) null else it.optInt("value", -1) }
                     ?.takeIf { it >= 0 }
+                val humidity = p.optJSONObject("relativeHumidity")
+                    ?.let { if (it.isNull("value")) null else it.optInt("value", -1) }
+                    ?.takeIf { it >= 0 }
+                // dewpoint in °C — used to calculate RH when relativeHumidity is absent
+                val dewpointC = p.optJSONObject("dewpoint")
+                    ?.let { if (it.isNull("value")) null else it.optDouble("value", Double.NaN) }
+                    ?.takeIf { !it.isNaN() }
                 list.add(NwsPeriod(
                     name          = p.optString("name", ""),
                     temperature   = p.optInt("temperature", Int.MIN_VALUE),
                     isDaytime     = p.optBoolean("isDaytime", true),
                     shortForecast = p.optString("shortForecast", ""),
                     windSpeed     = p.optString("windSpeed", ""),
-                    precipPct     = precipPct
+                    precipPct     = precipPct,
+                    humidity      = humidity,
+                    dewpointC     = dewpointC
                 ))
             }
             list.ifEmpty { null }
@@ -366,8 +398,69 @@ class ScoutWeatherManager(
         val isDaytime: Boolean,
         val shortForecast: String,
         val windSpeed: String,
-        val precipPct: Int?
+        val precipPct: Int?,
+        val humidity: Int?,
+        val dewpointC: Double?
     )
+
+    // =======================
+    // FEELS-LIKE CALCULATIONS
+    // =======================
+
+    // NWS Rothfusz regression — only valid at T ≥ 80°F and RH ≥ 40%
+    private fun heatIndex(tempF: Int, humidity: Int): Int? {
+        if (tempF < 80 || humidity < 40) return null
+        val t = tempF.toDouble()
+        val r = humidity.toDouble()
+        val hi = -42.379 + 2.04901523 * t + 10.14333127 * r - 0.22475541 * t * r -
+                 0.00683783 * t * t - 0.05481717 * r * r + 0.00122874 * t * t * r +
+                 0.00085282 * t * r * r - 0.00000199 * t * t * r * r
+        return hi.toInt()
+    }
+
+    // NWS 2001 wind chill formula — only valid at T ≤ 50°F and V ≥ 3 mph
+    private fun windChill(tempF: Int, windMph: Int): Int? {
+        if (tempF > 50 || windMph < 3) return null
+        val t = tempF.toDouble()
+        val v = windMph.toDouble()
+        val wc = 35.74 + 0.6215 * t - 35.75 * Math.pow(v, 0.16) + 0.4275 * t * Math.pow(v, 0.16)
+        return wc.toInt()
+    }
+
+    // Handles "6 mph", "6 to 10 mph", "Calm" — returns average of the range
+    private fun parseWindMph(windSpeed: String): Int? {
+        val nums = Regex("""\d+""").findAll(windSpeed).mapNotNull { it.value.toIntOrNull() }.toList()
+        if (nums.isEmpty()) return null
+        return nums.sum() / nums.size
+    }
+
+    // Magnus formula: relative humidity (%) from temperature (°F) and dewpoint (°C).
+    private fun rhFromDewpoint(tempF: Int, dewpointC: Double): Int {
+        val tempC = (tempF - 32.0) * 5.0 / 9.0
+        val rh = 100.0 * Math.exp(17.625 * dewpointC / (243.04 + dewpointC)) /
+                         Math.exp(17.625 * tempC    / (243.04 + tempC))
+        return rh.toInt().coerceIn(0, 100)
+    }
+
+    // Returns a natural spoken "feels like" clause, or empty string if not meaningful.
+    private fun feelsLikePart(p: NwsPeriod): String {
+        val windMph = parseWindMph(p.windSpeed)
+        if (windMph != null) {
+            val wc = windChill(p.temperature, windMph)
+            if (wc != null && (p.temperature - wc) >= 3) {
+                return " With the wind chill it feels like $wc degrees."
+            }
+        }
+        // Use reported humidity, or derive it from dewpoint if humidity is absent.
+        val rh = p.humidity ?: p.dewpointC?.let { rhFromDewpoint(p.temperature, it) }
+        if (rh != null) {
+            val hi = heatIndex(p.temperature, rh)
+            if (hi != null && (hi - p.temperature) >= 3) {
+                return " The heat index makes it feel like $hi degrees."
+            }
+        }
+        return ""
+    }
 
     // =======================
     // PARSERS
@@ -376,16 +469,18 @@ class ScoutWeatherManager(
     private fun parseCurrentPeriods(periods: List<NwsPeriod>): String? {
         val p = periods.firstOrNull() ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
-        val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        val windPart   = if (p.windSpeed.isNotBlank() && p.windSpeed != "0 mph") " Winds at ${p.windSpeed}." else ""
-        return "Right now it is ${p.temperature} degrees and ${p.shortForecast.lowercase(Locale.US)}.$precipPart$windPart"
+        val precipPart   = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
+        val windPart     = if (p.windSpeed.isNotBlank() && p.windSpeed != "0 mph") " Winds at ${p.windSpeed}." else ""
+        val feelsLike    = feelsLikePart(p)
+        return "Right now it is ${p.temperature} degrees and ${p.shortForecast.lowercase(Locale.US)}.$precipPart$windPart$feelsLike"
     }
 
     private fun parseTonightPeriods(periods: List<NwsPeriod>): String? {
         val p = periods.firstOrNull { !it.isDaytime } ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "Tonight should be around ${p.temperature} degrees. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "Tonight should be around ${p.temperature} degrees. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun parseTomorrowPeriods(periods: List<NwsPeriod>): String? {
@@ -396,7 +491,8 @@ class ScoutWeatherManager(
             ?: return null
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "Tomorrow: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "Tomorrow: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun parseWeekPeriods(periods: List<NwsPeriod>): String? {
@@ -422,7 +518,8 @@ class ScoutWeatherManager(
             ?: return "I can only see about a week ahead for weather. I'm sorry, I can't tell you about $dayName from here."
         if (p.temperature == Int.MIN_VALUE) return null
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
-        return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart"
+        val feelsLike  = feelsLikePart(p)
+        return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart$feelsLike"
     }
 
     private fun formatCacheTime(timeMs: Long): String {

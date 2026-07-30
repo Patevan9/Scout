@@ -82,7 +82,7 @@ class GeminiClient(
     // The daily quota resets at midnight Pacific. 6 hours is a
     // reasonable retry window — if the quota is still gone when we
     // try again, we set another 6-hour cooldown automatically.
-    private val DAILY_QUOTA_COOLDOWN_MS = 6L * 60L * 60L * 1000L  // 6 hours
+    private val DAILY_QUOTA_COOLDOWN_MS = 60L * 60L * 1000L  // 1 hour — retry sooner
 
 
     // =======================
@@ -124,8 +124,8 @@ class GeminiClient(
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
-                connectTimeout = 20_000
-                readTimeout = 30_000
+                connectTimeout = 10_000
+                readTimeout = 20_000
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("x-goog-api-key", key)
             }
@@ -156,7 +156,7 @@ class GeminiClient(
                 .put("contents", contents)
                 .put(
                     "generationConfig",
-                    JSONObject().put("maxOutputTokens", 150)
+                    JSONObject().put("maxOutputTokens", 600)
                 )
 
             OutputStreamWriter(conn.outputStream).use {
@@ -203,12 +203,27 @@ class GeminiClient(
                 Log.e("ScoutGemini", "finishReason=$finishReason")
             }
 
-            val text = candidate
+            val rawText = candidate
                 ?.optJSONObject("content")
                 ?.optJSONArray("parts")
                 ?.optJSONObject(0)
                 ?.optString("text")
                 ?.trim()
+
+            // If Gemini hit the token limit mid-sentence, trim to the last complete
+            // sentence so Scout never speaks a dangling half-sentence.
+            // If no sentence boundary exists at all, return null so the caller falls
+            // back gracefully rather than speaking a meaningless fragment.
+            val text = if (!rawText.isNullOrBlank() && finishReason == "MAX_TOKENS") {
+                val lastPunct = rawText.lastIndexOfAny(charArrayOf('.', '!', '?'))
+                if (lastPunct > 0) {
+                    Log.e("ScoutGemini", "MAX_TOKENS: trimming to sentence boundary at $lastPunct")
+                    rawText.substring(0, lastPunct + 1)
+                } else {
+                    Log.e("ScoutGemini", "MAX_TOKENS: no sentence boundary — discarding fragment")
+                    null
+                }
+            } else rawText
 
             return if (text.isNullOrBlank()) {
                 Log.e("ScoutGemini", "Blank Gemini text. Raw=$raw")
