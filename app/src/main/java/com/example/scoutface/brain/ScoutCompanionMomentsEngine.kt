@@ -83,7 +83,15 @@ data class CompanionSignals(
     // --- Tie-break: per-contentKey (not per-category) last-fired time, so two
     // candidates that happen to share a category can still be told apart. A
     // missing entry means "never fired" and sorts as the most overdue.
-    val lastFiredMsByContentKey: Map<String, Long> = emptyMap()
+    val lastFiredMsByContentKey: Map<String, Long> = emptyMap(),
+
+    // --- Per-category cooldown: a hard gate, distinct from the tie-break map
+    // above. A category whose own cooldown hasn't elapsed is not even
+    // considered for candidate generation this evaluation -- this is what
+    // stops e.g. Memory from resurfacing a fact every time the shared
+    // cooldown happens to allow *some* moment to fire. A missing entry means
+    // "this category has never fired" and never blocks it.
+    val lastFiredMsByCategory: Map<MomentCategory, Long> = emptyMap()
 )
 
 /**
@@ -102,18 +110,23 @@ data class CompanionSignals(
  * between calls or across a configuration-change recreation.
  *
  * Hard gates (situational safety, the shared proactive-speech cooldown, the
- * daily budget) are intentionally kept separate from and unconditionally
- * override confidence scoring -- a high-scoring candidate must never be able
- * to talk its way past a restraint rule. Confidence scoring only decides
- * *which* grounded candidate to use once the hard gates already allow
- * speaking at all.
+ * daily budget, and each category's own cooldown) are intentionally kept
+ * separate from and unconditionally override confidence scoring -- a
+ * high-scoring candidate must never be able to talk its way past a restraint
+ * rule. Confidence scoring only decides *which* grounded candidate to use
+ * once the hard gates already allow speaking at all.
  */
 object ScoutCompanionMomentsEngine {
 
-    // Hard gates -- intentionally conservative starting values. An intrusive
-    // Scout is worse than a quiet one; these are expected to loosen only
-    // after real A32 testing confirms it's warranted, same convention as
-    // every other tunable threshold in this project.
+    // Hard gates -- intentionally conservative starting values for the
+    // initial on-device test build. An intrusive Scout is worse than a quiet
+    // one; these are meant to loosen only after real A32 testing confirms
+    // it's warranted -- never shortened directly just to make testing more
+    // convenient. If faster observation is ever needed during testing, add a
+    // separate, explicitly labeled smoke-test configuration rather than
+    // editing these values in place (see e.g. the temporary, clearly-flagged
+    // smoke-test thresholds already used elsewhere in this project, such as
+    // MainActivity's IDLE_SILENCE_PRESENCE_THRESHOLD_MS).
     const val SHARED_PROACTIVE_COOLDOWN_MS = 45L * 60L * 1_000L // 45 minutes
     const val DAILY_MOMENT_BUDGET = 3
 
@@ -121,6 +134,26 @@ object ScoutCompanionMomentsEngine {
     const val MOMENT_CONFIDENCE_THRESHOLD = 0.50f
 
     const val MAX_CONFIDENCE = 1.0f
+
+    // Per-category cooldowns -- a second, independent hard gate on top of the
+    // shared cooldown above. The shared cooldown limits how often Scout
+    // speaks proactively at all; these limit how often the *same kind* of
+    // moment repeats, so e.g. a Memory moment can't resurface again the very
+    // next time the shared cooldown happens to allow some other moment to
+    // fire. Deliberately rarer than ScoutPresenceDecider's own category
+    // cooldowns (30-90 minutes) -- Companion Moments are meant to feel more
+    // special than mechanical presence courtesy remarks, not equally routine.
+    const val ENVIRONMENT_CATEGORY_COOLDOWN_MS = 2L * 60L * 60L * 1_000L // 2 hours
+    const val MEMORY_CATEGORY_COOLDOWN_MS = 24L * 60L * 60L * 1_000L // 24 hours
+    const val OBSERVATION_CATEGORY_COOLDOWN_MS = 3L * 60L * 60L * 1_000L // 3 hours
+    const val CURIOSITY_CATEGORY_COOLDOWN_MS = 6L * 60L * 60L * 1_000L // 6 hours
+
+    private val CATEGORY_COOLDOWN_MS: Map<MomentCategory, Long> = mapOf(
+        MomentCategory.ENVIRONMENT to ENVIRONMENT_CATEGORY_COOLDOWN_MS,
+        MomentCategory.MEMORY to MEMORY_CATEGORY_COOLDOWN_MS,
+        MomentCategory.OBSERVATION to OBSERVATION_CATEGORY_COOLDOWN_MS,
+        MomentCategory.CURIOSITY to CURIOSITY_CATEGORY_COOLDOWN_MS
+    )
 
     // Environment
     const val ENVIRONMENT_NEW_ARRIVAL_SCORE = 0.60f
@@ -177,13 +210,31 @@ object ScoutCompanionMomentsEngine {
         if (signals.proactiveMomentsFiredToday >= DAILY_MOMENT_BUDGET) return null
 
         val candidates = listOfNotNull(
-            generateEnvironmentCandidate(signals),
-            generateMemoryCandidate(signals),
-            generateObservationCandidate(signals),
-            generateCuriosityCandidate(signals)
+            generateIfCooldownElapsed(MomentCategory.ENVIRONMENT, signals) { generateEnvironmentCandidate(signals) },
+            generateIfCooldownElapsed(MomentCategory.MEMORY, signals) { generateMemoryCandidate(signals) },
+            generateIfCooldownElapsed(MomentCategory.OBSERVATION, signals) { generateObservationCandidate(signals) },
+            generateIfCooldownElapsed(MomentCategory.CURIOSITY, signals) { generateCuriosityCandidate(signals) }
         ).filter { it.confidence >= MOMENT_CONFIDENCE_THRESHOLD }
 
         return selectWinner(candidates, signals.lastFiredMsByContentKey)
+    }
+
+    /**
+     * A category still inside its own cooldown is never even considered --
+     * the generator isn't called at all, so a category on cooldown can never
+     * produce a candidate regardless of how strongly it would otherwise score.
+     * This is a hard gate, exactly like the shared cooldown and daily budget
+     * in evaluate(): confidence cannot buy a category out of its cooldown.
+     */
+    private inline fun generateIfCooldownElapsed(
+        category: MomentCategory,
+        signals: CompanionSignals,
+        generate: () -> MomentCandidate?
+    ): MomentCandidate? {
+        val lastFired = signals.lastFiredMsByCategory[category] ?: return generate()
+        val cooldown = CATEGORY_COOLDOWN_MS.getValue(category)
+        if (signals.nowMs - lastFired < cooldown) return null
+        return generate()
     }
 
     /**

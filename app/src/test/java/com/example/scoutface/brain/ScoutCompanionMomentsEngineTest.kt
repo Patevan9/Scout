@@ -25,7 +25,8 @@ class ScoutCompanionMomentsEngineTest {
         msSinceLastCuriosityMoment: Long? = 0L,
         isFirstCuriosityOpportunityToday: Boolean = false,
         presentPersonLastSeenMs: Long? = nowMs, // seen "now" -- not a first meeting by default
-        lastFiredMsByContentKey: Map<String, Long> = emptyMap()
+        lastFiredMsByContentKey: Map<String, Long> = emptyMap(),
+        lastFiredMsByCategory: Map<MomentCategory, Long> = emptyMap()
     ) = CompanionSignals(
         nowMs = nowMs,
         situationalGuardPassed = situationalGuardPassed,
@@ -41,7 +42,8 @@ class ScoutCompanionMomentsEngineTest {
         isFirstCuriosityOpportunityToday = isFirstCuriosityOpportunityToday,
         presentPersonLastSeenMs = presentPersonLastSeenMs,
         zoneId = UTC,
-        lastFiredMsByContentKey = lastFiredMsByContentKey
+        lastFiredMsByContentKey = lastFiredMsByContentKey,
+        lastFiredMsByCategory = lastFiredMsByCategory
     )
 
     // --- Hard gates always override confidence, no exceptions ---
@@ -62,6 +64,44 @@ class ScoutCompanionMomentsEngineTest {
             secondFaceJustAppeared = true
         )
         assertNull(ScoutCompanionMomentsEngine.evaluate(signals))
+    }
+
+    // --- Per-category cooldown: a second, independent hard gate ---
+
+    @Test fun `a category still inside its own cooldown does not fire even at high confidence`() {
+        val nowMs = 10_000_000L
+        val stillOnCooldown = nowMs - (ScoutCompanionMomentsEngine.ENVIRONMENT_CATEGORY_COOLDOWN_MS - 1)
+        val signals = baseSignals(
+            nowMs = nowMs,
+            secondFaceJustAppeared = true,
+            lastFiredMsByCategory = mapOf(MomentCategory.ENVIRONMENT to stillOnCooldown)
+        )
+        assertNull(ScoutCompanionMomentsEngine.evaluate(signals))
+    }
+
+    @Test fun `a category fires again once its own cooldown has elapsed`() {
+        val nowMs = 10_000_000L
+        val cooldownElapsed = nowMs - (ScoutCompanionMomentsEngine.ENVIRONMENT_CATEGORY_COOLDOWN_MS + 1)
+        val signals = baseSignals(
+            nowMs = nowMs,
+            secondFaceJustAppeared = true,
+            lastFiredMsByCategory = mapOf(MomentCategory.ENVIRONMENT to cooldownElapsed)
+        )
+        val winner = ScoutCompanionMomentsEngine.evaluate(signals)
+        assertEquals(MomentCategory.ENVIRONMENT, winner?.category)
+    }
+
+    @Test fun `category cooldowns are independent -- one category on cooldown does not block another`() {
+        val nowMs = 10_000_000L
+        val environmentStillOnCooldown = nowMs - (ScoutCompanionMomentsEngine.ENVIRONMENT_CATEGORY_COOLDOWN_MS - 1)
+        val signals = baseSignals(
+            nowMs = nowMs,
+            secondFaceJustAppeared = true, // would fire, but ENVIRONMENT is on cooldown
+            staleTaughtFacts = listOf(StaleFact("memory:user_primary:favorite_color", ScoutCompanionMomentsEngine.MEMORY_MIN_DAYS_SINCE_SURFACE)),
+            lastFiredMsByCategory = mapOf(MomentCategory.ENVIRONMENT to environmentStillOnCooldown)
+        )
+        val winner = ScoutCompanionMomentsEngine.evaluate(signals)
+        assertEquals(MomentCategory.MEMORY, winner?.category)
     }
 
     // --- A presence greeting (the shared clock) suppresses an immediate companion moment ---
