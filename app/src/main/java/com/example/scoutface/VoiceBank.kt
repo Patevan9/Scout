@@ -64,11 +64,12 @@ class VoiceBank(private val prefs: SharedPreferences) {
                 "Anything interesting happen today?",
                 "What's been keeping you busy?"
             )
-            // A sentence fragment, not a complete line -- the caller (MainActivity)
-            // appends the specific taught fact after this, e.g. "...your favorite
-            // color is teal." Kept as a fragment here rather than a full templated
-            // sentence per intent, since VoiceBank has no mechanism for inserting a
-            // value into a chosen phrase.
+            // A sentence fragment, not a complete line -- the caller (MainActivity,
+            // via ScoutMemoryPhraser) appends entity-aware possessive wording and
+            // the specific taught fact after this, e.g. "...your favorite color is
+            // teal" or "...Diana's birthday is November 27." Kept as a fragment
+            // here rather than a full templated sentence per intent, since
+            // VoiceBank has no mechanism for inserting a value into a chosen phrase.
             "COMPANION_MEMORY_INTRO" -> listOf(
                 "I still remember you told me",
                 "I've been thinking about something you told me --",
