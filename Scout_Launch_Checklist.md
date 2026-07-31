@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: July 30, 2026
-Based on commit: 1b5deb19dfced44529f571b30d27c622e8e12fb3
+Last updated: July 31, 2026
+Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
 Status: Current
 
-**Version 20**
+**Version 21**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -111,7 +111,7 @@ The following were previously tracked in this document but don't determine wheth
 - **Scout Behavior Learning (Tier 1 suggestions / Tier 2 Scout Dev telemetry)** — approved design, explicitly post-launch (Scout 1.1+). See Master Summary §16.
 - **Support Scout donation screen** (in-app optional contribution tiers) — see Master Summary §5.
 - **Post-launch feature ideas** — Spanish language support, hardware mode (KEYESTUDIO chassis), cosmetic expression packs, calendar integration, full mood system, brain pack upgrades, robot renaming, voice recognition, and similar — see Master Summary §14 (Hardware), §16b (Future Polish), §17 (Language Support), and its dated history.
-- **Companion Moments** (`ScoutCompanionMomentsEngine.kt`, merged but not yet wired into `MainActivity` — see `Scout_Quick_Start.md` for current status) — an active development priority, but not something the Play Store checks for, so not tracked as a launch item.
+- **Companion Moments** (`ScoutCompanionMomentsEngine.kt` + `MainActivity` wiring, both merged and live on `main` as of PR #8 — see `Scout_Quick_Start.md` for current status) — real-world A32 observation to tune social timing is ongoing, but not something the Play Store checks for, so not tracked as a launch item.
 
 ---
 
@@ -125,4 +125,4 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: July 30, 2026 | Version 20 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: July 31, 2026 | Version 21 | For Patrick, Diana, Elijah, and Scout*
