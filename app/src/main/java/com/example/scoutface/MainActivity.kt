@@ -86,6 +86,16 @@ import com.example.scoutface.brain.ScoutPresenceDecider
 import com.example.scoutface.brain.FuzzyNameMatcher
 import com.example.scoutface.brain.ScoutSpeechAvailabilityMonitor
 
+import com.example.scoutface.brain.CompanionSignals
+import com.example.scoutface.brain.MomentCandidate
+import com.example.scoutface.brain.MomentCategory
+import com.example.scoutface.brain.ScoutArrivalLatch
+import com.example.scoutface.brain.ScoutCompanionMomentsEngine
+import com.example.scoutface.brain.ScoutMemoryPhraser
+import com.example.scoutface.brain.ScoutPresenceStreakTracker
+import com.example.scoutface.brain.ScoutStaleResultGuard
+import com.example.scoutface.brain.StaleFact
+
 import com.example.scoutface.brain.TextNormalizer
 
 import com.google.mlkit.vision.common.InputImage
@@ -420,6 +430,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastFaceCount: Int = 0
 
+    // Latched (not overwritten every frame) so a rare second-face-arrival
+    // transition survives until the next throttled maybeMakeCompanionMoment()
+    // check actually consumes it, instead of being clobbered by the very next
+    // camera frame -- see the face-detection callback and
+    // consumeSecondFaceArrivalSignal(). 0L means "nothing pending."
+    private var secondFaceArrivalPendingSinceMs: Long = 0L
+
+    // Bounds how stale a latched arrival can be before it's discarded rather
+    // than acted on -- if every check happened to be blocked (speaking,
+    // thinking, wrong mode) for longer than this, the "someone just joined"
+    // framing would no longer be honest by the time it's finally spoken.
+    private val SECOND_FACE_ARRIVAL_MAX_PENDING_MS = 5L * 60L * 1_000L // 5 min
+
     @Volatile
 
     private var lastFaceUpdatedMs: Long = 0L
@@ -698,6 +721,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // can be honest about it instead of silently retrying forever -- see
     // ScoutSpeechAvailabilityMonitor and its one call site in onError() below.
     private val speechAvailabilityMonitor = ScoutSpeechAvailabilityMonitor()
+
+    // =======================
+
+    // COMPANION MOMENTS -- see maybeMakeCompanionMoment() and its one call site
+    // in the face-detection callback. The decision logic itself lives entirely
+    // in ScoutCompanionMomentsEngine (brain package); everything here is just
+    // gathering real signals for it and acting on its answer.
+
+    private var lastCompanionMomentCheckMs = 0L
+
+    // Set true the first time respond() is called for a real (non-presence-
+    // initiated) conversational turn -- see respond() below. Feeds the
+    // Curiosity category's "no conversation yet this session" bonus. Reset back
+    // to false whenever the tolerant continuous-presence streak it's scoped to
+    // itself restarts -- see ScoutPresenceStreakTracker and its one call site
+    // in the face-detection callback.
+    private var hasHadConversationThisSession = false
+
+    // DB reads (JournalDb/TruthDb) for signal-gathering must not run on the
+    // camera-analysis callback thread -- dedicated single-thread executor,
+    // unrelated to and independent from ScoutLlamaController's own executor.
+    private val companionMomentsExecutor: java.util.concurrent.ExecutorService =
+        java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    // Bumped in onDestroy() (before shutting the executor down) so any
+    // companion-moment work already queued or in flight on
+    // companionMomentsExecutor can recognize itself as stale and discard its
+    // result instead of touching a destroyed Activity's UI/TTS -- mirrors the
+    // generation/owner-token pattern ScoutLlamaController already uses for
+    // TinyLlama generations. Read from both the main thread and
+    // companionMomentsExecutor's background thread, hence @Volatile.
+    @Volatile
+    private var companionMomentsGeneration: Int = 0
 
     // =======================
 
@@ -2013,6 +2069,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                             val now = System.currentTimeMillis()
 
+                            // Latched, not overwritten every frame -- see
+                            // secondFaceArrivalPendingSinceMs's declaration and
+                            // consumeSecondFaceArrivalSignal(). Feeds
+                            // ScoutCompanionMomentsEngine's Environment category, which is
+                            // scoped only to a second person joining, not a return-from-
+                            // absence (that stays Presence's job, see genuineAbsenceMarked).
+                            if (lastFaceCount < 2 && faces.size >= 2 && !genuineAbsenceMarked) {
+                                secondFaceArrivalPendingSinceMs = now
+                            }
+
                             lastFaceCount = faces.size
 
                             if (faces.size < 2) lastSecondaryFaceName = null
@@ -2422,13 +2488,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 // Gap-tolerant streak for the idle-silence acknowledgment: only
                                 // restart it if the gap since the last sighting exceeded the
                                 // grace period -- otherwise this is the same streak continuing.
-                                if (presencePresentSinceMs == 0L) {
-                                    presencePresentSinceMs = now
-                                    logPresenceDebug("Tolerant presence streak started")
-                                } else if (now - presenceLastSeenMs > PRESENCE_GAP_GRACE_MS) {
-                                    logPresenceDebug("Presence streak reset -- gap of " +
-                                        "${(now - presenceLastSeenMs) / 1000}s exceeded the grace period")
-                                    presencePresentSinceMs = now
+                                // Also defines "session" for hasHadConversationThisSession: that
+                                // flag resets whenever this streak itself restarts, so Curiosity's
+                                // "no conversation yet this session" bonus is scoped to the same
+                                // continuous-presence window CURIOSITY_MIN_PRESENCE_MS measures.
+                                val streakUpdate = ScoutPresenceStreakTracker.update(
+                                    presentSinceMs = presencePresentSinceMs,
+                                    lastSeenMs = presenceLastSeenMs,
+                                    nowMs = now,
+                                    gapGraceMs = PRESENCE_GAP_GRACE_MS
+                                )
+                                if (streakUpdate.streakRestarted) {
+                                    if (presencePresentSinceMs == 0L) {
+                                        logPresenceDebug("Tolerant presence streak started")
+                                    } else {
+                                        logPresenceDebug("Presence streak reset -- gap of " +
+                                            "${(now - presenceLastSeenMs) / 1000}s exceeded the grace period")
+                                    }
+                                    hasHadConversationThisSession = false
                                 } else {
                                     val gapMs = now - presenceLastSeenMs
                                     // Only meaningful gaps -- skips routine per-frame timing noise.
@@ -2437,6 +2514,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                             "grace period -- streak continues")
                                     }
                                 }
+                                presencePresentSinceMs = streakUpdate.newPresentSinceMs
                                 presenceLastSeenMs = now
 
                                 // Layer 1 return greeting: face is back. If we were tracking a
@@ -2459,6 +2537,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 }
 
                                 maybeMakeIdleSilencePresenceRemark()
+
+                                maybeMakeCompanionMoment()
 
                                 if (!greetedThisSession &&
                                         now - faceAppearanceMs >= GREET_STABILIZE_MS &&
@@ -3538,6 +3618,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (!isPresenceInitiated) {
             presenceDecider.onConversationTurn()
+            hasHadConversationThisSession = true
         }
 
         finishThinking()
@@ -4871,6 +4952,279 @@ Respond only with Scout's next reply.
         returnStabilizingSinceMs = 0L
     }
 
+    // =======================
+    // COMPANION MOMENTS -- wiring only. All decision logic (why speak, why
+    // now, why this candidate, why not stay silent) lives in
+    // ScoutCompanionMomentsEngine; nothing here re-implements or second-
+    // guesses that decision. This section's only job is: gather real signals,
+    // hand them to the engine, and -- only if it returns a candidate -- act on
+    // the answer.
+    //
+    // Threading: DB reads (JournalDb, TruthDb) are deferred to
+    // companionMomentsExecutor since SQLiteDatabase is documented safe for
+    // cross-thread access; HabitLayer and ScoutPresenceDecider are NOT
+    // documented thread-safe and are normally only ever touched from the main
+    // thread elsewhere in this file, so anything from either of them is
+    // captured on the main thread before the executor hop, never read from
+    // the background thread.
+    // =======================
+
+    /**
+     * Called from the face-tracking loop, same as the presence checks above.
+     * Throttled internally (safe to call every frame). Consumption (cooldown
+     * stamp, daily-budget-affecting JournalDb write, diagnostic log) only
+     * happens once respond() has actually been called in speakCompanionMoment()
+     * below -- never merely because the engine returned a candidate.
+     */
+    private fun maybeMakeCompanionMoment() {
+        val now = System.currentTimeMillis()
+        if (now - lastCompanionMomentCheckMs < PRESENCE_CHECK_INTERVAL_MS) return
+        lastCompanionMomentCheckMs = now
+
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            logPresenceDebug("Companion moment blocked: $blockReason")
+            return
+        }
+
+        // Captured on the main thread -- see the threading note above.
+        val secondFaceJustAppeared = consumeSecondFaceArrivalSignal(now)
+        val habitObservationContentKey = habitLayer.getIdleObservation()
+        val continuousPresenceMs = currentTolerantPresenceMs()
+        val msSinceLastProactiveRemark = presenceDecider.msSinceLastPresenceRemark(now)
+        val hadConversationThisSession = hasHadConversationThisSession
+        // Captured before dispatch so a result computed under an older
+        // generation (this Activity instance destroyed in the meantime) can
+        // recognize itself as stale -- see companionMomentsGeneration's doc.
+        val generation = companionMomentsGeneration
+
+        try {
+            companionMomentsExecutor.execute {
+                try {
+                    val signals = buildCompanionSignals(
+                        nowMs = now,
+                        secondFaceJustAppeared = secondFaceJustAppeared,
+                        habitObservationContentKey = habitObservationContentKey,
+                        continuousPresenceMs = continuousPresenceMs,
+                        msSinceLastProactiveRemark = msSinceLastProactiveRemark,
+                        hasHadConversationThisSession = hadConversationThisSession
+                    )
+                    val candidate = ScoutCompanionMomentsEngine.evaluate(signals) ?: return@execute
+
+                    // Grounded phrase resolution -- e.g. for Memory, this re-reads the
+                    // fact's current value from TruthDb. If it's gone (or a fact
+                    // couldn't otherwise be resolved into honest text), this returns
+                    // null and nothing is spoken or consumed.
+                    val text = resolveCompanionMomentText(candidate) ?: return@execute
+
+                    if (ScoutStaleResultGuard.isStale(generation, companionMomentsGeneration)) {
+                        logPresenceDebug("Companion moment discarded: stale generation")
+                        return@execute
+                    }
+
+                    runOnUiThread {
+                        speakCompanionMoment(candidate, text, generation)
+                    }
+                } catch (_: Exception) {
+                    // A failed companion-moment attempt must never crash or
+                    // destabilize anything else -- matches DiagLog's safe() convention.
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // The executor was already shut down (Activity destroyed between the
+            // throttle check above and this call) -- safe to ignore, matches the
+            // "silence is the default outcome" contract elsewhere in this feature.
+        }
+    }
+
+    // Clears secondFaceArrivalPendingSinceMs unconditionally (one latched event
+    // is only ever evaluated once) and reports whether it was still fresh
+    // enough to act on -- see secondFaceArrivalPendingSinceMs's declaration.
+    private fun consumeSecondFaceArrivalSignal(nowMs: Long): Boolean {
+        val pendingSinceMs = secondFaceArrivalPendingSinceMs
+        secondFaceArrivalPendingSinceMs = 0L
+        return ScoutArrivalLatch.consume(pendingSinceMs, nowMs, SECOND_FACE_ARRIVAL_MAX_PENDING_MS)
+    }
+
+    /** Runs on the main thread -- the only place this feature actually calls respond(). */
+    private fun speakCompanionMoment(candidate: MomentCandidate, text: String, generation: Int) {
+        if (ScoutStaleResultGuard.isStale(generation, companionMomentsGeneration)) {
+            // The Activity was destroyed (or superseded) between the background
+            // hop and this runOnUiThread callback actually running -- runOnUiThread
+            // posts to the main Looper, not to the Activity, so it can still fire
+            // after onDestroy(). Never speak or touch UI/TTS for a stale generation.
+            logPresenceDebug("Companion moment discarded before speaking: stale generation")
+            return
+        }
+
+        val blockReason = when {
+            isSpeaking -> "speaking"
+            isCapturingSpeech -> "capturing speech"
+            isThinking -> "thinking"
+            !bootFinishedSpeaking -> "still starting up"
+            !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            else -> null
+        }
+        if (blockReason != null) {
+            // State changed during the background evaluation hop -- discard.
+            // Nothing is consumed: the cooldown, budget, and novelty history
+            // all stay exactly as they were, so the next eligible check can
+            // try again on its own merits rather than losing this attempt.
+            logPresenceDebug("Companion moment discarded after background eval: $blockReason")
+            return
+        }
+
+        respond(text, isPresenceInitiated = true)
+
+        // Only recorded now that respond() has genuinely been called.
+        val now = System.currentTimeMillis()
+        presenceDecider.onExternalProactiveRemark(now)
+        journalDb.add(candidate.contentKey, entryType = "companion_moment", subject = candidate.category.name, weight = 1)
+        diagLog.logCompanionMoment(candidate.category.toDiagMomentCategory(), candidate.confidence, candidate.contributions)
+        logPresenceDebug("Companion moment spoken: ${candidate.category}")
+    }
+
+    // Runs on companionMomentsExecutor's background thread -- see the threading
+    // note above. Only JournalDb/TruthDb reads and pure computation happen here.
+    private fun buildCompanionSignals(
+        nowMs: Long,
+        secondFaceJustAppeared: Boolean,
+        habitObservationContentKey: String?,
+        continuousPresenceMs: Long,
+        msSinceLastProactiveRemark: Long,
+        hasHadConversationThisSession: Boolean
+    ): CompanionSignals {
+        // Comfortably longer than the engine's longest category cooldown (24h for
+        // Memory) so a still-relevant "last fired" entry is never missed -- not
+        // coupled to that exact constant, just safely larger than it.
+        val noveltyLookbackMs = 48L * 60L * 60L * 1_000L
+        val recentMoments = journalDb.getEntriesSince("companion_moment", nowMs - noveltyLookbackMs)
+
+        val lastFiredMsByCategory: Map<MomentCategory, Long> = recentMoments
+            .groupBy { it.subject }
+            .mapNotNull { (subject, entries) ->
+                val category = MomentCategory.values().find { it.name == subject } ?: return@mapNotNull null
+                category to entries.maxOf { it.createdAt }
+            }
+            .toMap()
+
+        val lastFiredMsByContentKey: Map<String, Long> = recentMoments
+            .groupBy { it.text }
+            .mapValues { (_, entries) -> entries.maxOf { it.createdAt } }
+
+        val proactiveMomentsFiredToday = journalDb.getEntriesSince(
+            "companion_moment", startOfLocalDayMs(nowMs)
+        ).size
+
+        val msPerDay = 24L * 60L * 60L * 1_000L
+        val staleTaughtFacts = truthDb.getAllEntities().flatMap { entity ->
+            truthDb.getAllFactsWithTimestamp(entity).map { (factKey, _, updatedAt) ->
+                val contentKey = "memory:$entity:$factKey"
+                // "Days since last surfaced" combines both halves of the story:
+                // when the user last taught/changed the fact (TruthDb), and when
+                // Scout last spoke it as a companion moment (JournalDb) -- whichever
+                // is more recent resets the staleness clock.
+                val effectiveLastSurfaced = maxOf(updatedAt, lastFiredMsByContentKey[contentKey] ?: 0L)
+                val days = ((nowMs - effectiveLastSurfaced) / msPerDay).toInt().coerceAtLeast(0)
+                StaleFact(contentKey = contentKey, daysSinceLastSurfaced = days)
+            }
+        }
+
+        val curiosityContentKey = "curiosity:light_question"
+        val lastCuriosityMs = lastFiredMsByContentKey[curiosityContentKey]
+        val zoneId = java.time.ZoneId.systemDefault()
+
+        return CompanionSignals(
+            nowMs = nowMs,
+            situationalGuardPassed = true, // already confirmed on the main thread before dispatch
+            msSinceLastProactiveRemark = msSinceLastProactiveRemark,
+            proactiveMomentsFiredToday = proactiveMomentsFiredToday,
+            secondFaceJustAppeared = secondFaceJustAppeared,
+            staleTaughtFacts = staleTaughtFacts,
+            habitObservationContentKey = habitObservationContentKey,
+            // No elevated-conversation-activity signal exists anywhere in this
+            // codebase yet -- deliberately left false rather than inventing a new
+            // heuristic mid-wiring-PR. HabitLayer.getIdleObservation() above is
+            // Observation's only real signal source for now.
+            conversationTurnRateElevated = false,
+            continuousPresenceMs = continuousPresenceMs,
+            hasHadConversationThisSession = hasHadConversationThisSession,
+            msSinceLastCuriosityMoment = lastCuriosityMs?.let { nowMs - it },
+            isFirstCuriosityOpportunityToday = ScoutCompanionMomentsEngine.isFirstMeetingToday(
+                lastCuriosityMs, nowMs, zoneId
+            ),
+            // The first-meeting-today bonus is intentionally inert in this pass:
+            // computing it correctly needs a person's *previous* last_seen value,
+            // read before PeopleDb.touchSeen() overwrites it elsewhere in this
+            // file -- deliberately not threading that through an unrelated,
+            // already-working call site for one scoring bonus. Passing nowMs
+            // here makes isFirstMeetingToday() always false (same calendar day
+            // as itself), rather than always true, which would be the wrong
+            // direction to fail in.
+            presentPersonLastSeenMs = nowMs,
+            zoneId = zoneId,
+            lastFiredMsByContentKey = lastFiredMsByContentKey,
+            lastFiredMsByCategory = lastFiredMsByCategory
+        )
+    }
+
+    // Also runs on the background thread (called from within
+    // maybeMakeCompanionMoment()'s executor block, before the runOnUiThread hop).
+    // TruthDb reads and VoiceBank (backed by SharedPreferences) are both safe to
+    // call from a background thread; keyToHuman() is a pure function.
+    private fun resolveCompanionMomentText(candidate: MomentCandidate): String? = when (candidate.category) {
+        MomentCategory.ENVIRONMENT -> voice.say("COMPANION_ENVIRONMENT")
+
+        MomentCategory.CURIOSITY -> voice.say("COMPANION_CURIOSITY")
+
+        MomentCategory.MEMORY -> {
+            val parts = candidate.contentKey.split(":", limit = 3)
+            if (parts.size != 3 || parts[0] != "memory") {
+                null
+            } else {
+                val entity = parts[1]
+                val factKey = parts[2]
+                val value = truthDb.getFactValue(entity, factKey)
+                if (value == null) {
+                    null
+                } else {
+                    // Entity-aware wording -- a fact belonging to someone other than
+                    // the user (e.g. entity="diana") must never be spoken as "your
+                    // ...". Aborts (returns null) rather than guessing if the entity
+                    // can't be honestly resolved into possessive wording.
+                    ScoutMemoryPhraser.buildSentence(
+                        intro = voice.say("COMPANION_MEMORY_INTRO"),
+                        entity = entity,
+                        userEntity = ENTITY_USER_PRIMARY,
+                        scoutEntity = ENTITY_SCOUT,
+                        humanFactKey = keyToHuman(factKey),
+                        value = value,
+                        displayName = ScoutEntityResolver::displayName
+                    )
+                }
+            }
+        }
+
+        MomentCategory.OBSERVATION -> if (candidate.contentKey == "observation:elevated_activity") {
+            voice.say("COMPANION_OBSERVATION_FALLBACK")
+        } else {
+            // contentKey IS the already-phrased sentence from
+            // HabitLayer.getIdleObservation() for this category -- see the
+            // wiring note on CompanionSignals.habitObservationContentKey.
+            candidate.contentKey
+        }
+    }
+
+    private fun startOfLocalDayMs(nowMs: Long, zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()): Long =
+        java.time.Instant.ofEpochMilli(nowMs).atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant().toEpochMilli()
+
     private fun isGeminiEnabled(): Boolean =
         prefs.getBoolean(PREF_GEMINI_ENABLED, true)
 
@@ -4926,8 +5280,25 @@ Respond only with Scout's next reply.
 
         shutdownSystems()
 
+        // Invalidate before tearing the executor down so any companion-moment
+        // work already queued or mid-flight recognizes itself as stale (see
+        // companionMomentsGeneration's doc) even in the brief window before
+        // shutdownNow() actually takes effect. shutdownNow() (not shutdown())
+        // because a result delivered after this Activity is destroyed is
+        // actively unsafe, not just pointless -- unlike a plain shutdown(),
+        // this drops any queued task and attempts to interrupt one already running.
+        companionMomentsGeneration++
+        companionMomentsExecutor.shutdownNow()
+
         super.onDestroy()
 
+    }
+
+    private fun MomentCategory.toDiagMomentCategory(): DiagLog.DiagMomentCategory = when (this) {
+        MomentCategory.ENVIRONMENT -> DiagLog.DiagMomentCategory.ENVIRONMENT
+        MomentCategory.MEMORY      -> DiagLog.DiagMomentCategory.MEMORY
+        MomentCategory.OBSERVATION -> DiagLog.DiagMomentCategory.OBSERVATION
+        MomentCategory.CURIOSITY   -> DiagLog.DiagMomentCategory.CURIOSITY
     }
 
     private fun IntentType.toDiagIntent(): DiagLog.DiagIntent = when (this) {

@@ -43,4 +43,24 @@ class JournalDb(context: Context) :
             arrayOf(text, System.currentTimeMillis(), entryType, subject, weight)
         )
     }
+
+    data class Entry(val text: String, val createdAt: Long, val entryType: String, val subject: String?)
+
+    // First read method this class has ever had (previously write-only). Used by
+    // ScoutCompanionMomentsEngine's wiring for novelty tracking: how long since a
+    // given category/specific moment last fired, and how many moments have fired
+    // today. [entryType] filters to just one kind of entry (e.g. "companion_moment")
+    // so this doesn't pull in unrelated teaching/correction/system-note entries.
+    fun getEntriesSince(entryType: String, sinceMs: Long): List<Entry> {
+        val out = mutableListOf<Entry>()
+        readableDatabase.rawQuery(
+            "SELECT text, created_at, entry_type, subject FROM journal WHERE entry_type=? AND created_at>=? ORDER BY created_at ASC;",
+            arrayOf(entryType, sinceMs.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(Entry(c.getString(0), c.getLong(1), c.getString(2), c.getString(3)))
+            }
+        }
+        return out
+    }
 }

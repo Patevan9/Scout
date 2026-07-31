@@ -54,6 +54,33 @@ class VoiceBank(private val prefs: SharedPreferences) {
                 "Good to see you again.",
                 "Welcome back. Good to have you around again."
             )
+            "COMPANION_ENVIRONMENT" -> listOf(
+                "It's nice hearing everyone together.",
+                "Good to have more company.",
+                "It's nice having you both around."
+            )
+            "COMPANION_CURIOSITY" -> listOf(
+                "How's your day been?",
+                "Anything interesting happen today?",
+                "What's been keeping you busy?"
+            )
+            // A sentence fragment, not a complete line -- the caller (MainActivity,
+            // via ScoutMemoryPhraser) appends entity-aware possessive wording and
+            // the specific taught fact after this, e.g. "...your favorite color is
+            // teal" or "...Diana's birthday is November 27." Kept as a fragment
+            // here rather than a full templated sentence per intent, since
+            // VoiceBank has no mechanism for inserting a value into a chosen phrase.
+            "COMPANION_MEMORY_INTRO" -> listOf(
+                "I still remember you told me",
+                "I've been thinking about something you told me --",
+                "Something you mentioned before came to mind --"
+            )
+            // Only used for the elevated-activity Observation path, which nothing
+            // currently generates (see ScoutCompanionMomentsEngine wiring) -- kept
+            // for forward compatibility rather than left to fall through to "Okay."
+            "COMPANION_OBSERVATION_FALLBACK" -> listOf(
+                "You've been pretty engaged today."
+            )
             else -> listOf("Okay.")
         }
 

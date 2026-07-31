@@ -389,4 +389,32 @@ class ScoutPresenceDecider(
         lastPresenceRemarkMs = now
         lastReturnGreetingMs = now
     }
+
+    // =======================
+    // SHARED PROACTIVE-SPEECH CLOCK -- read/write access for other proactive-
+    // speech systems (e.g. ScoutCompanionMomentsEngine). To the user there is
+    // only one Scout, so any system that speaks unprompted shares this same
+    // clock rather than keeping its own independently-timed cooldown.
+    // =======================
+
+    /**
+     * Time since any proactive remark -- from this class or externally
+     * stamped via [onExternalProactiveRemark] -- last happened. A never-fired
+     * clock returns Long.MAX_VALUE so a fresh install/session doesn't read as
+     * "just spoke."
+     */
+    fun msSinceLastPresenceRemark(nowMs: Long = System.currentTimeMillis()): Long {
+        if (lastPresenceRemarkMs == 0L) return Long.MAX_VALUE
+        return nowMs - lastPresenceRemarkMs
+    }
+
+    /**
+     * Call when a different proactive-speech system (not this class) actually
+     * speaks, so this class's own idle-silence/return-greeting gates also
+     * respect it -- without this, Presence and Companion Moments could speak
+     * back-to-back since each would only see its own history.
+     */
+    fun onExternalProactiveRemark(nowMs: Long = System.currentTimeMillis()) {
+        lastPresenceRemarkMs = nowMs
+    }
 }
