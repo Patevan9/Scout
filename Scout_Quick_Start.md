@@ -1,13 +1,13 @@
 # Project Scout — Quick Start
 
-Last updated: July 30, 2026
-Based on commit: 1b5deb19dfced44529f571b30d27c622e8e12fb3
+Last updated: July 31, 2026
+Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
 Status: Current
 
-**Version 27**
+**Version 28**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-This is the smallest accurate handoff — what a fresh session needs in the next 60 seconds to not break anything and know what's happening right now. For full technical history and architecture, use `Scout_Master_Summary.md` (v54) — that document is the single source of truth and keeps the complete day-by-day record.
+This is the smallest accurate handoff — what a fresh session needs in the next 60 seconds to not break anything and know what's happening right now. For full technical history and architecture, use `Scout_Master_Summary.md` (v55) — that document is the single source of truth and keeps the complete day-by-day record.
 
 ---
 
@@ -15,17 +15,18 @@ This is the smallest accurate handoff — what a fresh session needs in the next
 
 **Workflow:** `main` is now Scout's single source of truth for development (deliberate change — see `CLAUDE.md`). New work happens on short-lived feature branches named `claude/**`, merges into `main` via pull request, and the branch is deleted afterward. CI (`.github/workflows/android-build.yml`) builds on every push to `main`/`claude/**`, runs the actual JVM unit test suite (`testDebugUnitTest`), not just a compile check, and also triggers on pull requests targeting `main`.
 
-**All three PRs opened this session are now merged into `main`:**
+**Recently merged PRs (most recent first):**
 
 | PR | Branch (deleted after merge) | What it did | Status |
 |----|--------|---------------|--------|
+| #8 | `claude/companion-moments-wiring` | Wires `ScoutCompanionMomentsEngine` (PR #5) into `MainActivity`: real call site, `VoiceBank` phrase pools, shared proactive-speech timestamp, `DiagLog` entries, `JournalDb` novelty tracking. All 5 findings from an independent ChatGPT review (arrival-signal latching, entity-aware Memory phrasing, session-scoped conversation flag, executor lifecycle/generation protection, new unit tests) resolved before merge. | **Merged** — commit `a85177e95b7873250cde4e37ae7a41c1ba89f638`. CI green including `testDebugUnitTest`. |
 | #4 | `claude/speech-reliability-designs` | `FuzzyNameMatcher.kt` (generic wake-word tolerance for a renamed Scout) + `ScoutSpeechAvailabilityMonitor.kt` (honest warning when speech recognition looks unavailable) | **Merged** — commit `c14671f2592e422c1f4cafe718ecfd3e8a5cfd7e`. Fully wired into `MainActivity` (both pieces touch `onResults()`/`onError()` directly) — this is live behavior, not just an added-but-unused class. |
-| #5 | `claude/companion-moments-engine` | `ScoutCompanionMomentsEngine.kt` — the decision-logic engine for the new "Companion Moments" system, plus its tests | **Merged** — commit `1b5deb19dfced44529f571b30d27c622e8e12fb3`. Engine only — confirmed via the merge diff that it touches only the two new engine/test files, zero changes to `MainActivity`. **Not wired in yet** — no call site, no `VoiceBank` phrases, no `DiagLog` entries, no `JournalDb` reads. That wiring is a deliberately separate, later PR. |
+| #5 | `claude/companion-moments-engine` | `ScoutCompanionMomentsEngine.kt` — the decision-logic engine for the "Companion Moments" system, plus its tests | **Merged** — commit `1b5deb19dfced44529f571b30d27c622e8e12fb3`. Engine only at the time — wiring shipped separately in PR #8 above. |
 | #6 | `claude/ci-run-unit-tests` | Expanded CI to actually run `./gradlew testDebugUnitTest` (not just compile) + added the `pull_request` → `main` trigger. Running tests for the first time exposed a real pre-existing bug — see below | **Merged** — commit `d1a56ac8615fd8fa065790d1318bb953f9a79127`, including the bug fix bundled on the same branch. |
 
 **Real bug found by CI actually running tests (now fixed and merged):** `ScoutMemoryGate.SELF_WORDS` only recognized the user talking about *themselves* ("my", "me", "i", "us", "we") — not the user addressing *Scout* directly ("you", "your"), so "what did you learn today" failed. Fix adds "you"/"your", kept narrow so it only matters combined with a real topic word — ordinary commands like "can you set a timer" are unaffected.
 
-**Current product priority — Companion Moments.** During over an hour of real-device testing, Scout stayed technically stable but felt too passive and boring — he mostly watches the room and waits to be spoken to. Making Scout feel more naturally present via small, self-initiated "Companion Moments" is now a major priority. **This is explicitly not "just make him talk more"** — restraint (hard gates, cooldowns, a daily budget, and silence as the default outcome) is the core design constraint, not an afterthought. Companion Moments coexists with the already-shipped Presence system (`ScoutPresenceDecider` — return greetings, idle-silence remarks) rather than duplicating it, and both share one proactive-speech cooldown so the user experiences one Scout, not two. Full design detail lives in Master Summary's July 30 entry — read that before touching either system.
+**Companion Moments is fully wired and live on `main`.** During over an hour of real-device testing, Scout stayed technically stable but felt too passive and boring — he mostly watched the room and waited to be spoken to. PR #5 built the decision engine; PR #8 wired it into `MainActivity` end to end (call site, phrase pools, shared cooldown timestamp, diagnostics, persisted daily budget) and resolved all 5 findings from an independent code review before merging. **This is explicitly not "just make him talk more"** — restraint (hard gates, cooldowns, a persisted 3/day budget, and silence as the default outcome) is the core design constraint, not an afterthought. Companion Moments coexists with the already-shipped Presence system (`ScoutPresenceDecider` — return greetings, idle-silence remarks) rather than duplicating it: both read/write one shared proactive-speech timestamp, but each still compares it against its own unchanged interval (Presence 20 min, Companion Moments 45 min) — so the user experiences one Scout, not two. **What's left is real-world A32 observation to tune social timing (starting values are deliberately conservative) — that's validation, not unfinished implementation.** Full design and implementation detail lives in Master Summary's July 30 and July 31 entries.
 
 **Recent shipped history (compressed — see Master Summary for full day-by-day detail):** 16KB page-size alignment is resolved and confirmed against a real signed release APK (`zipalign` pass, July 19). TinyLlama model delivery now works end-to-end through a real in-app download + unified startup gate (July 19–24). Personal-memory questions are now structurally gated before Gemini, TinyLlama's long-prompt crash is fixed, teaching moved to real entity/property extraction with alias support, the Presence layer (idle-silence + return greeting) shipped, and API keys are now encrypted via Android Keystore — all July 26–29, and all merged into `main` via PR #1. PR #2 and PR #3 (small CI/speech cleanups) are also merged.
 
@@ -75,7 +76,7 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 - **Play Store listing** — description, screenshots, content rating not started.
 - **STT name recognition** — "Scout" sometimes misheard. Now generically tolerant for any configured name via `FuzzyNameMatcher.kt` (merged, PR #4, live).
 - **Barge-in** — deliberately disabled. PARKED, do not re-enable without discussion.
-- **Companion Moments (`ScoutCompanionMomentsEngine.kt`, PR #5)** — merged, but engine-only. Do not assume it's live behavior — there is no `MainActivity` call site yet. That wiring is a separate, later piece of work.
+- **Companion Moments (`ScoutCompanionMomentsEngine.kt` + wiring, PR #5 + PR #8)** — merged and live on `main`, not experimental. Untuned: starting values (45-min shared cooldown, 3/day budget, 0.50 confidence threshold, 2–24h category cooldowns) are deliberately conservative. Needs real-world A32 observation before loosening anything — see Master Summary's July 31 entry.
 
 ---
 
@@ -104,4 +105,4 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 
 ---
 
-*Project Scout Quick Start | Last updated: July 30, 2026 | Version 27 | Upload every session | For full details use Master Summary v54*
+*Project Scout Quick Start | Last updated: July 31, 2026 | Version 28 | Upload every session | For full details use Master Summary v55*

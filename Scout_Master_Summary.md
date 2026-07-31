@@ -1,13 +1,34 @@
 # Project Scout — Master Project Summary
 
-Last updated: July 30, 2026
-Based on commit: 1b5deb19dfced44529f571b30d27c622e8e12fb3
+Last updated: July 31, 2026
+Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
 Status: Current
 
-**Version 54**
+**Version 55**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## July 31, 2026 — PR #8 Merged: Companion Moments Fully Wired and Live on `main`
+
+✓ **PR #8 merged — Companion Moments wiring** (branch `claude/companion-moments-wiring`, deleted after merge). Merge commit `a85177e95b7873250cde4e37ae7a41c1ba89f638`. Adds the real `MainActivity` call site (`maybeMakeCompanionMoment()`/`speakCompanionMoment()`/`buildCompanionSignals()`/`resolveCompanionMomentText()`, evaluated from the same face-detection frame callback and 30-second throttle as the existing presence checks), four new `VoiceBank` phrase pools (`COMPANION_ENVIRONMENT`, `COMPANION_CURIOSITY`, `COMPANION_MEMORY_INTRO`, `COMPANION_OBSERVATION_FALLBACK`), `JournalDb.getEntriesSince()` for novelty tracking (daily budget and per-category/per-content-key last-fired history are both derived fresh from `JournalDb` on every check, never an in-memory counter), and `DiagLog.logCompanionMoment()` (category/confidence/contribution-key diagnostics only — no facts, names, or spoken text). **Companion Moments is now fully wired and live on `main` — not just an engine sitting unused.**
+
+✓ **Shared proactive-speech timestamp is live, exactly as designed.** `ScoutPresenceDecider` gained `msSinceLastPresenceRemark()`/`onExternalProactiveRemark()` — one shared timestamp both systems read and write, each still compared against its own unchanged interval: Presence keeps its existing 20-minute `PRESENCE_GLOBAL_COOLDOWN_MS`; Companion Moments compares that same shared timestamp against its own 45-minute `SHARED_PROACTIVE_COOLDOWN_MS`. Either system speaking suppresses the other only for the other's own interval — Presence's existing behavior was not retuned or shortened to match Companion Moments.
+
+✓ **Companion Moments alone carries the persisted three-per-day budget** (`DAILY_MOMENT_BUDGET = 3`, an engine-side constant, independent of and in addition to the shared cooldown above). Derived fresh from `JournalDb` `'companion_moment'` entries against the local calendar day (`java.time.LocalDate`) on every check, so a process restart doesn't reset the day's count.
+
+✓ **All five findings from an independent ChatGPT review of the actual PR #8 diff were resolved before merge, not after:**
+1. **Arrival-event latching.** The second-face-arrival signal (Environment category) was a one-frame boolean the 30-second throttle would almost always miss before the next camera frame overwrote it back to `false`. Replaced with a latched pending timestamp (`secondFaceArrivalPendingSinceMs`), consumed exactly once via the new `ScoutArrivalLatch.consume()`, with a bounded 5-minute staleness window so a very late consumption doesn't speak a no-longer-honest "someone just joined."
+2. **Entity-aware Memory phrasing.** The spoken sentence previously hardcoded "your ..." regardless of which entity a fact actually belonged to — a fact about Diana could have been spoken as if it were the user's own. New `ScoutMemoryPhraser` (in the new `brain/ScoutCompanionMomentsWiring.kt`) resolves `user_primary`→"your", `scout`→"my", any other known entity→its own possessive display name (e.g. "Diana's"), and aborts the moment entirely — rather than guessing — for a blank/unresolved entity.
+3. **Session-scoped conversation flag.** `hasHadConversationThisSession` previously latched `true` once and stayed there for the Activity's entire process lifetime. It now resets whenever the tolerant continuous-presence streak it's scoped to itself restarts — the same streak `CURIOSITY_MIN_PRESENCE_MS` is measured against — via the newly extracted `ScoutPresenceStreakTracker`.
+4. **Executor lifecycle protection.** `companionMomentsExecutor` gained a generation token (`companionMomentsGeneration`), mirroring `ScoutLlamaController`'s existing owner/generation-token pattern: bumped in `onDestroy()`, checked before the background-to-UI-thread hop and again before actually speaking (since a posted `Runnable` can still run after the Activity is destroyed). `execute()` is now guarded against `RejectedExecutionException`, and `shutdown()` was replaced with `shutdownNow()` so queued/in-flight work is dropped rather than left to finish against a destroyed Activity.
+5. **Test coverage.** New `brain/ScoutCompanionMomentsWiringTest.kt` (18 tests) covers all four fixes above as small, pure, unit-tested helpers — independent of `ScoutCompanionMomentsEngine`'s own existing test suite.
+
+✓ **CI confirmed green on the merge commit**, including the `Run JVM unit tests` step (not just `assembleDebug`), on both the `push` and `pull_request` triggers.
+
+**What's left is validation and tuning, not unfinished implementation.** Companion Moments' code is complete and merged into `main`. Its starting values — the 45-minute shared cooldown (on top of Presence's own unchanged 20-minute interval), the 3/day budget, the 0.50 confidence threshold, and the 2–24 hour per-category cooldowns — are deliberately conservative and untuned by design (see the July 30 entry below). Real-world A32 observation is the next step, to see whether Scout's social timing feels right in day-to-day use, not to finish building the feature. Findings from that observation belong in a new dated entry when they happen, not folded into this one.
 
 ---
 
@@ -42,6 +63,8 @@ This is the single source of truth.
 ✓ **Deterministic tie-breaking** when multiple candidates are simultaneously eligible: confidence score first, then a time-sensitivity rank, then least-recently-used content, then a fixed category order as the final fallback.
 
 ✓ **MainActivity wiring is explicitly a separate, later PR** — the real call site, `VoiceBank` phrase pools for the four categories, `DiagLog` diagnostic entries, and `JournalDb` novelty-tracking reads/writes are all intentionally out of scope for PR #5. When that follow-up PR happens, it is intentionally scoped to only that wiring work — no new sensors, no emotion assumptions, no expanded categories.
+
+**Update (July 31):** that wiring PR (#8) shipped and merged — see the July 31, 2026 entry above. Companion Moments is no longer engine-only.
 
 ---
 
@@ -1113,4 +1136,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 30, 2026 | Version 54 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: July 31, 2026 | Version 55 | Single source of truth — upload every session*
