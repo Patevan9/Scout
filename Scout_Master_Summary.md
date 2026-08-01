@@ -1,13 +1,46 @@
 # Project Scout — Master Project Summary
 
-Last updated: July 31, 2026
-Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
+Last updated: August 1, 2026
+Based on commit: cf1f695b619bf9d861f5da371450ea7c32d053c6
 Status: Current
 
-**Version 55**
+**Version 56**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## August 1, 2026 — PR #10 Merged: Settings Reorganized into Seven Owner-Oriented Sections
+
+✓ **Product context.** With the recent architecture work (Companion Moments, speech reliability, memory improvements) complete and merged, Patrick shifted focus from feature work to living with Scout day-to-day and observing him in the home. Out of that came a standalone design discussion — explicitly design-only for several turns before any code was touched — to rethink Settings from the perspective of a normal owner rather than a developer. The stated goal: the menu should answer "what do I want Scout to do?" rather than "where did we put this setting?"
+
+✓ **Seven sections replace the previous five.** The prior structure (Identity & Voice, Brain & Behavior, Builder's Workbench, Privacy & Data, Extras & Support) was organized around implementation. The new structure:
+- **My Household** — Memory Export, Import Memory, Reset Memory Layers. Deliberately sparse — there's no "browse what Scout knows" screen yet, only bulk operations, and the docs say so rather than papering over the gap.
+- **Companion** — the entire former Identity & Voice screen (Robot Name, Voice Pitch, Voice Speed, Reset Voice, Closed Captions) plus Presence Mode and Allow Spontaneous Comments, moved from the old Brain & Behavior screen. Answers "how does Scout feel to live with?"
+- **AI** — Online Features toggle and Online Services (API key/provider management). Scoped tightly to thinking-systems plumbing, not personality.
+- **Connected Services** — Calendar Awareness, moved out of the old Privacy & Data screen. The direct jump into Android's own Calendar settings is unchanged.
+- **Privacy & Data** — trimmed to Voice Camera Commands, Privacy Policy, and Terms of Use after Memory moved to My Household and Calendar moved to Connected Services. Kept the name (a mid-discussion rename to "Privacy & Safety" was reverted once nothing "Safety"-labeled was left in the section).
+- **Builder's Workbench** — unchanged content-wise (Enable Hardware Mode, Motor Controls, Bluetooth Pairing, Pet Awareness). Explicitly the one section exempt from the no-placeholder rule below, since Patrick framed it as his own long-term physical-robot workspace — real hardware he already owns (a KEYESTUDIO Mini Tank Kit V2: Bluetooth/app control, IR control, ultrasonic obstacle avoidance, light/ultrasonic following, an 8×16 LED panel) — not a family-facing discovery surface.
+- **Advanced & Support** — Donate to Scout (new, see below), Support, About Scout (with its hidden 7-tap dev unlock), Licenses, a merged Diagnostic Report row, Clear Diagnostic History, and the hidden Performance Benchmark row.
+
+✓ **Five rows cut after being confirmed dead via code inspection, not assumption.** `kid_safe_filter` and `pet_safety`'s Workbench-era read/write were each grepped across the full app source: `kid_safe_filter` was read and written only inside `SettingsActivity.kt` — nothing else in the app ever checked it, so toggling it changed no real behavior. Voice Tone, Online Brain Helper, Camera Controls, and Cosmetics were all pure "coming in a future update!" toasts with no backing logic at all. Online Brain Helper was additionally confirmed redundant, not just unbuilt — a grep for any brain-selection pref key or routing logic found nothing; the automatic TinyLlama-default/Gemini-opt-in behavior documented elsewhere already covers what the row claimed to do. All five were cut from the visible menu rather than relocated. Pet Awareness was **not** cut — Patrick reframed it as the seed of a future physical-safety system (his dog Nicolas is older and hard of hearing; the goal is cautious movement around pets once Scout has a mobile chassis) and it stayed in Builder's Workbench, where it already lived.
+
+✓ **One mislabeling caught before it shipped.** Mid-discussion, Patrick proposed renaming "Allow Spontaneous Comments" to "Companion Moments" since that better reflects the feature's intent. Tracing the pref key (`spontaneous_enabled` / `PREF_SPONTANEOUS_ENABLED`) through the code showed it's wired only into `ScoutPresenceDecider` (idle-silence remarks, return greetings) — `ScoutCompanionMomentsEngine` has no reference to it anywhere, and Companion Moments itself has no user-facing toggle at all today. The rename was dropped; the row kept its existing, accurate label. If a real Companion Moments toggle gets built later, it needs its own new pref key, not this one.
+
+✓ **View + Share Diagnostic Report merged into one row.** Both always pointed at the same `DiagReportActivity`, differing only by a boolean extra (`EXTRA_SHOW_SHARE`) that toggled whether the notes field and Share button were visible. The merged row always shows both.
+
+✓ **New Donate to Scout screen, reusing the website's existing Stripe infrastructure rather than building anything new.** Mirrors `donate.html`'s actual mechanics (read directly from source, not assumed): five fixed tiers ($5/$10/$25/$50/$100), each backed by its own pre-created Stripe Payment Link — no free-text custom-amount entry exists on the website either, contrary to an initial assumption. Tapping a tier live-updates a single CTA button's label before the user commits; tapping the CTA opens the matching Payment Link externally via `ACTION_VIEW`, the same hand-off pattern `showSupport()` already used. Deliberately **not** routed through Google Play Billing, despite that being the original plan: grepped the app for `BillingClient`/`PurchasesUpdatedListener` and confirmed zero Play Billing integration exists anywhere in the app today (the $9.99 app price is a Play Store listing price, not an in-app purchase), so "through Google" would have meant building real new payment infrastructure from scratch. Google Play's standard commission (roughly 15–30%) would also take a meaningfully larger cut of a small donation than Stripe's flat ~2.9%+30¢. Google Play Billing requirements apply to purchases that unlock app content or functionality — a donation that unlocks nothing doesn't require it, the same pattern other apps (Wikipedia, Twitch's "support the streamer" links) already use externally. **Play Billing stays the intended path for anything that actually unlocks something later** — a better/premium brain tier, paid cosmetics (eye colors, emotes, holiday themes) — since those do trigger Play's requirement.
+
+✓ **Two voice-command deep links repointed.** `MainActivity`'s "go online" handler and its two calendar-prompt call sites used to jump straight to the old `S_BRAIN`/`S_PRIVACY` screens via `openSettingsScreen()`. Repointed to the new `S_AI`/`S_CONNECTED` screen keys so voice commands still land where the content actually lives now. Two explanatory comments referencing "Brain & Behavior" were updated to say "AI." Two on-screen instructional strings in `LlamaBenchmarkActivity.kt` pointing users to "Extras & Support > Share Diagnostic Report" were also updated to the new path.
+
+✓ **No preference keys renamed anywhere in this change.** Every row move is a relocation to a different screen-building function; the underlying `SharedPreferences` keys are untouched. Confirmed this was achievable without exception before starting the edit.
+
+✓ **This was a relocation and presentation change, not a behavioral rewrite** — Patrick set that constraint explicitly partway through. `onCalendarToggleChanged()`, `confirmReset()`, `confirmDeleteDiagLogs()`, `showPrivacyPolicy()`, `showTermsOfUse()`, `showLicenses()`, `showAbout()`, `showSupport()`, and the 7-tap dev-unlock logic in `onAboutScoutTapped()` are all untouched function bodies — only which screen calls them changed. The two exceptions (the Diagnostic Report merge and the voice deep-link repoint) were both explicitly requested, not incidental.
+
+✓ **CI confirmed green on both the `push` and `pull_request` triggers** — `assembleDebug` and `testDebugUnitTest` both passed on commit `6e1da3b`, no Android SDK was available in the session doing the work so this was the only real build verification, and PR #10 merged clean with `mergeable_state: "clean"` and zero review comments.
+
+**What's left is on-device verification, not unfinished implementation.** CI confirms the app compiles and the unit test suite passes; it does not confirm the seven section cards actually open the right screens, that the two repointed voice deep-links actually land correctly, that the Donate tier buttons visually update and open the correct Stripe checkout page per tier, or that the hidden dev-benchmark unlock still surfaces correctly in its new location. All four are called out explicitly as pending A32 checks, matching how Companion Moments' "validation, not unfinished implementation" note was framed on July 31.
 
 ---
 
@@ -1136,4 +1169,4 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: July 31, 2026 | Version 55 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: August 1, 2026 | Version 56 | Single source of truth — upload every session*

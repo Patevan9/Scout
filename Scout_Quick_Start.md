@@ -1,13 +1,13 @@
 # Project Scout — Quick Start
 
-Last updated: July 31, 2026
-Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
+Last updated: August 1, 2026
+Based on commit: cf1f695b619bf9d861f5da371450ea7c32d053c6
 Status: Current
 
-**Version 28**
+**Version 29**
 
 Upload this at the start of EVERY Claude or ChatGPT session about Scout.
-This is the smallest accurate handoff — what a fresh session needs in the next 60 seconds to not break anything and know what's happening right now. For full technical history and architecture, use `Scout_Master_Summary.md` (v55) — that document is the single source of truth and keeps the complete day-by-day record.
+This is the smallest accurate handoff — what a fresh session needs in the next 60 seconds to not break anything and know what's happening right now. For full technical history and architecture, use `Scout_Master_Summary.md` (v56) — that document is the single source of truth and keeps the complete day-by-day record.
 
 ---
 
@@ -19,10 +19,13 @@ This is the smallest accurate handoff — what a fresh session needs in the next
 
 | PR | Branch (deleted after merge) | What it did | Status |
 |----|--------|---------------|--------|
+| #10 | `claude/settings-reorganization` | Reorganizes Settings from five implementation-oriented sections into seven owner-oriented ones (My Household, Companion, AI, Connected Services, Privacy & Data, Builder's Workbench, Advanced & Support). Cuts five confirmed-dead rows, merges View/Share Diagnostic Report into one, adds a Donate to Scout screen reusing the website's existing Stripe Payment Links. Relocation/presentation change, not a behavioral rewrite — see below and Master Summary's August 1 entry. | **Merged** — commit `cf1f695b619bf9d861f5da371450ea7c32d053c6`. CI green including `testDebugUnitTest`. |
 | #8 | `claude/companion-moments-wiring` | Wires `ScoutCompanionMomentsEngine` (PR #5) into `MainActivity`: real call site, `VoiceBank` phrase pools, shared proactive-speech timestamp, `DiagLog` entries, `JournalDb` novelty tracking. All 5 findings from an independent ChatGPT review (arrival-signal latching, entity-aware Memory phrasing, session-scoped conversation flag, executor lifecycle/generation protection, new unit tests) resolved before merge. | **Merged** — commit `a85177e95b7873250cde4e37ae7a41c1ba89f638`. CI green including `testDebugUnitTest`. |
 | #4 | `claude/speech-reliability-designs` | `FuzzyNameMatcher.kt` (generic wake-word tolerance for a renamed Scout) + `ScoutSpeechAvailabilityMonitor.kt` (honest warning when speech recognition looks unavailable) | **Merged** — commit `c14671f2592e422c1f4cafe718ecfd3e8a5cfd7e`. Fully wired into `MainActivity` (both pieces touch `onResults()`/`onError()` directly) — this is live behavior, not just an added-but-unused class. |
 | #5 | `claude/companion-moments-engine` | `ScoutCompanionMomentsEngine.kt` — the decision-logic engine for the "Companion Moments" system, plus its tests | **Merged** — commit `1b5deb19dfced44529f571b30d27c622e8e12fb3`. Engine only at the time — wiring shipped separately in PR #8 above. |
 | #6 | `claude/ci-run-unit-tests` | Expanded CI to actually run `./gradlew testDebugUnitTest` (not just compile) + added the `pull_request` → `main` trigger. Running tests for the first time exposed a real pre-existing bug — see below | **Merged** — commit `d1a56ac8615fd8fa065790d1318bb953f9a79127`, including the bug fix bundled on the same branch. |
+
+**Settings reorganized into seven owner-oriented sections, fully merged and live on `main`.** After living with Scout day-to-day, the previous five-section Settings screen (Identity & Voice, Brain & Behavior, Builder's Workbench, Privacy & Data, Extras & Support) — organized around implementation — was replaced with seven sections organized around what an owner actually wants to do: **My Household** (memory export/import/reset), **Companion** (name, voice, captions, presence, spontaneous comments), **AI** (online features, API key management), **Connected Services** (calendar awareness), **Privacy & Data** (camera behavior, privacy policy, terms), **Builder's Workbench** (unchanged — still the only section allowed to show not-yet-active hardware rows, since it's Patrick's own long-term build workspace, not a family-facing surface), and **Advanced & Support** (donations, support, about, licenses, diagnostics). Five confirmed-dead rows were cut (Kid Safe Filter and Voice Tone toggled nothing at all; Online Brain Helper duplicated AI's real rows; Camera Controls and Cosmetics were empty "coming soon" toasts — verified via grep that none of their preference keys were read anywhere outside `SettingsActivity.kt` before removing them). View/Share Diagnostic Report merged into one row. A new Donate to Scout screen reuses the website's existing five Stripe Payment Links (fixed tiers, live-selected, external hand-off) — deliberately not Google Play Billing, since these are voluntary donations that unlock nothing; Play Billing stays reserved for future purchases that actually unlock something (premium brain tiers, paid cosmetics). The two voice-command deep links ("go online", calendar prompts) were repointed to the new screens. **No preference keys were renamed anywhere in this change.** **Not yet verified on a real device** — CI confirms `assembleDebug` and `testDebugUnitTest` both pass, but the actual on-screen behavior (all seven cards, both repointed voice deep-links, the Donate tier buttons and their Stripe links, and the hidden dev-benchmark unlock still surfacing in its new location) hasn't been exercised on the A32 yet. Full design discussion and rationale lives in Master Summary's August 1 entry.
 
 **Real bug found by CI actually running tests (now fixed and merged):** `ScoutMemoryGate.SELF_WORDS` only recognized the user talking about *themselves* ("my", "me", "i", "us", "we") — not the user addressing *Scout* directly ("you", "your"), so "what did you learn today" failed. Fix adds "you"/"your", kept narrow so it only matters combined with a real topic word — ordinary commands like "can you set a timer" are unaffected.
 
@@ -77,6 +80,7 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 - **STT name recognition** — "Scout" sometimes misheard. Now generically tolerant for any configured name via `FuzzyNameMatcher.kt` (merged, PR #4, live).
 - **Barge-in** — deliberately disabled. PARKED, do not re-enable without discussion.
 - **Companion Moments (`ScoutCompanionMomentsEngine.kt` + wiring, PR #5 + PR #8)** — merged and live on `main`, not experimental. Untuned: starting values (45-min shared cooldown, 3/day budget, 0.50 confidence threshold, 2–24h category cooldowns) are deliberately conservative. Needs real-world A32 observation before loosening anything — see Master Summary's July 31 entry.
+- **Settings reorganization (`SettingsActivity.kt`, PR #10)** — merged and live on `main`. CI-verified (compiles, unit tests pass) but not yet exercised on a real device — confirm all seven section cards, both repointed voice deep-links, the Donate to Scout tier buttons/Stripe links, and the hidden dev-benchmark unlock before treating it as fully verified. See Master Summary's August 1 entry.
 
 ---
 
@@ -105,4 +109,4 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 
 ---
 
-*Project Scout Quick Start | Last updated: July 31, 2026 | Version 28 | Upload every session | For full details use Master Summary v55*
+*Project Scout Quick Start | Last updated: August 1, 2026 | Version 29 | Upload every session | For full details use Master Summary v56*
