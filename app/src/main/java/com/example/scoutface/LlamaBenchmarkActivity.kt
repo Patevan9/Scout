@@ -98,7 +98,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                 "device temperature) and logs measured performance to Scout's diagnostic " +
                 "log. Camera and voice keep running normally during the test -- nothing " +
                 "about Scout's normal settings is changed. When finished, use Settings > " +
-                "Extras & Support > Share Diagnostic Report to send the results."
+                "Advanced & Support > Diagnostic Report to send the results."
             textSize = 13f
             setTextColor(txtSec)
             setPadding(0, dp(8), 0, dp(16))
@@ -237,7 +237,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                 lines.add("Done. Reminder: these are 4 fixed test prompts, not the actual production " +
                     "prompt -- use these results to compare thread settings against each other, not " +
                     "as an absolute measure of Scout's real reply latency.")
-                lines.add("Share via Settings > Extras & Support > Share Diagnostic Report.")
+                lines.add("Share via Settings > Advanced & Support > Diagnostic Report.")
                 resultsView.text = lines.joinToString("\n")
                 running = false
                 runButton.isEnabled = true

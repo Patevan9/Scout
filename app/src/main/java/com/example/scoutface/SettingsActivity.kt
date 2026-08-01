@@ -62,26 +62,31 @@ class SettingsActivity : AppCompatActivity() {
     private val DIV          = Color.parseColor("#1A2D45")
 
     // Subtle icon badge colors per section
-    private val IC_IDENTITY  = Color.parseColor("#1F3A70")
-    private val IC_BRAIN     = Color.parseColor("#3A2060")
+    private val IC_HOUSEHOLD = Color.parseColor("#1F3A70")
+    private val IC_COMPANION = Color.parseColor("#5A2045")
+    private val IC_AI        = Color.parseColor("#3A2060")
+    private val IC_CONNECTED = Color.parseColor("#1E4A5A")
     private val IC_WORKBENCH = Color.parseColor("#153E3E")
     private val IC_PRIVACY   = Color.parseColor("#153E20")
-    private val IC_EXTRAS    = Color.parseColor("#3E2E10")
+    private val IC_ADVANCED  = Color.parseColor("#3E2E10")
 
     companion object {
         // Lets other activities (MainActivity, via voice commands like "go online" /
         // "turn on calendar") launch straight into a specific screen instead of always
-        // landing on the main menu -- S_BRAIN and S_PRIVACY are exposed for that.
+        // landing on the main menu -- S_AI and S_CONNECTED are exposed for that.
         const val EXTRA_TARGET_SCREEN = "target_screen"
-        const val S_BRAIN     = "brain"
-        const val S_PRIVACY   = "privacy"
+        const val S_AI         = "ai"
+        const val S_CONNECTED  = "connected"
 
         private const val S_MAIN      = "main"
-        private const val S_IDENTITY  = "identity"
+        private const val S_HOUSEHOLD = "household"
+        private const val S_COMPANION = "companion"
+        private const val S_PRIVACY   = "privacy"
         private const val S_WORKBENCH = "workbench"
-        private const val S_EXTRAS    = "extras"
+        private const val S_ADVANCED  = "advanced"
         private const val S_ROBOT     = "robot_name"
         private const val S_APIKEY    = "api_key"
+        private const val S_DONATE    = "donate"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -119,7 +124,7 @@ class SettingsActivity : AppCompatActivity() {
         // Voice-command deep link (e.g. "go online" / "turn on calendar") -- lands on
         // the requested screen on top of Main, so back navigation still makes sense.
         intent.getStringExtra(EXTRA_TARGET_SCREEN)?.let { target ->
-            if (target == S_BRAIN || target == S_PRIVACY) push(target)
+            if (target == S_AI || target == S_CONNECTED) push(target)
         }
     }
 
@@ -176,13 +181,16 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun build(s: String): View = when (s) {
         S_MAIN      -> mainScreen()
-        S_IDENTITY  -> identityScreen()
-        S_BRAIN     -> brainScreen()
-        S_WORKBENCH -> workbenchScreen()
+        S_HOUSEHOLD -> householdScreen()
+        S_COMPANION -> companionScreen()
+        S_AI        -> aiScreen()
+        S_CONNECTED -> connectedScreen()
         S_PRIVACY   -> privacyScreen()
-        S_EXTRAS    -> extrasScreen()
+        S_WORKBENCH -> workbenchScreen()
+        S_ADVANCED  -> advancedScreen()
         S_ROBOT     -> robotNameScreen()
         S_APIKEY    -> apiKeyScreen()
+        S_DONATE    -> donateScreen()
         else        -> mainScreen()
     }
 
@@ -194,17 +202,42 @@ class SettingsActivity : AppCompatActivity() {
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(8), dp(16), dp(32))
 
-        body.addView(sectionCard("👤", "Identity & Voice",    "Name, voice pitch, and speed",   IC_IDENTITY)  { push(S_IDENTITY) })
+        body.addView(sectionCard("👤", "My Household",        "What Scout knows about your family", IC_HOUSEHOLD) { push(S_HOUSEHOLD) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("🧠", "Brain & Behavior",    "How Scout thinks and responds",   IC_BRAIN)     { push(S_BRAIN) })
+        body.addView(sectionCard("😊", "Companion",           "How Scout sounds, talks, and acts",  IC_COMPANION) { push(S_COMPANION) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("🔧", "Builder's Workbench", "Hardware, controls, and chassis", IC_WORKBENCH) { push(S_WORKBENCH) })
+        body.addView(sectionCard("🧠", "AI",                  "Scout's thinking systems",           IC_AI)        { push(S_AI) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("🛡️", "Privacy & Data",      "Memory and privacy controls",     IC_PRIVACY)   { push(S_PRIVACY) })
+        body.addView(sectionCard("🔗", "Connected Services",  "Calendar and other connections",     IC_CONNECTED) { push(S_CONNECTED) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("⭐", "Extras & Support",    "Cosmetics, licenses, and help",   IC_EXTRAS)    { push(S_EXTRAS) })
+        body.addView(sectionCard("🔒", "Privacy & Data",      "Camera and legal information",       IC_PRIVACY)   { push(S_PRIVACY) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("🔧", "Builder's Workbench", "Hardware, controls, and chassis",    IC_WORKBENCH) { push(S_WORKBENCH) })
+        body.addView(cardSpacer())
+        body.addView(sectionCard("⚙️", "Advanced & Support",  "Donations, diagnostics, and help",   IC_ADVANCED)  { push(S_ADVANCED) })
         body.addView(footerNote("Scout is built for families — safe, private, and always on your side."))
 
+        scroll.addView(body)
+        root.addView(scroll)
+        return root
+    }
+
+    // ─── MY HOUSEHOLD ───────────────────────────────────────────
+
+    private fun householdScreen(): View {
+        val root = vCol(BG).fillParent()
+        root.addView(subHeader("My Household", "What Scout remembers about your family."))
+        val scroll = ScrollView(this).wrapWeight()
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
+
+        body.addView(sectionLabel("MEMORY"))
+        body.addView(cardGroup(
+            navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
+            navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
+            navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
+        ))
+
+        body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -217,11 +250,11 @@ class SettingsActivity : AppCompatActivity() {
         return v
     }
 
-    // ─── IDENTITY & VOICE ───────────────────────────────────────
+    // ─── COMPANION ──────────────────────────────────────────────
 
-    private fun identityScreen(): View {
+    private fun companionScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Identity & Voice", "Customize Scout's name and how he speaks."))
+        root.addView(subHeader("Companion", "How Scout sounds, talks, and acts."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -249,21 +282,26 @@ class SettingsActivity : AppCompatActivity() {
         ))
 
         body.addView(cardSpacer())
+        body.addView(sectionLabel("BEHAVIOR"))
         body.addView(cardGroup(
-            navRow("Voice Tone", "Warm  ✦ Future", "Choose a different tone for Scout") { toast("Voice Tone personalities coming in a future update!") }
+            toggleRow("Presence Mode", "Scout adapts when you're nearby",
+                memPrefs.getBoolean("presence_mode_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
+            toggleRow("Allow Spontaneous Comments", "Scout may share observations",
+                memPrefs.getBoolean("spontaneous_enabled", true)
+            ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() }
         ))
 
-        body.addView(footerNote("More voice tone options coming in a future update."))
         scroll.addView(body)
         root.addView(scroll)
         return root
     }
 
-    // ─── BRAIN & BEHAVIOR ───────────────────────────────────────
+    // ─── AI ─────────────────────────────────────────────────────
 
-    private fun brainScreen(): View {
+    private fun aiScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Brain & Behavior", "How Scout thinks and responds."))
+        root.addView(subHeader("AI", "Scout's thinking systems."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -272,22 +310,28 @@ class SettingsActivity : AppCompatActivity() {
             toggleRow("Online Features", "Use internet services when available",
                 memPrefs.getBoolean("gemini_enabled", true)
             ) { on -> memPrefs.edit().putBoolean("gemini_enabled", on).apply() },
-            navRow("Online Services", "", "Manage API keys and providers") { push(S_APIKEY) },
-            navRow("Online Brain Helper", "Gemini / Llama", "Use an AI to make Scout smarter") { toast("Brain model selection coming in a future update!") }
+            navRow("Online Services", "", "Manage API keys and providers") { push(S_APIKEY) }
         ))
 
-        body.addView(cardSpacer())
-        body.addView(sectionLabel("BEHAVIOR"))
+        scroll.addView(body)
+        root.addView(scroll)
+        return root
+    }
+
+    // ─── CONNECTED SERVICES ─────────────────────────────────────
+
+    private fun connectedScreen(): View {
+        val root = vCol(BG).fillParent()
+        root.addView(subHeader("Connected Services", "Calendar and other connections."))
+        val scroll = ScrollView(this).wrapWeight()
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
+
+        body.addView(sectionLabel("CALENDAR"))
         body.addView(cardGroup(
-            toggleRow("Kid Safe Filter", "Keep conversations family-friendly",
-                scoutPrefs.getBoolean("kid_safe_filter", true)
-            ) { on -> scoutPrefs.edit().putBoolean("kid_safe_filter", on).apply() },
-            toggleRow("Presence Mode", "Scout adapts when you're nearby",
-                memPrefs.getBoolean("presence_mode_enabled", true)
-            ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
-            toggleRow("Allow Spontaneous Comments", "Scout may share observations",
-                memPrefs.getBoolean("spontaneous_enabled", true)
-            ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() }
+            toggleRow("Calendar Awareness", "Let Scout answer questions about your calendar (read-only)",
+                memPrefs.getBoolean("calendar_awareness_enabled", false) &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+            ) { on -> onCalendarToggleChanged(on) }
         ))
 
         scroll.addView(body)
@@ -379,33 +423,15 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun privacyScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Privacy & Data", "Manage Scout's memory and privacy."))
+        root.addView(subHeader("Privacy & Data", "Camera behavior and legal information."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(sectionLabel("MEMORY"))
-        body.addView(cardGroup(
-            navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
-            navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
-            navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
-        ))
-
-        body.addView(cardSpacer())
         body.addView(sectionLabel("CAMERA"))
         body.addView(cardGroup(
-            navRow("Camera Controls", "✦ Future", "Manage access controls") { toast("Camera Controls coming in a future update!") },
             toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
                 scoutPrefs.getBoolean("voice_cam_cmds", true)
             ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
-        ))
-
-        body.addView(cardSpacer())
-        body.addView(sectionLabel("CALENDAR"))
-        body.addView(cardGroup(
-            toggleRow("Calendar Awareness", "Let Scout answer questions about your calendar (read-only)",
-                memPrefs.getBoolean("calendar_awareness_enabled", false) &&
-                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
-            ) { on -> onCalendarToggleChanged(on) }
         ))
 
         body.addView(cardSpacer())
@@ -415,23 +441,23 @@ class SettingsActivity : AppCompatActivity() {
             navRow("Terms of Use", "", "Terms for using Scout") { showTermsOfUse() }
         ))
 
-        body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
+        body.addView(footerNote("Your data stays private. Camera data is never stored or shared unless you choose to."))
         scroll.addView(body)
         root.addView(scroll)
         return root
     }
 
-    // ─── EXTRAS & SUPPORT ───────────────────────────────────────
+    // ─── ADVANCED & SUPPORT ─────────────────────────────────────
 
-    private fun extrasScreen(): View {
+    private fun advancedScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Extras & Support", "Cosmetics, support, and more."))
+        root.addView(subHeader("Advanced & Support", "Diagnostics, support, and more."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        body.addView(sectionLabel("COSMETICS"))
+        body.addView(sectionLabel("DONATE"))
         body.addView(cardGroup(
-            navRow("Cosmetics  ✦ Future", "", "Change Scout's backpack and look") { toast("Cosmetics coming in a future update!") }
+            navRow("Donate to Scout", "", "Support Scout's development — completely optional") { push(S_DONATE) }
         ))
 
         body.addView(cardSpacer())
@@ -445,8 +471,9 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("DIAGNOSTICS"))
         val diagRows = mutableListOf(
-            navRow("View Diagnostic Report",  "", "Review the technical information in Scout's diagnostic report.") { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, false)) },
-            navRow("Share Diagnostic Report", "", "Review the report, then choose where to send it")                  { startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true)) },
+            navRow("Diagnostic Report", "", "Review Scout's technical diagnostic report, then choose where to send it") {
+                startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true))
+            },
             navRow("Clear Diagnostic History", "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
         )
         // Hidden until unlocked via 7 taps on "About Scout" -- see onAboutScoutTapped().
@@ -459,6 +486,94 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardGroup(*diagRows.toTypedArray()))
 
         body.addView(footerNote("Thank you for supporting Scout!"))
+        scroll.addView(body)
+        root.addView(scroll)
+        return root
+    }
+
+    // ─── DONATE TO SCOUT ────────────────────────────────────────
+
+    // Mirrors donate.html's mechanics: fixed Stripe Payment Links, one per preset
+    // amount (no arbitrary custom-amount entry), tapping a tier live-updates the
+    // CTA before the user commits, external hand-off via ACTION_VIEW -- same
+    // pattern showSupport() already uses. Google Play Billing is deliberately not
+    // used here: these are voluntary donations that unlock nothing, so Play's
+    // in-app-purchase requirement doesn't apply, and Stripe's flat ~2.9%+30¢ fee
+    // leaves far more of a small donation intact than Play's standard commission.
+    private fun donateScreen(): View {
+        val root = vCol(BG).fillParent()
+        root.addView(subHeader("Donate to Scout", "Completely optional — never required, never unlocks features."))
+        val scroll = ScrollView(this).wrapWeight()
+        val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
+
+        val donationLinks = linkedMapOf(
+            5   to "https://buy.stripe.com/bJefZ9aof6GSgu15jEe7m00",
+            10  to "https://buy.stripe.com/9B68wHbsj1my0v36nIe7m01",
+            25  to "https://buy.stripe.com/3cIaEP0NFd5ggu16nIe7m02",
+            50  to "https://buy.stripe.com/bJe14f3ZR4yK3Hf6nIe7m03",
+            100 to "https://buy.stripe.com/dRm00bdArfdoa5D9zUe7m04"
+        )
+
+        body.addView(sectionLabel("CHOOSE AN AMOUNT"))
+
+        var selected = 10
+        val amountButtons = mutableMapOf<Int, Button>()
+
+        fun styleButton(btn: Button, amount: Int) {
+            val isSelected = amount == selected
+            btn.background = roundRect(if (isSelected) ACCENT else DIM_BLUE, 10)
+            btn.setTextColor(if (isSelected) Color.WHITE else TXT_SEC)
+        }
+
+        fun amountButton(amount: Int): Button {
+            val btn = Button(this).apply {
+                text = "\$$amount"
+                textSize = 15f; isAllCaps = false
+                setPadding(dp(8), dp(14), dp(8), dp(14))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = dp(8)
+                }
+            }
+            amountButtons[amount] = btn
+            styleButton(btn, amount)
+            return btn
+        }
+
+        val row1 = hRow(Color.TRANSPARENT)
+        listOf(5, 10, 25).forEach { row1.addView(amountButton(it)) }
+        body.addView(row1)
+
+        val row2 = hRow(Color.TRANSPARENT).apply { setPadding(0, dp(8), 0, 0) }
+        listOf(50, 100).forEach { row2.addView(amountButton(it)) }
+        row2.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
+        })
+        body.addView(row2)
+
+        body.addView(spacer(dp(20)))
+
+        val ctaBtn = actionBtn("Donate \$$selected") {
+            val url = donationLinks[selected]
+            if (url != null) {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (_: Exception) {
+                    toast("Could not open the donation page. Please check your internet connection.")
+                }
+            }
+        }
+
+        amountButtons.forEach { (amount, btn) ->
+            btn.setOnClickListener {
+                selected = amount
+                amountButtons.forEach { (a, b) -> styleButton(b, a) }
+                ctaBtn.text = "Donate \$$selected"
+            }
+        }
+
+        body.addView(ctaBtn)
+        body.addView(footerNote("Scout is a one-time purchase. Donations never unlock core features. You'll complete your contribution securely through Stripe — no account required."))
+
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -726,7 +841,7 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener {
                 scoutPrefs.edit().putFloat("voice_pitch", 1.0f).putFloat("voice_speed", 1.0f).apply()
                 speakPreview(true)
-                show(S_IDENTITY)
+                show(S_COMPANION)
             }
         })
         return row

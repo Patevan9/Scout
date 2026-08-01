@@ -4089,14 +4089,14 @@ Respond only with Scout's next reply.
 
         if (!prefs.getBoolean(PREF_CALENDAR_ENABLED, false)) {
             respond("I don't check calendars right now. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
-            openSettingsScreen(SettingsActivity.S_PRIVACY)
+            openSettingsScreen(SettingsActivity.S_CONNECTED)
             return
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR)
             != PackageManager.PERMISSION_GRANTED) {
             respond("I don't have calendar access yet. Here's Calendar Awareness in Settings, if you'd like to turn it on.")
-            openSettingsScreen(SettingsActivity.S_PRIVACY)
+            openSettingsScreen(SettingsActivity.S_CONNECTED)
             return
         }
 
@@ -4415,13 +4415,13 @@ Respond only with Scout's next reply.
 
         respond("Here's Calendar Awareness, in Settings.")
 
-        openSettingsScreen(SettingsActivity.S_PRIVACY)
+        openSettingsScreen(SettingsActivity.S_CONNECTED)
 
     }
 
     // Shared by every voice path that needs to land the user on a specific Settings
-    // screen (Calendar Awareness, Brain & Behavior) instead of just telling them where
-    // to look and leaving them to find it by hand.
+    // screen (Calendar Awareness, AI) instead of just telling them where to look and
+    // leaving them to find it by hand.
     private fun openSettingsScreen(screen: String) {
 
         handler.postDelayed({
@@ -5259,10 +5259,10 @@ Respond only with Scout's next reply.
 
         } else {
 
-            // Internet's fine -- go straight to Brain & Behavior (where Online Features
-            // and the API key live) instead of just describing status and leaving the
-            // user to hunt for it themselves.
-            openSettingsScreen(SettingsActivity.S_BRAIN)
+            // Internet's fine -- go straight to AI (where Online Features and the API
+            // key live) instead of just describing status and leaving the user to hunt
+            // for it themselves.
+            openSettingsScreen(SettingsActivity.S_AI)
 
         }
 
