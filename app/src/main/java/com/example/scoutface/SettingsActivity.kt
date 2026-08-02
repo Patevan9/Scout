@@ -202,7 +202,7 @@ class SettingsActivity : AppCompatActivity() {
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(8), dp(16), dp(32))
 
-        body.addView(sectionCard("👤", "My Household",        "What Scout knows about your family", IC_HOUSEHOLD) { push(S_HOUSEHOLD) })
+        body.addView(sectionCard("👤", "My Household",        "Manage Scout's saved memory", IC_HOUSEHOLD) { push(S_HOUSEHOLD) })
         body.addView(cardSpacer())
         body.addView(sectionCard("😊", "Companion",           "How Scout sounds, talks, and acts",  IC_COMPANION) { push(S_COMPANION) })
         body.addView(cardSpacer())
@@ -226,7 +226,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun householdScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("My Household", "What Scout remembers about your family."))
+        root.addView(subHeader("My Household", "Export, import, or reset Scout's saved memory."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -441,7 +441,7 @@ class SettingsActivity : AppCompatActivity() {
             navRow("Terms of Use", "", "Terms for using Scout") { showTermsOfUse() }
         ))
 
-        body.addView(footerNote("Your data stays private. Camera data is never stored or shared unless you choose to."))
+        body.addView(footerNote("Camera processing stays on your device. Scout may store local face-recognition data for people you introduce — nothing is uploaded or shared unless you choose to."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -497,9 +497,13 @@ class SettingsActivity : AppCompatActivity() {
     // amount (no arbitrary custom-amount entry), tapping a tier live-updates the
     // CTA before the user commits, external hand-off via ACTION_VIEW -- same
     // pattern showSupport() already uses. Google Play Billing is deliberately not
-    // used here: these are voluntary donations that unlock nothing, so Play's
-    // in-app-purchase requirement doesn't apply, and Stripe's flat ~2.9%+30¢ fee
-    // leaves far more of a small donation intact than Play's standard commission.
+    // used here: per Google's current policy, a direct contribution to the
+    // creator that grants no digital content, feature, or benefit doesn't
+    // require Play Billing, and Stripe's flat ~2.9%+30¢ fee leaves far more of
+    // a small donation intact than Play's standard commission. This reasoning
+    // holds only as long as every tier grants nothing in return -- re-verify
+    // against Google's current policy before Play Store submission, and if any
+    // tier is ever changed to unlock a real benefit, move it to Play Billing.
     private fun donateScreen(): View {
         val root = vCol(BG).fillParent()
         root.addView(subHeader("Donate to Scout", "Completely optional — never required, never unlocks features."))
@@ -572,7 +576,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         body.addView(ctaBtn)
-        body.addView(footerNote("Scout is a one-time purchase. Donations never unlock core features. You'll complete your contribution securely through Stripe — no account required."))
+        body.addView(footerNote("Scout is a one-time purchase. Donations never unlock core features. You'll complete your contribution securely through Stripe in your browser."))
 
         scroll.addView(body)
         root.addView(scroll)
