@@ -66,6 +66,8 @@ import com.example.scoutface.brain.FactKey
 
 import com.example.scoutface.brain.ScoutBootStatus
 
+import com.example.scoutface.brain.AwarenessResolver
+import com.example.scoutface.brain.AwarenessState
 import com.example.scoutface.brain.ScoutConnectivityManager
 
 import com.example.scoutface.brain.ScoutIntentRouter
@@ -709,6 +711,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var connectivityManager: ScoutConnectivityManager
 
+    // AWARENESS LAYER -- Phase 1 only (Scout_Awareness_Layer_Spec.md). Live state +
+    // rolling history + the sensor resolver that publishes to both. Zero consumers
+    // read from these yet -- see start()/stop() call sites in startSystems()/
+    // shutdownSystems() below.
+    private lateinit var awarenessState: AwarenessState
+    private lateinit var awarenessHistory: AwarenessHistoryDb
+    private lateinit var awarenessResolver: AwarenessResolver
+
     private lateinit var geminiClient: GeminiClient
 
     private lateinit var scoutGeminiManager: ScoutGeminiManager
@@ -866,6 +876,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
 
         connectivityManager = ScoutConnectivityManager(this)
+
+        awarenessState = AwarenessState()
+        awarenessResolver = AwarenessResolver(
+            context = this,
+            state = awarenessState,
+            history = awarenessHistory,
+            connectivityManager = connectivityManager
+        )
 
         scoutGeminiManager = ScoutGeminiManager(
 
@@ -1054,6 +1072,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
 
                 embedExecutor.shutdown()
+
+            } catch (_: Exception) {
+
+            }
+
+            try {
+
+                awarenessResolver.stop()
 
             } catch (_: Exception) {
 
@@ -1406,6 +1432,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         checkBatteryOptimization()
 
+        awarenessResolver.start()
+
     }
 
     private fun checkBatteryOptimization() {
@@ -1601,6 +1629,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         diagDb = DiagnosticDb(this)
         diagLog = DiagLog(diagDb)
         diagDb.trimCrashFileIfNeeded()
+
+        awarenessHistory = AwarenessHistoryDb(this)
 
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
