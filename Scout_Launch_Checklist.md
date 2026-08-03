@@ -126,3 +126,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 ---
 
 *Project Scout Launch Checklist | Last updated: August 1, 2026 | Version 22 | For Patrick, Diana, Elijah, and Scout*
+
+---
+
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.

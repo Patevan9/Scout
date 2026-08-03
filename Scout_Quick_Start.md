@@ -110,3 +110,7 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 ---
 
 *Project Scout Quick Start | Last updated: August 1, 2026 | Version 29 | Upload every session | For full details use Master Summary v56*
+
+---
+
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.

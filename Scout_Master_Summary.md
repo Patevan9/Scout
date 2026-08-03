@@ -1170,3 +1170,7 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 ---
 
 *Project Scout Master Summary | Last updated: August 1, 2026 | Version 56 | Single source of truth — upload every session*
+
+---
+
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.
