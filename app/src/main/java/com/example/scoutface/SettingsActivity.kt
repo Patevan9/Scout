@@ -1042,7 +1042,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun showAbout() {
         AlertDialog.Builder(this)
             .setTitle("About Scout")
-            .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0")
+            .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0\n\nCopyright © 2026 Patrick Evan Lippy. All rights reserved.")
             .setPositiveButton("Close", null)
             .show()
     }
@@ -1193,7 +1193,9 @@ class SettingsActivity : AppCompatActivity() {
                 "in the app with an updated effective date.\n\n" +
 
                 "CONTACT\n" +
-                "Questions? Email us at lippyroboticslabs@gmail.com"
+                "Questions? Email us at lippyroboticslabs@gmail.com\n\n" +
+
+                "Copyright © 2026 Patrick Evan Lippy. All rights reserved."
             )
             .setPositiveButton("Close", null)
             .show()
@@ -1256,7 +1258,9 @@ class SettingsActivity : AppCompatActivity() {
                 "this app under Settings > Privacy & Data.\n\n" +
 
                 "CONTACT\n" +
-                "Questions? Email us at lippyroboticslabs@gmail.com"
+                "Questions? Email us at lippyroboticslabs@gmail.com\n\n" +
+
+                "Copyright © 2026 Patrick Evan Lippy. All rights reserved."
             )
             .setPositiveButton("Close", null)
             .show()
