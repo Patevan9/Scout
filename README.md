@@ -55,3 +55,8 @@ OpenAI tools acted as development assistants throughout the project. Final desig
 ## Development Status
 
 Scout is currently in active development and is not yet feature complete. The project focuses on creating a privacy-first AI companion that performs as much processing locally on the device as possible while using cloud AI only when needed.
+
+---
+
+Project Scout
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.

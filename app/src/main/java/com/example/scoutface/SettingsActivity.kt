@@ -1042,7 +1042,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun showAbout() {
         AlertDialog.Builder(this)
             .setTitle("About Scout")
-            .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0")
+            .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0\n\nCopyright © 2026 Patrick Evan Lippy\nAll rights reserved.")
             .setPositiveButton("Close", null)
             .show()
     }
