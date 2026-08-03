@@ -204,3 +204,7 @@ Neither proves distance or speaker identity; neither substitutes for the other.
 ## Closing
 
 None of this is about making Scout talk more. It's about making sure that when Scout does decide to say something, it traces back to something he genuinely observed — never a sensor guessing on Awareness's behalf, never Awareness guessing on Behavior's behalf, never Behavior inventing a signal that was never really there.
+
+---
+
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.
