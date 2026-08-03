@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: July 31, 2026
-Based on commit: a85177e95b7873250cde4e37ae7a41c1ba89f638
+Last updated: August 1, 2026
+Based on commit: cf1f695b619bf9d861f5da371450ea7c32d053c6
 Status: Current
 
-**Version 21**
+**Version 22**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -32,8 +32,8 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 **Stability & privacy**
 - A32 confirmed stable through multiple root-caused crash classes, most recently a camera/ML Kit/SpeechRecognizer startup collision (July 28) — fixed via staggered subsystem startup, not a guess.
 - API keys encrypted at rest via the Android Keystore (AES-256-GCM) — no more plaintext key storage.
-- Diagnostic reporting system (View/Share modes) — verified to never contain speech text, names, memories, face data, or location.
-- Settings screen (5 sections), 5-screen onboarding flow (offline by default for new installs), battery optimization prompt.
+- Diagnostic reporting system (single merged Diagnostic Report row as of PR #10, always offers Share) — verified to never contain speech text, names, memories, face data, or location.
+- Settings screen (reorganized into 7 owner-oriented sections, PR #10, Aug 1), 5-screen onboarding flow (offline by default for new installs), battery optimization prompt.
 
 **Compliance**
 - Hardcoded Gemini API key removed from source.
@@ -125,4 +125,8 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: July 31, 2026 | Version 21 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 1, 2026 | Version 22 | For Patrick, Diana, Elijah, and Scout*
+
+---
+
+Copyright © 2026 Patrick Evan Lippy. All rights reserved.
