@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.BatteryManager
 import android.util.Log
 import com.example.scoutface.AwarenessCategory
 import com.example.scoutface.AwarenessHistoryDb
@@ -56,6 +57,15 @@ class AwarenessResolver(
         if (started) return
         started = true
 
+        // Seed live state with the current readings *before* registering any
+        // listener, and via the plain setters (not onChargingChanged()/
+        // onConnectivityChanged()) so this initial snapshot never itself counts
+        // as a transition and never writes to history. Seeding first also means
+        // an immediate callback fired right after registration is compared
+        // against the real starting value instead of null, so it can't be
+        // misread as a false startup transition.
+        seedInitialState()
+
         try {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_POWER_CONNECTED)
@@ -79,11 +89,24 @@ class AwarenessResolver(
             networkCallback = callback
         } catch (_: Exception) {
         }
+    }
 
-        // Seed live state with the current reading without treating it as a
-        // transition — only edges detected after this point are written to
-        // history, matching §3's "only a transition ever produces a write."
-        state.updateOnline(connectivityManager.hasValidatedInternet())
+    private fun seedInitialState() {
+        try {
+            // Standard Android idiom for reading the current sticky battery
+            // broadcast synchronously, without registering an ongoing receiver.
+            val batteryStatus = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            state.updateCharging(charging)
+        } catch (_: Exception) {
+        }
+
+        try {
+            state.updateOnline(connectivityManager.hasValidatedInternet())
+        } catch (_: Exception) {
+        }
     }
 
     /** Unregisters both sensor listeners. Call from the same lifecycle owner's teardown. */

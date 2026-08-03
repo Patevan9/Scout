@@ -22,8 +22,11 @@ import android.database.sqlite.SQLiteOpenHelper
  * on-device volume (see MAX_ENTRIES note below).
  *
  * Retention: 7-day cutoff, reused directly from DiagnosticDb.RETENTION_MS
- * (§4/§8), plus a row-count ceiling. Purge runs once per app session on the
- * first call to add(), same pattern DiagnosticDb already proves works.
+ * (§4/§8), plus a row-count ceiling. The time-based purge runs once per app
+ * session on the first call to add(), same pattern DiagnosticDb already
+ * proves works. The count ceiling is a true hard cap: it's enforced after
+ * every insert, not just once per session, so MAX_ENTRIES can never actually
+ * be exceeded mid-session.
  */
 class AwarenessHistoryDb(context: Context) :
     SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
@@ -50,7 +53,7 @@ class AwarenessHistoryDb(context: Context) :
      */
     fun add(category: AwarenessCategory, detail: String, entity: String? = null) {
         if (!purgedThisSession) {
-            purgeOld()
+            purgeOldByTime()
             purgedThisSession = true
         }
         val cv = ContentValues().apply {
@@ -60,6 +63,7 @@ class AwarenessHistoryDb(context: Context) :
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insert("awareness_events", null, cv)
+        enforceCountCeiling()
     }
 
     /**
@@ -83,17 +87,25 @@ class AwarenessHistoryDb(context: Context) :
         return out
     }
 
-    private fun purgeOld() {
+    private fun purgeOldByTime() {
         val cutoff = System.currentTimeMillis() - RETENTION_MS
         writableDatabase.execSQL(
             "DELETE FROM awareness_events WHERE created_at < ?;",
             arrayOf(cutoff.toString())
         )
-        // Secondary cap: keep only the newest MAX_ENTRIES regardless of age.
-        // Provisional — the spec explicitly defers picking a final number until
-        // the A32 logging trial shows real daily event volume (§4, §9). This
-        // reuses DiagnosticDb's proven value as a safe interim ceiling only,
-        // not a considered answer for Awareness history specifically.
+    }
+
+    /**
+     * Keeps only the newest MAX_ENTRIES rows regardless of age. Runs after
+     * every insert (not just once per session) so the documented cap is a
+     * real hard ceiling instead of one that can be exceeded mid-session.
+     * MAX_ENTRIES itself is provisional — the spec explicitly defers picking
+     * a final number until the A32 logging trial shows real daily event
+     * volume (§4, §9). This reuses DiagnosticDb's proven value as a safe
+     * interim ceiling only, not a considered answer for Awareness history
+     * specifically.
+     */
+    private fun enforceCountCeiling() {
         writableDatabase.execSQL(
             "DELETE FROM awareness_events WHERE id NOT IN " +
             "(SELECT id FROM awareness_events ORDER BY created_at DESC LIMIT $MAX_ENTRIES);"
@@ -104,7 +116,7 @@ class AwarenessHistoryDb(context: Context) :
         private const val DB_NAME     = "scout_awareness.db"
         private const val DB_VERSION  = 1
         const val RETENTION_MS        = DiagnosticDb.RETENTION_MS  // 7 days — reused precedent, §4
-        private const val MAX_ENTRIES = 1_000  // provisional — see purgeOld()
+        private const val MAX_ENTRIES = 1_000  // provisional — see enforceCountCeiling()
     }
 }
 
