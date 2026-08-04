@@ -775,6 +775,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val IRIS_MAX_Y = 54f
 
+    // Single shared horizontal gain applied to a tracked face's offset from
+    // center, regardless of which side it's on. Previously two different,
+    // undocumented values (1.15x / 1.35x) applied depending on sign -- traced
+    // to the repo's very first commit with no comment or PR explaining the
+    // difference, and confirmed on-device to produce a real rightward gaze
+    // bias while tracking. Equalized to one value; IRIS_MAX_X still governs
+    // maximum travel independently of this gain.
+    private val GAZE_TRACKING_GAIN = 1.25f
+
     // =======================
 
     // LIFECYCLE
@@ -2145,15 +2154,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     if (abs(dy) < 0.08f) dy = 0f
 
-                                    val correctedDx = when {
-
-                                        dx > 0f -> dx * 1.15f
-
-                                        dx < 0f -> dx * 1.35f
-
-                                        else -> 0f
-
-                                    }
+                                    val correctedDx = dx * GAZE_TRACKING_GAIN
 
                                     val rawLookX = (-correctedDx * IRIS_MAX_X).coerceIn(
 

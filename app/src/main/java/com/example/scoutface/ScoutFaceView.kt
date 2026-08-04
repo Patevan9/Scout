@@ -1133,14 +1133,18 @@ class ScoutFaceView @JvmOverloads constructor(
             thinkEndedAt = 0L
             if (nextThinkGlanceAt == 0L) {
                 thinkGlanceActive = true
-                thinkGlanceSideX  = -(35f + Random.nextFloat() * 15f)  // always left
+                // One side chosen per glance episode, not continuously varied within
+                // it -- previously hardcoded to always the same side (left), with no
+                // documented reason found in history. Magnitude range unchanged.
+                val thinkGlanceSide = if (Random.nextBoolean()) 1f else -1f
+                thinkGlanceSideX  = thinkGlanceSide * (35f + Random.nextFloat() * 15f)
                 nextThinkGlanceAt = 1L
             }
         } else {
             if (thinkGlanceActive) thinkEndedAt = now  // record moment thinking stopped
             thinkGlanceActive = false; nextThinkGlanceAt = 0L; thinkGlanceSideX = 0f
         }
-        // Micro-drift: slow organic wandering around the upper-left anchor while thinking
+        // Micro-drift: slow organic wandering around the upper-left-or-right anchor while thinking
         val thinkMicroX = if (thinkGlanceActive) sin(now / 1400.0).toFloat() * 6f else 0f
         val thinkMicroY = if (thinkGlanceActive) cos(now / 1100.0).toFloat() * 4f else 0f
         val thinkGazeTargetY = if (thinkGlanceActive) -20f + thinkMicroY else 0f
