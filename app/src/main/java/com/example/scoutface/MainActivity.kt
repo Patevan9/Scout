@@ -89,10 +89,12 @@ import com.example.scoutface.brain.FuzzyNameMatcher
 import com.example.scoutface.brain.ScoutSpeechAvailabilityMonitor
 
 import com.example.scoutface.brain.CompanionSignals
+import com.example.scoutface.brain.CourtesyIntent
 import com.example.scoutface.brain.MomentCandidate
 import com.example.scoutface.brain.MomentCategory
 import com.example.scoutface.brain.ScoutArrivalLatch
 import com.example.scoutface.brain.ScoutCompanionMomentsEngine
+import com.example.scoutface.brain.ScoutCourtesyMatcher
 import com.example.scoutface.brain.ScoutMemoryPhraser
 import com.example.scoutface.brain.ScoutPresenceStreakTracker
 import com.example.scoutface.brain.ScoutStaleResultGuard
@@ -2941,6 +2943,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 val words = normalized.split(" ").filter { it.isNotBlank() }
 
+                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
+                val nameLower = scoutName.lowercase()
+
+                // Courtesy layer (Phase 1) -- checked before both the one-word filter
+                // and the wake-name gate below, on purpose: these are a small, fixed,
+                // deterministic set of everyday courtesy phrases ("hi", "thank you",
+                // "good night", ...) that should work without saying Scout's name,
+                // without going through handleQuery()/ScoutIntentRouter/TinyLlama/
+                // Gemini at all. See ScoutCourtesyMatcher's own doc comment for exactly
+                // which forms are matched and why. Everything else in this function --
+                // the wake-name requirement, the conversation window, real questions --
+                // is completely unchanged.
+                ScoutCourtesyMatcher.match(normalized, scoutName)?.let { courtesy ->
+                    convoDb.logTurn("user", normalized)
+                    handleCourtesy(courtesy)
+                    scheduleListenRestart()
+                    return
+                }
+
                 val allowedOneWord = setOf(
 
                     "time", "date",
@@ -2985,8 +3006,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 habitLayer.logUtterance(normalized, lastFaceHashes.firstOrNull())
 
-                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
-                val nameLower = scoutName.lowercase()
                 // FuzzyNameMatcher gives any configured name (not just the default
                 // "Scout") the same class of mishearing tolerance, via bounded
                 // edit-distance whole-word matching rather than a hand-written list of
@@ -4393,6 +4412,24 @@ Respond only with Scout's next reply.
         val out = voice.say(key)
 
         respond(out)
+
+    }
+
+    // Answers a Courtesy Phase 1 match (see ScoutCourtesyMatcher) directly via
+    // respond() -- never through handleQuery()/ScoutIntentRouter, so these never
+    // reach TinyLlama or Gemini. Uses Phrases.kt's own rotating-pool pattern
+    // (Phrases.COURTESY_* -- separate pools from GREET/GOODBYE, not reused).
+    private fun handleCourtesy(courtesy: CourtesyIntent) {
+
+        val pool = when (courtesy) {
+            CourtesyIntent.GREET -> Phrases.COURTESY_GREET
+            CourtesyIntent.GOOD_MORNING -> Phrases.COURTESY_GOOD_MORNING
+            CourtesyIntent.THANKS -> Phrases.COURTESY_THANKS
+            CourtesyIntent.GOOD_NIGHT -> Phrases.COURTESY_GOOD_NIGHT
+            CourtesyIntent.GOODBYE -> Phrases.COURTESY_GOODBYE
+        }
+
+        respond(Phrases.pick("courtesy_${courtesy.name.lowercase()}", pool))
 
     }
 

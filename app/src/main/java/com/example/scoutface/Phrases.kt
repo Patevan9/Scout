@@ -143,4 +143,42 @@ object Phrases {
         "Alright. Catch you later.",
         "Got it. Talk to you soon."
     )
+
+    // ── Courtesy (Phase 1) ──────────────────────────────────────────────────
+    // Dedicated pools for ScoutCourtesyMatcher -- deliberately separate from
+    // GREET/GOODBYE above (which stay reachable only through the existing
+    // wake-name + ScoutIntentRouter path) rather than reused, so the two
+    // systems don't become coupled. Wording is kept close to GREET/GOODBYE's
+    // tone on purpose, so Scout sounds the same whether or not his name was said.
+
+    val COURTESY_GREET = listOf(
+        "Hi.",
+        "Hello.",
+        "Hey there."
+    )
+
+    val COURTESY_GOOD_MORNING = listOf(
+        "Good morning.",
+        "Morning. It's good to see you.",
+        "Good morning. Ready when you are."
+    )
+
+    val COURTESY_THANKS = listOf(
+        "You're welcome.",
+        "Anytime.",
+        "Happy to help.",
+        "Of course."
+    )
+
+    val COURTESY_GOOD_NIGHT = listOf(
+        "Good night.",
+        "Sleep well.",
+        "Good night. Take care."
+    )
+
+    val COURTESY_GOODBYE = listOf(
+        "Okay. I'll see you later.",
+        "Take care.",
+        "Bye for now."
+    )
 }
