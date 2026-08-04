@@ -32,7 +32,13 @@ enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE }
 object ScoutCourtesyMatcher {
 
     fun match(normalized: String, scoutName: String): CourtesyIntent? {
-        val name = scoutName.trim().lowercase()
+        // Run the configured name through the exact same normalization the
+        // incoming speech already went through -- a bare trim()/lowercase()
+        // isn't enough, since a configured name containing punctuation or
+        // unusual spacing (e.g. "R2-D2", "Scout Jr.") would normalize
+        // differently than this, and the name-included forms below would
+        // then never match.
+        val name = TextNormalizer.normalizeUtterance(scoutName)
 
         return when (normalized) {
             "hi", "hello", "hey" -> CourtesyIntent.GREET

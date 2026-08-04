@@ -69,6 +69,31 @@ class ScoutCourtesyMatcherTest {
         assertNull(ScoutCourtesyMatcher.match("thanks scout", "Charlie"))
     }
 
+    // --- Configured name is normalized the same way the incoming speech already was ---
+    // (a bare trim()/lowercase() isn't enough for a name containing punctuation or
+    // unusual spacing, since speech goes through the fuller TextNormalizer.normalizeUtterance())
+
+    @Test fun `a punctuated configured name still matches its name-included form`() {
+        // TextNormalizer.normalizeUtterance("R2-D2") -> "r2 d2" (hyphen becomes a space,
+        // same as it would for the incoming speech text).
+        assertEquals(CourtesyIntent.THANKS, ScoutCourtesyMatcher.match("thanks r2 d2", "R2-D2"))
+        assertEquals(CourtesyIntent.GOOD_MORNING, ScoutCourtesyMatcher.match("good morning r2 d2", "R2-D2"))
+    }
+
+    @Test fun `a multiword configured name with punctuation still matches`() {
+        // TextNormalizer.normalizeUtterance("Scout Jr.") -> "scout jr" (period stripped).
+        assertEquals(CourtesyIntent.GOOD_NIGHT, ScoutCourtesyMatcher.match("good night scout jr", "Scout Jr."))
+    }
+
+    @Test fun `an unnormalized punctuated name would not have matched -- regression guard`() {
+        // Documents exactly the bug the review caught: scoutName.trim().lowercase()
+        // alone would have produced "r2-d2" (hyphen kept), which can never equal the
+        // already-normalized incoming speech's "r2 d2". Asserting the *fixed* behavior
+        // here doubles as a regression guard against reintroducing the bare trim/lowercase.
+        assertEquals(CourtesyIntent.THANKS, ScoutCourtesyMatcher.match("thanks r2 d2", "R2-D2"))
+        assertNull(ScoutCourtesyMatcher.match("thanks r2-d2", "R2-D2"))
+    }
+
     // --- Deliberately NOT matched: name-included hi/bye already have a working router path ---
 
     @Test fun `hi plus name is not matched here -- stays on the existing router path`() {
