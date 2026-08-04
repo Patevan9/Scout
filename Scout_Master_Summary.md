@@ -1,13 +1,42 @@
 # Project Scout — Master Project Summary
 
-Last updated: August 1, 2026
-Based on commit: cf1f695b619bf9d861f5da371450ea7c32d053c6
+Last updated: August 3, 2026
+Based on commit: a8298920e2e2ea9de55f939eb61a0f3231c9b5c8
 Status: Current
 
-**Version 56**
+**Version 57**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## August 3, 2026 — Design Note: Future Dedicated About Screen (Not Implemented)
+
+📝 **Design idea, not a code change.** Patrick described a more structured About screen he'd eventually like, once Scout is more polished:
+
+```
+Project Scout
+
+Version 1.0.0
+
+Built by
+Patrick Evan Lippy
+
+Copyright © 2026 Patrick Evan Lippy
+All rights reserved.
+
+Lippy Robotics
+https://lippyrobotics.com
+```
+
+Deliberately not implemented now — asked directly, Patrick had no preference on timing or the two open questions below, and this is a real UI decision (a dedicated screen vs. the current simple `AlertDialog`) worth deciding deliberately rather than guessing. Captured here so it isn't lost.
+
+**Today's About Scout dialog** (`SettingsActivity.showAbout()`) already covers the name/version/copyright basics in plain-text form: "Scout is a local-first AI companion robot app. ... Version 1.0 ... Copyright © 2026 Patrick Evan Lippy. All rights reserved." What this idea adds beyond that: a distinct "Built by" credit line, and a company name + website link, laid out as a real structured screen rather than one paragraph of dialog text.
+
+**Two open questions to resolve before building this:**
+1. **Website URL.** The mockup shows `https://lippyrobotics.com`. The site's real, currently-working address is `patevan9.github.io/lippyrobotics.github.io` (the custom domain/CNAME was removed a while back — see the website repo's git history). Either `lippyrobotics.com` needs to actually be registered and pointed at the site first, or the screen should link to the real working URL instead.
+2. **Version format.** The mockup shows `Version 1.0.0` (three-part). `app/build.gradle.kts`'s actual `versionName` is still `"1.0"` (two-part) as of this entry. Decide whether to bump `versionName` itself to match, or just display a separate marketing-style version string that isn't tied to the build config.
 
 ---
 
@@ -1169,7 +1198,7 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: August 1, 2026 | Version 56 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: August 3, 2026 | Version 57 | Single source of truth — upload every session*
 
 ---
 
