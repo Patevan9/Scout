@@ -1048,13 +1048,13 @@ Two kinds of autonomy — both approved:
 
 ---
 
-## 16d. Owner Remote View (Builder's Workbench) — Future Design Idea
+## 16d. Future Builder's Workbench — Owner Remote View
 
 **Status: Design discussion only. Do not begin implementation or planning work yet.**
 
 Captured August 5, 2026 so the idea isn't lost, the same way Proposal Sandbox and the Memory Reel concept were captured as future design discussions before either became active work.
 
-**What it is:** a long-term Builder's Workbench feature letting the owner privately check in on Scout while away — see what Scout currently sees, and check his status. Aimed at hobbyists and advanced users, not a home-security or cloud-surveillance product, and not something that changes Scout's core promise for everyday owners who never touch it.
+**What it is:** a long-term Builder's Workbench hobbyist/owner development tool letting the owner privately check in on Scout while away — see what Scout currently sees, and check his status. Explicitly **not** a home-security or surveillance feature, and not something that changes Scout's core promise for everyday owners who never touch it.
 
 **Possible capabilities (future discussion only):**
 - View Scout's current camera feed or a snapshot.
@@ -1063,16 +1063,20 @@ Captured August 5, 2026 so the idea isn't lost, the same way Proposal Sandbox an
 - View current Awareness state (Idle, Listening, Thinking, Speaking).
 - View simple diagnostics useful for development.
 
-**Design philosophy:** must stay consistent with Scout's privacy-first stance. Requirements expected of any real design, worked out in an August 5, 2026 architecture discussion:
-- Disabled by default; hidden inside Builder's Workbench, not surfaced to ordinary users.
-- Explicit owner authentication — no unauthenticated access, even on home Wi-Fi.
-- A visible "Remote View Active" indicator on Scout whenever it's in use — considered as two tiers: a subtle always-on reminder while the feature is toggled on at all, and a more prominent one while someone is actually connected and pulling frames.
-- No recording, structurally — frames only ever exist transiently in memory during encode-and-transmit, never written to disk.
-- No public internet exposure by default, and specifically no automatic UPnP/NAT-PMP port forwarding, ever — that's the real safety boundary, not which network interface a server binds to.
-- Local-only operation by default, reachable only from the home Wi-Fi.
-- Automatic timeout on any active connection, separate from the standing on/off toggle.
-- Optional secure away-from-home access only through a private VPN (e.g., Tailscale's free personal tier) as a separate, later layer — the local server itself never changes to support this; the VPN just makes a remote device appear to be on the home network.
-- Technical check already done: reusing the existing camera analyzer's already-decoded frame (the same one face detection and scene labeling already share) rather than opening a second camera session — confirmed this wouldn't change face-detection cadence or create camera-ownership contention; the real costs are a small bounded memory/battery increase only while a session is actively in use.
+**Design philosophy:** must stay consistent with Scout's privacy-first stance. Settled design constraints, worked out in an August 5, 2026 architecture discussion:
+- Off by default.
+- Builder's Workbench only — hidden from ordinary users, never surfaced elsewhere.
+- Owner-authenticated access — using an owner credential or a per-session token. Deliberately **not** locked to a simple numeric PIN at this stage; a PIN alone was judged too weak for a live camera stream, and the exact mechanism is left open so a stronger design can be chosen later without rewriting this note.
+- Reuse the existing decoded camera frame as an additional consumer — the same already-decoded frame face detection and scene labeling already share — rather than opening any new capture path.
+- Never create a second camera session. Confirmed this reuse approach doesn't change face-detection cadence or create camera-ownership contention; the real cost is a small, bounded memory/battery increase only while a session is actively in use.
+- Foreground-only — never a background service that keeps the camera open independent of the main app.
+- No recording or file writes, structurally — frames exist only transiently in memory during encode-and-transmit.
+- No UPnP, NAT-PMP, or any other automatic port forwarding, ever — that's the real safety boundary, not which network interface a server binds to.
+- A clear indicator on Scout whenever the feature is enabled at all.
+- A stronger, more prominent indicator while someone is actively viewing right now.
+- Automatic timeout on any active viewer session, separate from the standing on/off toggle.
+- Local-network access by default — reachable only from the home Wi-Fi.
+- Optional away-from-home access only through a separate private VPN setup (e.g., Tailscale's free personal tier) as its own later layer — the local server itself never changes to support this; the VPN just makes a remote device appear to be on the home network.
 
 This is documentation only — no code, no Settings row, no server, nothing scheduled. Revisit when Patrick decides it's time for an active design discussion.
 
