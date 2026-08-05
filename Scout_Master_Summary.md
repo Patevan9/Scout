@@ -1,10 +1,10 @@
 # Project Scout — Master Project Summary
 
-Last updated: August 1, 2026
-Based on commit: cf1f695b619bf9d861f5da371450ea7c32d053c6
-Status: Current
+Last updated: August 5, 2026
+Based on commit: a829892d0b24cead8ae39898e5affbe01e1de7f2
+Status: Current, but incomplete — PRs #12–#20 (copyright standardization, the Awareness Layer spec and Phase 1, the gaze-bias fix, and the Courtesy Layer) are merged on `main` but not yet itemized below. This update only adds the autonomy-boundary clarification and the Owner Remote View design note; catching up the rest is a separate pass.
 
-**Version 56**
+**Version 57**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
@@ -1043,6 +1043,38 @@ Two kinds of autonomy — both approved:
 **Status:** Future session. Do not build before launch.
 
 **Reaffirmed July 25, 2026** — Patrick restated this direction in full as a five-layer model: Working Memory (conversation only, cleared on restart) → Habit Store (decaying patterns, already built) → Truth Database (permanent, approved-only facts, already built) → **Proposal Sandbox** (new — a temporary holding area for Scout's own ideas; nothing here affects Scout until approved) → Reflective Layer (future — an LLM that can help generate ideas but never directly changes Scout). Core rule restated explicitly: Scout must never rewrite Kotlin files, modify application logic, generate executable code, edit his own source, or change compiled behavior — ever. He only ever proposes ("I've noticed Patrick usually asks for weather around 7am — want me to offer it after good morning?"), and every proposal requires explicit approval before it becomes real behavior. Immediate scope confirmed for whenever this is actually built: noticing patterns and mentioning them in conversation, and suggesting Settings changes — not self-adjustment. This section's original "do not build before launch" status stands; this is documentation only, not a build session.
+
+**Reaffirmed August 5, 2026** — Patrick clarified the boundary around one specific piece of this direction: isolated prototype-code generation (Scout drafting actual source, even sandboxed) is explicitly a *possible future policy amendment*, not something the current rules already permit. The standing rule is unchanged and absolute — Scout himself never generates executable code, modifies source, executes builds, or alters compiled behavior. What Scout *may* eventually do autonomously: notice patterns from Awareness/history, identify repeated successes or failures, form hypotheses, propose improvements, explain evidence and risk, and recommend a test plan — observation and reasoning only. After explicit owner approval, an external tool (e.g., a Claude Code session) may act on that proposal on a separate branch through the normal PR workflow — Scout may originate the idea but may not authorize network/API spending, choose or expand repository permissions, approve the diff, merge it, or deploy it. Permanent human gates, no exceptions: starting any external coding session or paid API request; expanding permissions or data access; any change touching privacy, memory, identity, microphone, camera, safety, or robot movement; and every production merge/deployment.
+
+---
+
+## 16d. Owner Remote View (Builder's Workbench) — Future Design Idea
+
+**Status: Design discussion only. Do not begin implementation or planning work yet.**
+
+Captured August 5, 2026 so the idea isn't lost, the same way Proposal Sandbox and the Memory Reel concept were captured as future design discussions before either became active work.
+
+**What it is:** a long-term Builder's Workbench feature letting the owner privately check in on Scout while away — see what Scout currently sees, and check his status. Aimed at hobbyists and advanced users, not a home-security or cloud-surveillance product, and not something that changes Scout's core promise for everyday owners who never touch it.
+
+**Possible capabilities (future discussion only):**
+- View Scout's current camera feed or a snapshot.
+- View battery level and charging status.
+- View Wi-Fi / internet status.
+- View current Awareness state (Idle, Listening, Thinking, Speaking).
+- View simple diagnostics useful for development.
+
+**Design philosophy:** must stay consistent with Scout's privacy-first stance. Requirements expected of any real design, worked out in an August 5, 2026 architecture discussion:
+- Disabled by default; hidden inside Builder's Workbench, not surfaced to ordinary users.
+- Explicit owner authentication — no unauthenticated access, even on home Wi-Fi.
+- A visible "Remote View Active" indicator on Scout whenever it's in use — considered as two tiers: a subtle always-on reminder while the feature is toggled on at all, and a more prominent one while someone is actually connected and pulling frames.
+- No recording, structurally — frames only ever exist transiently in memory during encode-and-transmit, never written to disk.
+- No public internet exposure by default, and specifically no automatic UPnP/NAT-PMP port forwarding, ever — that's the real safety boundary, not which network interface a server binds to.
+- Local-only operation by default, reachable only from the home Wi-Fi.
+- Automatic timeout on any active connection, separate from the standing on/off toggle.
+- Optional secure away-from-home access only through a private VPN (e.g., Tailscale's free personal tier) as a separate, later layer — the local server itself never changes to support this; the VPN just makes a remote device appear to be on the home network.
+- Technical check already done: reusing the existing camera analyzer's already-decoded frame (the same one face detection and scene labeling already share) rather than opening a second camera session — confirmed this wouldn't change face-detection cadence or create camera-ownership contention; the real costs are a small bounded memory/battery increase only while a session is actively in use.
+
+This is documentation only — no code, no Settings row, no server, nothing scheduled. Revisit when Patrick decides it's time for an active design discussion.
 
 ---
 
