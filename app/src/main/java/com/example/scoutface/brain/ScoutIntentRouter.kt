@@ -95,7 +95,9 @@ object ScoutIntentRouter {
             clean == "your name" ||
             clean.contains("what is your name") ||
             clean.contains("what's your name") ||
-            clean.contains("who are you")
+            clean.contains("who are you") ||
+            clean.contains("what should i call you") ||
+            clean.contains("what do i call you")
         ) {
             return IntentType.ASK_SCOUT_NAME
         }
@@ -121,9 +123,35 @@ object ScoutIntentRouter {
             clean.contains("what date is it") ||
             clean.contains("what is today's date") ||
             clean.contains("what is today") ||
+            clean.contains("what day is today") ||
+            clean.contains("what day is it") ||
             clean == "date"
         ) {
             return IntentType.DATE
+        }
+
+        // Deterministic self-knowledge: the language Android's speech recognizer
+        // is actually configured for (see ScoutSpeechLanguage -- single source of
+        // truth shared with buildRecognizerIntent()), not a guess. Kept to close
+        // variants of the literal phrase, deliberately narrow.
+        if (
+            clean.contains("what language are we speaking") ||
+            clean.contains("what language are you speaking") ||
+            clean.contains("what language do you speak") ||
+            clean.contains("what language are we talking")
+        ) {
+            return IntentType.LANGUAGE
+        }
+
+        // Deterministic self-knowledge: reuses HabitLayer.TIME_SLOTS (see
+        // ScoutTimeOfDay), the app's one existing hour-of-day-to-label mapping,
+        // instead of asking TinyLlama to guess. Deliberately narrow -- exactly
+        // the two phrasings discussed, not an open-ended "time" catch-all.
+        if (
+            clean.contains("is it morning or night") ||
+            clean.contains("what time of day is it")
+        ) {
+            return IntentType.TIME_OF_DAY
         }
 
         if (

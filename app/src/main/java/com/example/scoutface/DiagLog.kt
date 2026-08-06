@@ -100,7 +100,7 @@ class DiagLog(private val db: DiagnosticDb) {
      * UNKNOWN covers the else branch of the routing when block.
      */
     enum class DiagIntent {
-        TIME, DATE, CONNECTIVITY,
+        TIME, DATE, LANGUAGE, TIME_OF_DAY, CONNECTIVITY,
         GO_ONLINE, GO_OFFLINE,
         EXPORT_BRAIN,
         VISION,
