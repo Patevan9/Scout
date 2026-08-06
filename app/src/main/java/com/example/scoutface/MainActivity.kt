@@ -3138,14 +3138,26 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    // Answers from ScoutTimeOfDay, which reuses HabitLayer.TIME_SLOTS -- see
-    // that file's doc comment for why PresenceMode was considered and rejected
-    // as the source here.
-    private fun handleTimeOfDayIntent() {
+    // Answers from ScoutTimeOfDay, which reuses HabitLayer.TIME_SLOTS' hour
+    // boundaries -- see that file's doc comment for why PresenceMode was
+    // considered and rejected as the source here. Two router phrasings share
+    // this one intent but expect different answer shapes: "is it morning or
+    // night" is itself posed in terms of exactly those four words, so it gets
+    // spokenCategory(); "what time of day is it" is open-ended, so it gets
+    // the more descriptive descriptiveLabel(). The two phrasings are the only
+    // ones ScoutIntentRouter routes to TIME_OF_DAY, so checking for "morning
+    // or night" here reliably tells them apart.
+    private fun handleTimeOfDayIntent(qNorm: String) {
 
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
-        respond("It's ${ScoutTimeOfDay.currentLabel(hour)} right now.")
+        val out = if (qNorm.contains("morning or night")) {
+            "It's ${ScoutTimeOfDay.spokenCategory(hour)} right now."
+        } else {
+            "It's ${ScoutTimeOfDay.descriptiveLabel(hour)} right now."
+        }
+
+        respond(out)
 
     }
 
@@ -4663,7 +4675,7 @@ Respond only with Scout's next reply.
 
             IntentType.LANGUAGE -> handleLanguageIntent()
 
-            IntentType.TIME_OF_DAY -> handleTimeOfDayIntent()
+            IntentType.TIME_OF_DAY -> handleTimeOfDayIntent(qNorm)
 
             IntentType.CONNECTIVITY -> handleConnectivityIntent()
 
