@@ -13,7 +13,7 @@ class ScoutTimeOfDayTest {
         assertEquals("night", ScoutTimeOfDay.spokenCategory(2))
     }
 
-    @Test fun `7am is morning`() {
+    @Test fun `7am is morning (spokenCategory)`() {
         assertEquals("morning", ScoutTimeOfDay.spokenCategory(7))
     }
 
@@ -21,11 +21,11 @@ class ScoutTimeOfDayTest {
         assertEquals("afternoon", ScoutTimeOfDay.spokenCategory(13))
     }
 
-    @Test fun `3pm is afternoon`() {
+    @Test fun `3pm is afternoon (spokenCategory)`() {
         assertEquals("afternoon", ScoutTimeOfDay.spokenCategory(15))
     }
 
-    @Test fun `7pm is evening`() {
+    @Test fun `7pm is evening (spokenCategory)`() {
         assertEquals("evening", ScoutTimeOfDay.spokenCategory(19))
     }
 
@@ -53,7 +53,7 @@ class ScoutTimeOfDayTest {
         assertEquals("afternoon", ScoutTimeOfDay.spokenCategory(14))
     }
 
-    @Test fun `hour 18 (evening's start) is evening`() {
+    @Test fun `hour 18 (evening's start) is evening (spokenCategory)`() {
         assertEquals("evening", ScoutTimeOfDay.spokenCategory(18))
     }
 
@@ -65,7 +65,7 @@ class ScoutTimeOfDayTest {
         assertEquals("night", ScoutTimeOfDay.spokenCategory(22))
     }
 
-    @Test fun `hour 21 (one hour before late) is still evening`() {
+    @Test fun `hour 21 (one hour before late) is still evening (spokenCategory)`() {
         assertEquals("evening", ScoutTimeOfDay.spokenCategory(21))
     }
 
