@@ -220,9 +220,20 @@ clean.contains("go on the internet")
             clean.contains("i'll see you later") ||
             clean.contains("goodbye") ||
             clean.contains("bye scout") ||
-            clean == "bye"
+            clean == "bye" ||
+            clean.contains("that's all") ||
+            clean.contains("that will be all")
         ) {
             return IntentType.GOODBYE
+        }
+
+        // Better Conversation State Phase 1: an explicit end of the follow-up
+        // conversation, not a broader "disable Scout"/"do not disturb" command --
+        // Presence and Companion Moments' own proactive-remark timers are untouched
+        // by this. ".contains" deliberately covers "you can stop listening" too
+        // (a substring of it), one pattern instead of two near-duplicates.
+        if (clean.contains("stop listening")) {
+            return IntentType.STOP_LISTENING
         }
 
         if (

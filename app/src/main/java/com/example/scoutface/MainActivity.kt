@@ -103,6 +103,8 @@ import com.example.scoutface.brain.StaleFact
 import com.example.scoutface.brain.TextNormalizer
 
 import com.example.scoutface.brain.ScoutMicRestartTiming
+import com.example.scoutface.brain.ScoutConversationState
+import com.example.scoutface.brain.ConversationEndReason
 import com.example.scoutface.brain.ScoutSpeechLanguage
 import com.example.scoutface.brain.ScoutTimeOfDay
 
@@ -156,7 +158,7 @@ enum class IntentType {
 
     VISION,
 
-    GREET, HOW_ARE_YOU, GOODBYE,
+    GREET, HOW_ARE_YOU, GOODBYE, STOP_LISTENING,
 
     PRAISE, AFFECTION,
 
@@ -294,6 +296,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutResponseMs = 0L
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
+
+    // Better Conversation State -- Phase 1. Wraps CONVO_WINDOW_MS/
+    // PRESENCE_REPLY_WINDOW_MS (both unchanged, still the real timing source)
+    // with an explicit "closed on purpose" signal neither timer alone can
+    // express -- see ScoutConversationState's own doc comment. RAM-only,
+    // reset to a fresh instance on every MainActivity (re)creation, same as
+    // every other field on this screen.
+    private val conversationState = ScoutConversationState()
 
     // Reminder fires when speech is heard outside the conversation window while a face is visible.
     // Throttled to once every 2 minutes so it never becomes annoying.
@@ -3035,9 +3045,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // generically.
                 val hearsHisName = FuzzyNameMatcher.matchesName(normalized, scoutName) ||
                     (nameLower == "scout" && containsWholeWord(normalized, "gal"))
-                val inConvoWindow =
-                    (System.currentTimeMillis() - lastScoutResponseMs) < CONVO_WINDOW_MS ||
-                    System.currentTimeMillis() < presenceReplyWindowUntilMs
+                // Better Conversation State Phase 1: CONVO_WINDOW_MS/
+                // PRESENCE_REPLY_WINDOW_MS are unchanged and still computed here as
+                // before -- conversationState.evaluate() is the "next evaluation"
+                // point for the silence-timeout transition (performs the actual
+                // active -> inactive change here, not a stale read) and is also
+                // what makes an explicit close ("goodbye"/"stop listening"/etc.)
+                // override a still-recent timer: once closeExplicitly() has run,
+                // this keeps reporting inactive even if the raw windows below
+                // haven't technically expired yet.
+                val conversationNowMs = System.currentTimeMillis()
+                val convoWindowOpen = (conversationNowMs - lastScoutResponseMs) < CONVO_WINDOW_MS
+                val presenceReplyWindowOpen = conversationNowMs < presenceReplyWindowUntilMs
+                val conversationEvaluation = conversationState.evaluate(
+                    conversationNowMs, convoWindowOpen, presenceReplyWindowOpen
+                )
+                if (conversationEvaluation.justTimedOut) logConversationEnd()
+                val inConvoWindow = conversationEvaluation.isActive
                 val speechListenMode = if (inConvoWindow) DiagLog.ListenMode.FOLLOW_UP
                     else DiagLog.ListenMode.WAKE_WORD
                 diagLog.logSpeechResult(
@@ -3088,6 +3112,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         scheduleListenRestart()
                     }
                     return
+                }
+                // A real turn is about to be dispatched -- opens a fresh
+                // conversation if this was reached via the wake word from idle,
+                // or just records the turn if the conversation was already active.
+                if (conversationState.openFromUserTurn(System.currentTimeMillis())) {
+                    diagLog.logConversationStarted(startedByScout = false)
                 }
                 handleQuery(normalized)
 
@@ -3729,6 +3759,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastScoutUtteranceNormalized = TextNormalizer.normalizeUtterance(out)
 
         if (isPresenceInitiated) lastUtteranceWasPresenceRemark = true
+
+        // Better Conversation State Phase 1. Deliberately does not touch
+        // lastSpeechDoneMs, ttsLockoutUntilMs, or lastScoutUtteranceNormalized
+        // above -- those audio-safety mechanisms (TTS lockout, mic-restart
+        // cooldown, self-echo matching) are untouched by conversation state and
+        // keep working exactly as before, including right after an explicit
+        // close (see handleGoodbyeIntent()/handleStopListeningIntent()/
+        // handleCourtesy(), which close *after* this call returns).
+        if (isPresenceInitiated) {
+            if (conversationState.openFromScoutInitiated(lastScoutResponseMs)) {
+                diagLog.logConversationStarted(startedByScout = true)
+            }
+        } else {
+            conversationState.onScoutTurn(lastScoutResponseMs)
+        }
 
         speak(out, true)
 
@@ -4487,7 +4532,23 @@ Respond only with Scout's next reply.
     // respond() -- never through handleQuery()/ScoutIntentRouter, so these never
     // reach TinyLlama or Gemini. Uses Phrases.kt's own rotating-pool pattern
     // (Phrases.COURTESY_* -- separate pools from GREET/GOODBYE, not reused).
+    //
+    // Better Conversation State Phase 1: GREET/GOOD_MORNING may open a
+    // conversation from idle; THANKS only ever extends one that's already
+    // active, never opens by itself; GOOD_NIGHT/GOODBYE close explicitly. The
+    // close happens after respond() so the closing reply itself is still
+    // recorded as this conversation's last Scout turn before it ends.
     private fun handleCourtesy(courtesy: CourtesyIntent) {
+
+        val now = System.currentTimeMillis()
+
+        when (courtesy) {
+            CourtesyIntent.GREET, CourtesyIntent.GOOD_MORNING -> {
+                if (conversationState.openFromUserTurn(now)) diagLog.logConversationStarted(startedByScout = false)
+            }
+            CourtesyIntent.THANKS -> conversationState.extend(now)
+            CourtesyIntent.GOOD_NIGHT, CourtesyIntent.GOODBYE -> { /* closed below, after respond() */ }
+        }
 
         val pool = when (courtesy) {
             CourtesyIntent.GREET -> Phrases.COURTESY_GREET
@@ -4499,6 +4560,47 @@ Respond only with Scout's next reply.
 
         respond(Phrases.pick("courtesy_${courtesy.name.lowercase()}", pool))
 
+        if (courtesy == CourtesyIntent.GOOD_NIGHT || courtesy == CourtesyIntent.GOODBYE) {
+            if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+        }
+
+    }
+
+    // "goodbye"/"bye"/"that's all"/"that will be all" said with the wake word
+    // (or already inside an active conversation) -- the name-free forms of
+    // "goodbye"/"bye"/"good night" are handled by handleCourtesy() instead.
+    // Closes explicitly after the reply, same ordering as handleCourtesy().
+    private fun handleGoodbyeIntent() {
+
+        respond(Phrases.pick("goodbye", Phrases.GOODBYE))
+
+        if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+
+    }
+
+    // "stop listening" / "you can stop listening" -- ends the follow-up
+    // conversation only. Does NOT disable Scout, Presence, or Companion
+    // Moments -- those keep their own independent timers untouched.
+    private fun handleStopListeningIntent() {
+
+        respond("Okay.")
+
+        if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+
+    }
+
+    // Logs a conversation-end diagnostic from whatever ScoutConversationState
+    // just recorded for the transition that occurred (endReason/endedAt/
+    // startedAt). Call only right after a closeExplicitly()/evaluate() call
+    // that's already confirmed a transition actually happened.
+    private fun logConversationEnd() {
+        val reason = conversationState.endReason ?: return
+        diagLog.logConversationEnded(reason.toDiagReason(), conversationState.endedAt - conversationState.startedAt)
+    }
+
+    private fun ConversationEndReason.toDiagReason(): DiagLog.ConversationEndReason = when (this) {
+        ConversationEndReason.SILENCE_TIMEOUT -> DiagLog.ConversationEndReason.SILENCE_TIMEOUT
+        ConversationEndReason.EXPLICIT_END -> DiagLog.ConversationEndReason.EXPLICIT_END
     }
 
     private fun handleAskDogNameIntent() {
@@ -4679,7 +4781,7 @@ Respond only with Scout's next reply.
             IntentType.TIME, IntentType.DATE, IntentType.LANGUAGE, IntentType.TIME_OF_DAY, IntentType.CONNECTIVITY,
             IntentType.GO_ONLINE, IntentType.GO_OFFLINE, IntentType.EXPORT_BRAIN,
             IntentType.VISION, IntentType.GREET, IntentType.HOW_ARE_YOU,
-            IntentType.GOODBYE, IntentType.PRAISE, IntentType.AFFECTION,
+            IntentType.GOODBYE, IntentType.STOP_LISTENING, IntentType.PRAISE, IntentType.AFFECTION,
             IntentType.IDENTITY, IntentType.RECALL_FACT,
             IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
             IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
@@ -4720,7 +4822,9 @@ Respond only with Scout's next reply.
 
             IntentType.HOW_ARE_YOU -> handleVoiceBankIntent("HOW_ARE_YOU")
 
-            IntentType.GOODBYE -> respond(Phrases.pick("goodbye", Phrases.GOODBYE))
+            IntentType.GOODBYE -> handleGoodbyeIntent()
+
+            IntentType.STOP_LISTENING -> handleStopListeningIntent()
 
             IntentType.PRAISE -> handleVoiceBankIntent("PRAISE")
 
@@ -5454,6 +5558,7 @@ Respond only with Scout's next reply.
         IntentType.GREET           -> DiagLog.DiagIntent.GREET
         IntentType.HOW_ARE_YOU     -> DiagLog.DiagIntent.HOW_ARE_YOU
         IntentType.GOODBYE         -> DiagLog.DiagIntent.GOODBYE
+        IntentType.STOP_LISTENING  -> DiagLog.DiagIntent.STOP_LISTENING
         IntentType.PRAISE          -> DiagLog.DiagIntent.PRAISE
         IntentType.AFFECTION       -> DiagLog.DiagIntent.AFFECTION
         IntentType.IDENTITY        -> DiagLog.DiagIntent.IDENTITY
