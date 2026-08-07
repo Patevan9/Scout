@@ -23,6 +23,19 @@ package com.example.scoutface
  */
 class DiagLog(private val db: DiagnosticDb) {
 
+    companion object {
+        /**
+         * Pure detail-string formatter for logSelfEchoDiscarded() below, split out
+         * so it's unit-testable without a database/Context — DiagLog itself has no
+         * existing test coverage (SQLiteOpenHelper needs Android), but this piece
+         * of it doesn't need to. Character count and timing only, matching this
+         * class's own no-speech-content rule (see the class doc comment) — never
+         * the recognized text.
+         */
+        fun formatSelfEchoDiscard(charCount: Int, gapAfterResponseMs: Long): String =
+            "chars=${charCount.coerceAtLeast(0)} gap=${gapAfterResponseMs.coerceAtLeast(0L)}ms"
+    }
+
     // ── Controlled input types ────────────────────────────────────────────────
     // Every string-producing parameter comes through one of these enums.
     // Callers cannot pass arbitrary text into any sensitive position.
@@ -209,6 +222,18 @@ class DiagLog(private val db: DiagnosticDb) {
                 append(" reason=$reason")
             }
         }
+    }
+
+    /**
+     * Recorded when a recognized transcript is discarded because it looks like
+     * Scout hearing his own just-spoken TTS output bleed back through the mic
+     * (the self-echo substring guard in onResults() — matching logic unchanged
+     * by this method's addition). Character count and timing only; the
+     * recognized text itself is never accepted as a parameter here, let alone
+     * stored.
+     */
+    fun logSelfEchoDiscarded(charCount: Int, gapAfterResponseMs: Long) = safe("SELF_ECHO") {
+        formatSelfEchoDiscard(charCount, gapAfterResponseMs)
     }
 
     /**
