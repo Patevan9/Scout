@@ -102,6 +102,8 @@ import com.example.scoutface.brain.StaleFact
 
 import com.example.scoutface.brain.TextNormalizer
 
+import com.example.scoutface.brain.ScoutMicRestartTiming
+
 import com.google.mlkit.vision.common.InputImage
 
 import com.google.mlkit.vision.face.FaceDetection
@@ -2990,11 +2992,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 // Ignore mic pickup of Scout's own voice — without hardware
                 // echo cancellation, TTS audio can bleed back into the mic
-                // and otherwise get treated as a new question.
+                // and otherwise get treated as a new question. Matching logic
+                // itself is unchanged here -- only the diagnostic call below is new.
                 if (words.size >= 2 &&
                     lastScoutUtteranceNormalized.isNotBlank() &&
                     lastScoutUtteranceNormalized.contains(normalized)
                 ) {
+
+                    diagLog.logSelfEchoDiscarded(
+                        charCount = normalized.length,
+                        gapAfterResponseMs = System.currentTimeMillis() - lastScoutResponseMs
+                    )
 
                     scheduleListenRestart()
 
@@ -3140,7 +3148,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun scheduleListenRestart(immediate: Boolean = false) {
+    // delayMsOverrideMs: used only by maybeStartListening()'s three post-TTS
+    // cooldown branches, to target the actual remaining time until the latest
+    // active deadline (see ScoutMicRestartTiming) instead of the flat
+    // LISTEN_RESTART_DELAY_MS poll below -- every other call site is
+    // state-based, not deadline-based, so it keeps using immediate/the flat
+    // poll exactly as before. Never lowers any threshold; only decides how
+    // precisely the wait targets thresholds that are still computed exactly
+    // as they always were.
+    private fun scheduleListenRestart(immediate: Boolean = false, delayMsOverrideMs: Long? = null) {
 
         if (!wantListening) return
 
@@ -3148,7 +3164,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         pendingListenStart = true
 
-        val delay = if (immediate) 0L else LISTEN_RESTART_DELAY_MS
+        val delay = delayMsOverrideMs ?: if (immediate) 0L else LISTEN_RESTART_DELAY_MS
 
         handler.postDelayed({
 
@@ -3159,6 +3175,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }, delay)
 
     }
+
+    // Shared by all three post-TTS cooldown branches in maybeStartListening()
+    // below -- whichever gate fails, the retry targets the actual latest
+    // remaining deadline across all three, not just the one that happened to
+    // fail first. Thresholds themselves (BOOT_LISTEN_EXTRA_DELAY_MS,
+    // TTS_LOCKOUT_MS, MIC_RESUME_COOLDOWN_MS) are unchanged -- this only
+    // changes how precisely the reschedule targets them.
+    private fun nextListenRestartDelayMs(now: Long): Long =
+        ScoutMicRestartTiming.computeRestartDelayMs(
+            now = now,
+            bootListenDeadlineMs = lastSpeechDoneMs + BOOT_LISTEN_EXTRA_DELAY_MS,
+            ttsLockoutDeadlineMs = ttsLockoutUntilMs,
+            micResumeDeadlineMs = lastSpeechDoneMs + MIC_RESUME_COOLDOWN_MS
+        )
 
     private fun maybeStartListening() {
 
@@ -3200,7 +3230,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (now - lastSpeechDoneMs < BOOT_LISTEN_EXTRA_DELAY_MS) {
 
             logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
-            scheduleListenRestart()
+            scheduleListenRestart(delayMsOverrideMs = nextListenRestartDelayMs(now))
 
             return
 
@@ -3209,7 +3239,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (now < ttsLockoutUntilMs) {
 
             logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
-            scheduleListenRestart()
+            scheduleListenRestart(delayMsOverrideMs = nextListenRestartDelayMs(now))
 
             return
 
@@ -3218,7 +3248,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (now - lastSpeechDoneMs < MIC_RESUME_COOLDOWN_MS) {
 
             logListenAttemptOnce(DiagLog.ListenAttemptReason.COOLDOWN)
-            scheduleListenRestart()
+            scheduleListenRestart(delayMsOverrideMs = nextListenRestartDelayMs(now))
 
             return
 
