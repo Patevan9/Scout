@@ -137,4 +137,42 @@ class ScoutIntentRouterTest {
     @Test fun `what time is it still routes to TIME, not TIME_OF_DAY`() {
         assertEquals(IntentType.TIME, ScoutIntentRouter.route("what time is it"))
     }
+
+    // --- Better Conversation State Phase 1: new GOODBYE-family phrasing ---
+
+    @Test fun `that's all routes to GOODBYE`() {
+        assertEquals(IntentType.GOODBYE, ScoutIntentRouter.route("that's all"))
+    }
+
+    @Test fun `that will be all routes to GOODBYE`() {
+        assertEquals(IntentType.GOODBYE, ScoutIntentRouter.route("that will be all"))
+    }
+
+    // --- GOODBYE regression: existing phrasing routes exactly as before ---
+
+    @Test fun `goodbye still routes to GOODBYE`() {
+        assertEquals(IntentType.GOODBYE, ScoutIntentRouter.route("goodbye"))
+    }
+
+    @Test fun `bare bye still routes to GOODBYE`() {
+        assertEquals(IntentType.GOODBYE, ScoutIntentRouter.route("bye"))
+    }
+
+    @Test fun `see you later still routes to GOODBYE`() {
+        assertEquals(IntentType.GOODBYE, ScoutIntentRouter.route("see you later"))
+    }
+
+    // --- New STOP_LISTENING intent ---
+
+    @Test fun `stop listening routes to STOP_LISTENING`() {
+        assertEquals(IntentType.STOP_LISTENING, ScoutIntentRouter.route("stop listening"))
+    }
+
+    @Test fun `you can stop listening routes to STOP_LISTENING`() {
+        assertEquals(IntentType.STOP_LISTENING, ScoutIntentRouter.route("you can stop listening"))
+    }
+
+    @Test fun `stop listening does not route to GOODBYE`() {
+        assertEquals(IntentType.STOP_LISTENING, ScoutIntentRouter.route("scout stop listening"))
+    }
 }

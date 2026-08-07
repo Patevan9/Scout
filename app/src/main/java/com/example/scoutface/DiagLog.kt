@@ -117,7 +117,7 @@ class DiagLog(private val db: DiagnosticDb) {
         GO_ONLINE, GO_OFFLINE,
         EXPORT_BRAIN,
         VISION,
-        GREET, HOW_ARE_YOU, GOODBYE,
+        GREET, HOW_ARE_YOU, GOODBYE, STOP_LISTENING,
         PRAISE, AFFECTION,
         IDENTITY,
         RECALL_FACT,
@@ -136,6 +136,14 @@ class DiagLog(private val db: DiagnosticDb) {
      * file stays independently stable and doesn't need a cross-package import.
      */
     enum class DiagMomentCategory { ENVIRONMENT, MEMORY, OBSERVATION, CURIOSITY }
+
+    /**
+     * Mirrors brain.ConversationEndReason (ScoutConversationState) as a
+     * controlled diagnostic token, same convention as DiagIntent/
+     * DiagMomentCategory above -- kept as DiagLog's own enum rather than
+     * importing the brain-package type directly.
+     */
+    enum class ConversationEndReason { SILENCE_TIMEOUT, EXPLICIT_END }
 
     // ── Public logging methods ────────────────────────────────────────────────
 
@@ -234,6 +242,26 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logSelfEchoDiscarded(charCount: Int, gapAfterResponseMs: Long) = safe("SELF_ECHO") {
         formatSelfEchoDiscard(charCount, gapAfterResponseMs)
+    }
+
+    /**
+     * Recorded when ScoutConversationState (Better Conversation State Phase 1)
+     * transitions from inactive to active -- either a real user turn (wake-word
+     * or an opening courtesy phrase) or Scout speaking first (a presence-
+     * initiated remark). No speech text, no phrase content -- only which side
+     * started it.
+     */
+    fun logConversationStarted(startedByScout: Boolean) = safe("CONVERSATION") {
+        "event=started started_by=${if (startedByScout) "scout" else "user"}"
+    }
+
+    /**
+     * Recorded when ScoutConversationState transitions from active to
+     * inactive. reason — controlled enum, never free text. durationMs —
+     * endedAt - startedAt, clamped >= 0.
+     */
+    fun logConversationEnded(reason: ConversationEndReason, durationMs: Long) = safe("CONVERSATION") {
+        "event=ended reason=${reason.name.lowercase()} duration_ms=${durationMs.coerceAtLeast(0L)}"
     }
 
     /**
