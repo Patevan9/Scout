@@ -63,4 +63,78 @@ class ScoutIntentRouterTest {
     @Test fun `mentioning a name with no relation keyword is not routed here either`() {
         assertEquals(IntentType.UNKNOWN, ScoutIntentRouter.route("tell me about Diana"))
     }
+
+    // --- New DATE phrasing (router gap fix) ---
+
+    @Test fun `what day is today now routes to DATE`() {
+        assertEquals(IntentType.DATE, ScoutIntentRouter.route("what day is today"))
+    }
+
+    @Test fun `what day is it now routes to DATE`() {
+        assertEquals(IntentType.DATE, ScoutIntentRouter.route("what day is it"))
+    }
+
+    // --- DATE regression: existing phrasing routes exactly as before ---
+
+    @Test fun `what date is it still routes to DATE`() {
+        assertEquals(IntentType.DATE, ScoutIntentRouter.route("what date is it"))
+    }
+
+    @Test fun `what is today still routes to DATE`() {
+        assertEquals(IntentType.DATE, ScoutIntentRouter.route("what is today"))
+    }
+
+    @Test fun `bare date still routes to DATE`() {
+        assertEquals(IntentType.DATE, ScoutIntentRouter.route("date"))
+    }
+
+    // --- New ASK_SCOUT_NAME phrasing (router gap fix) ---
+
+    @Test fun `what should i call you now routes to ASK_SCOUT_NAME`() {
+        assertEquals(IntentType.ASK_SCOUT_NAME, ScoutIntentRouter.route("what should i call you"))
+    }
+
+    @Test fun `what do i call you now routes to ASK_SCOUT_NAME`() {
+        assertEquals(IntentType.ASK_SCOUT_NAME, ScoutIntentRouter.route("what do i call you"))
+    }
+
+    // --- ASK_SCOUT_NAME regression: existing phrasing routes exactly as before ---
+
+    @Test fun `what is your name still routes to ASK_SCOUT_NAME`() {
+        assertEquals(IntentType.ASK_SCOUT_NAME, ScoutIntentRouter.route("what is your name"))
+    }
+
+    @Test fun `who are you still routes to ASK_SCOUT_NAME`() {
+        assertEquals(IntentType.ASK_SCOUT_NAME, ScoutIntentRouter.route("who are you"))
+    }
+
+    // --- New LANGUAGE intent ---
+
+    @Test fun `what language are we speaking routes to LANGUAGE`() {
+        assertEquals(IntentType.LANGUAGE, ScoutIntentRouter.route("what language are we speaking"))
+    }
+
+    @Test fun `what language do you speak routes to LANGUAGE`() {
+        assertEquals(IntentType.LANGUAGE, ScoutIntentRouter.route("what language do you speak"))
+    }
+
+    @Test fun `what language are you speaking routes to LANGUAGE`() {
+        assertEquals(IntentType.LANGUAGE, ScoutIntentRouter.route("what language are you speaking"))
+    }
+
+    // --- New TIME_OF_DAY intent ---
+
+    @Test fun `is it morning or night routes to TIME_OF_DAY`() {
+        assertEquals(IntentType.TIME_OF_DAY, ScoutIntentRouter.route("is it morning or night"))
+    }
+
+    @Test fun `what time of day is it routes to TIME_OF_DAY`() {
+        assertEquals(IntentType.TIME_OF_DAY, ScoutIntentRouter.route("what time of day is it"))
+    }
+
+    // --- TIME_OF_DAY does not collide with the existing clock-time TIME intent ---
+
+    @Test fun `what time is it still routes to TIME, not TIME_OF_DAY`() {
+        assertEquals(IntentType.TIME, ScoutIntentRouter.route("what time is it"))
+    }
 }

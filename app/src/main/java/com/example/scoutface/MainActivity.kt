@@ -103,6 +103,8 @@ import com.example.scoutface.brain.StaleFact
 import com.example.scoutface.brain.TextNormalizer
 
 import com.example.scoutface.brain.ScoutMicRestartTiming
+import com.example.scoutface.brain.ScoutSpeechLanguage
+import com.example.scoutface.brain.ScoutTimeOfDay
 
 import com.google.mlkit.vision.common.InputImage
 
@@ -146,7 +148,7 @@ import kotlin.math.abs
 
 enum class IntentType {
 
-    TIME, DATE, CONNECTIVITY,
+    TIME, DATE, LANGUAGE, TIME_OF_DAY, CONNECTIVITY,
 
     GO_ONLINE, GO_OFFLINE,
 
@@ -2736,7 +2738,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun buildRecognizerIntent(silenceMs: Long, possiblySilenceMs: Long): Intent =
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US)
+            // ScoutSpeechLanguage.RECOGNITION_LOCALE, not a separate literal here --
+            // this is also what handleLanguageIntent() answers "what language are
+            // we speaking" from, so the two can never drift apart.
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, ScoutSpeechLanguage.RECOGNITION_LOCALE)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             // Prefer offline recognition so a brief network hiccup does not
             // cause silent failures — Samsung has offline models available.
@@ -3125,6 +3130,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         fmt.timeZone = TimeZone.getDefault()
 
         val out = "Today is ${fmt.format(Date())}."
+
+        respond(out)
+
+    }
+
+    // Answers from ScoutSpeechLanguage's RECOGNITION_LOCALE -- the same constant
+    // buildRecognizerIntent() configures the speech recognizer with -- so this
+    // can never drift from what the recognizer is actually set to. Never a
+    // separately hardcoded string, never TinyLlama.
+    private fun handleLanguageIntent() {
+
+        respond("We're speaking ${ScoutSpeechLanguage.spokenLanguageName()}.")
+
+    }
+
+    // Answers from ScoutTimeOfDay, which reuses HabitLayer.TIME_SLOTS' hour
+    // boundaries -- see that file's doc comment for why PresenceMode was
+    // considered and rejected as the source here. Two router phrasings share
+    // this one intent but expect different answer shapes: "is it morning or
+    // night" is itself posed in terms of exactly those four words, so it gets
+    // spokenCategory(); "what time of day is it" is open-ended, so it gets
+    // the more descriptive descriptiveLabel(). The two phrasings are the only
+    // ones ScoutIntentRouter routes to TIME_OF_DAY, so checking for "morning
+    // or night" here reliably tells them apart.
+    private fun handleTimeOfDayIntent(qNorm: String) {
+
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+
+        val out = if (qNorm.contains("morning or night")) {
+            "It's ${ScoutTimeOfDay.spokenCategory(hour)} right now."
+        } else {
+            "It's ${ScoutTimeOfDay.descriptiveLabel(hour)} right now."
+        }
 
         respond(out)
 
@@ -4638,7 +4676,7 @@ Respond only with Scout's next reply.
         diagLog.logRoute(intent.toDiagIntent())
 
         val isDirect = when (intent) {
-            IntentType.TIME, IntentType.DATE, IntentType.CONNECTIVITY,
+            IntentType.TIME, IntentType.DATE, IntentType.LANGUAGE, IntentType.TIME_OF_DAY, IntentType.CONNECTIVITY,
             IntentType.GO_ONLINE, IntentType.GO_OFFLINE, IntentType.EXPORT_BRAIN,
             IntentType.VISION, IntentType.GREET, IntentType.HOW_ARE_YOU,
             IntentType.GOODBYE, IntentType.PRAISE, IntentType.AFFECTION,
@@ -4663,6 +4701,10 @@ Respond only with Scout's next reply.
             IntentType.TIME -> handleTimeIntent()
 
             IntentType.DATE -> handleDateIntent()
+
+            IntentType.LANGUAGE -> handleLanguageIntent()
+
+            IntentType.TIME_OF_DAY -> handleTimeOfDayIntent(qNorm)
 
             IntentType.CONNECTIVITY -> handleConnectivityIntent()
 
@@ -5402,6 +5444,8 @@ Respond only with Scout's next reply.
     private fun IntentType.toDiagIntent(): DiagLog.DiagIntent = when (this) {
         IntentType.TIME            -> DiagLog.DiagIntent.TIME
         IntentType.DATE            -> DiagLog.DiagIntent.DATE
+        IntentType.LANGUAGE        -> DiagLog.DiagIntent.LANGUAGE
+        IntentType.TIME_OF_DAY     -> DiagLog.DiagIntent.TIME_OF_DAY
         IntentType.CONNECTIVITY    -> DiagLog.DiagIntent.CONNECTIVITY
         IntentType.GO_ONLINE       -> DiagLog.DiagIntent.GO_ONLINE
         IntentType.GO_OFFLINE      -> DiagLog.DiagIntent.GO_OFFLINE
