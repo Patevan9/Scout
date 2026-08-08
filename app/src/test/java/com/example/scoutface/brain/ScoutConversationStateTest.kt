@@ -41,6 +41,23 @@ class ScoutConversationStateTest {
         assertEquals(0L, state.lastUserTurnAt) // no user turn has happened yet
     }
 
+    @Test fun `a reply right after a Scout-initiated boot greeting needs no wake word`() {
+        // Models the exact mechanism the boot-greeting fix relies on: the boot
+        // announcement is a genuine spoken greeting, routed through
+        // respond(isPresenceInitiated = true) in MainActivity exactly like any
+        // other presence-initiated remark, so openFromScoutInitiated() runs at
+        // boot. A reply that arrives while the underlying presence reply
+        // window is still open must then read as an active conversation --
+        // MainActivity's wake-gate check treats that as "no wake word needed",
+        // which is the whole point of this fix (MainActivity itself has no
+        // unit coverage, so this is the closest verifiable proxy).
+        val state = ScoutConversationState()
+        state.openFromScoutInitiated(10_000L)
+        val evaluation = state.evaluate(nowMs = 12_000L, convoWindowOpen = true, presenceReplyWindowOpen = true)
+        assertTrue(evaluation.isActive)
+        assertFalse(evaluation.justTimedOut)
+    }
+
     @Test fun `opening while already active does not reset startedAt`() {
         val state = ScoutConversationState()
         state.openFromUserTurn(1_000L)

@@ -79,6 +79,16 @@ class ScoutWeatherManager(
 
         // Re-resolve gridpoint if the device has moved more than ~1.4 miles
         private const val GRIDPOINT_TOLERANCE = 0.02
+
+        // The only two fallback messages used when fresh weather cannot be
+        // obtained right now (no internet, or NWS unreachable/unparseable).
+        // Deliberately not private, so ScoutWeatherManagerTest can assert they
+        // never quietly grow a cached-data caveat ("as of...", "last weather I
+        // have...") again -- cached conditions must never be spoken as a
+        // substitute when fresh weather can't currently be obtained, even with
+        // an apologetic prefix.
+        const val MSG_NEED_INTERNET = "I need to be online to check the weather."
+        const val MSG_SERVICE_UNREACHABLE = "I wasn't able to reach the weather service right now."
     }
 
     // =======================
@@ -148,18 +158,14 @@ class ScoutWeatherManager(
 
         val today = todayDateString()
 
+        // Never fall back to cached weather when offline -- an old reading
+        // spoken as if current is worse than no answer at all. The cache
+        // itself is left untouched here; only the offline branch stops
+        // reading from it.
         if (!hasValidatedInternet()) {
             requestInFlight.set(false)
-            val cached = prefs.getString(keys.text, null)
-            val cachedTimeMs = prefs.getLong(keys.age, 0L)
-            val cachedDate = prefs.getString(keys.date, null)
             runOnMain {
-                if (cached != null) {
-                    val prefix = if (cachedDate != today) "The last weather I have is from an earlier day. " else "I'm offline right now, but as of ${formatCacheTime(cachedTimeMs)}: "
-                    respond("$prefix$cached")
-                } else {
-                    respond("I can't check the weather right now — I'm not connected to the internet.")
-                }
+                respond(MSG_NEED_INTERNET)
             }
             return
         }
@@ -196,16 +202,12 @@ class ScoutWeatherManager(
                     return@Thread
                 }
 
+                // Internet is up (checked above) but NWS couldn't be reached --
+                // same no-cache-fallback rule as the offline branch.
                 val periods = fetchForecastPeriods(forecastUrl) ?: run {
                     runOnMain {
                         requestInFlight.set(false)
-                        val cached = prefs.getString(keys.text, null)
-                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
-                        val cDate = prefs.getString(keys.date, null)
-                        if (cached != null) {
-                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
-                            respond("$prefix$cached")
-                        } else respond("I wasn't able to reach the weather service right now.")
+                        respond(MSG_SERVICE_UNREACHABLE)
                     }
                     return@Thread
                 }
@@ -240,13 +242,10 @@ class ScoutWeatherManager(
                         }
                         respond(result)
                     } else {
-                        val cached = prefs.getString(keys.text, null)
-                        val cachedTimeMs = prefs.getLong(keys.age, 0L)
-                        val cDate = prefs.getString(keys.date, null)
-                        if (cached != null) {
-                            val prefix = if (cDate != today) "I couldn't get a fresh reading. The last weather I have is from an earlier day. " else "I couldn't get a fresh reading. As of ${formatCacheTime(cachedTimeMs)}: "
-                            respond("$prefix$cached")
-                        } else respond("I wasn't able to reach the weather service right now.")
+                        // Periods were fetched but couldn't be parsed into an
+                        // answer (e.g. no matching period for the requested
+                        // day) -- same no-cache-fallback rule.
+                        respond(MSG_SERVICE_UNREACHABLE)
                     }
                 }
 
@@ -520,21 +519,5 @@ class ScoutWeatherManager(
         val precipPart = p.precipPct?.let { if (it >= 5) " $it percent chance of precipitation." else "" } ?: ""
         val feelsLike  = feelsLikePart(p)
         return "${p.name}: ${p.temperature} degrees during the day. ${p.shortForecast}.$precipPart$feelsLike"
-    }
-
-    private fun formatCacheTime(timeMs: Long): String {
-        if (timeMs == 0L) return "an earlier check"
-        val cal = java.util.Calendar.getInstance()
-        cal.timeInMillis = timeMs
-        val hourOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY)
-        val minute   = cal.get(java.util.Calendar.MINUTE)
-        val hour12   = when {
-            hourOfDay == 0 -> 12
-            hourOfDay > 12 -> hourOfDay - 12
-            else           -> hourOfDay
-        }
-        val amPm      = if (hourOfDay < 12) "am" else "pm"
-        val minuteStr = if (minute < 10) "0$minute" else "$minute"
-        return "$hour12:$minuteStr$amPm"
     }
 }

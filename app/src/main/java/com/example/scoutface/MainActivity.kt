@@ -1436,8 +1436,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (pendingBootAnnouncement) {
             pendingBootAnnouncement = false
             val out = bootStatus.build()
-            speak(out, true)
-            convoDb.logTurn("scout", out)
+            // Same reasoning as the immediate boot-announcement path in
+            // onInit() -- a genuine spoken greeting, routed through
+            // respond(isPresenceInitiated = true) so it opens the same
+            // Scout-initiated conversation/reply-window as any other
+            // presence-initiated remark.
+            respond(out, isPresenceInitiated = true)
             journalDb.add("Booted. Spoke: $out")
         }
 
@@ -3628,8 +3632,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // the message reflects the brain's state at actual speak-time.
             if (LlamaEngine.isReady) {
                 val out = bootStatus.build()
-                speak(out, true)
-                convoDb.logTurn("scout", out)
+                // Better Conversation State Phase 1: this is a genuine spoken
+                // greeting intended for the user (see ScoutBootStatus/Phrases
+                // BOOT_*), so it goes through respond(isPresenceInitiated =
+                // true) like any other Scout-first remark -- the same
+                // conservative reply window a return greeting or idle-silence
+                // remark already gets, so a reply right after boot doesn't
+                // need the wake word. respond() calls speak(out, true) and
+                // convoDb.logTurn("scout", out) itself; only the boot-specific
+                // journal line stays here.
+                respond(out, isPresenceInitiated = true)
                 journalDb.add("Booted. Spoke: $out")
             } else {
                 pendingBootAnnouncement = true
