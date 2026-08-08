@@ -98,7 +98,14 @@ class ScoutGeminiManager(
         // conversation was explicitly closed, or the stuck-generation
         // watchdog gave up, while this request was in flight).
         shouldDiscardResult: (() -> Boolean)? = null,
-        onDiscarded: (() -> Unit)? = null
+        onDiscarded: (() -> Unit)? = null,
+        // Busy-Brain PR 2. Called instead of the injected respond() directly
+        // when a real answer is ready to speak, so the caller can hold it if
+        // Scout is currently speaking/handling something else instead of
+        // flushing over it. Default null preserves existing behavior exactly
+        // (speaks immediately via respond()) for any caller that doesn't
+        // pass it.
+        deliverResult: ((String) -> Unit)? = null
     ): Boolean {
 
         val enabled   = isGeminiEnabled()
@@ -190,7 +197,7 @@ class ScoutGeminiManager(
                             onDiscarded?.invoke()
                         } else {
                             onAnswered?.invoke()
-                            respond(out)
+                            if (deliverResult != null) deliverResult(out) else respond(out)
                         }
                     } else {
                         // Gemini returned nothing — quota, timeout, or error.
