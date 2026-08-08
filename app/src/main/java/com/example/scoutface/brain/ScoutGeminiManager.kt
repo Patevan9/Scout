@@ -89,7 +89,16 @@ class ScoutGeminiManager(
         conversation: List<Pair<String, String>>,
         onDecision: ((DiagLog.GeminiDecision) -> Unit)? = null,
         onAnswered: (() -> Unit)? = null,
-        onFailed: (() -> Unit)? = null
+        onFailed: (() -> Unit)? = null,
+        // Busy-Brain pending-generation arbitration (PR 1). Checked only at
+        // the moment a real answer is about to be spoken -- never affects
+        // routing/fallback decisions above. Default null preserves existing
+        // behavior exactly (never discards) for any caller that doesn't pass
+        // it. See MainActivity's wiring for what "discarded" means (the
+        // conversation was explicitly closed, or the stuck-generation
+        // watchdog gave up, while this request was in flight).
+        shouldDiscardResult: (() -> Boolean)? = null,
+        onDiscarded: (() -> Unit)? = null
     ): Boolean {
 
         val enabled   = isGeminiEnabled()
@@ -171,11 +180,18 @@ class ScoutGeminiManager(
 
                     if (out != null) {
                         // Gemini answered — cache it, reset unavailable timer.
+                        // Cached and timestamped regardless of discard below --
+                        // a genuinely identical follow-up prompt should still
+                        // get the duplicate-prompt cache-hit benefit above.
                         unavailableLastSpokenMs = 0L
                         lastGeminiReply   = out
                         lastGeminiReplyMs = System.currentTimeMillis()
-                        onAnswered?.invoke()
-                        respond(out)
+                        if (shouldDiscardResult?.invoke() == true) {
+                            onDiscarded?.invoke()
+                        } else {
+                            onAnswered?.invoke()
+                            respond(out)
+                        }
                     } else {
                         // Gemini returned nothing — quota, timeout, or error.
                         // Let caller try TinyLlama first; only speak unavailable if

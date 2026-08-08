@@ -107,6 +107,8 @@ import com.example.scoutface.brain.ScoutConversationState
 import com.example.scoutface.brain.ConversationEndReason
 import com.example.scoutface.brain.ScoutSpeechLanguage
 import com.example.scoutface.brain.ScoutTimeOfDay
+import com.example.scoutface.brain.ScoutBusyBrainState
+import com.example.scoutface.brain.BusyBrainDiscardReason
 
 import com.google.mlkit.vision.common.InputImage
 
@@ -304,6 +306,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // reset to a fresh instance on every MainActivity (re)creation, same as
     // every other field on this screen.
     private val conversationState = ScoutConversationState()
+
+    // Busy-Brain -- PR 1 (foundation/correctness only). Tracks whether a real
+    // Gemini/TinyLlama generation is currently pending, independent of
+    // isThinking -- see ScoutBusyBrainState's own doc comment. PR 1 does not
+    // yet change microphone/isThinking timing; this exists so a second
+    // AI-style question can never start a second generation or silently
+    // invalidate the one already in flight, and so an explicitly-closed
+    // conversation's pending answer is never spoken once it arrives.
+    private val busyBrainState = ScoutBusyBrainState()
 
     // Reminder fires when speech is heard outside the conversation window while a face is visible.
     // Throttled to once every 2 minutes so it never becomes annoying.
@@ -3456,6 +3467,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 scheduleListenRestart(immediate = true)
             }
 
+            // Busy-Brain PR 1: a separate, independent check from the
+            // isThinking watchdog above -- deliberately not folded into it,
+            // since busyBrainState's own pending window isn't guaranteed to
+            // clear in lockstep with isThinking (particularly once PR 2
+            // decouples them further). Without this, a genuinely hung
+            // generation would permanently block every future AI-style
+            // question with "I'm still thinking about your last question."
+            // Reuses MAX_THINKING_DURATION_MS rather than a second constant
+            // -- the two watchdogs are still effectively coincident in PR 1's
+            // world, since isThinking isn't cleared early yet.
+            if (busyBrainState.isStuck(now, MAX_THINKING_DURATION_MS)) {
+                if (busyBrainState.discard(BusyBrainDiscardReason.TIMEOUT)) {
+                    journalDb.add("Busy-Brain watchdog: pending generation stuck — discarding.")
+                }
+            }
+
             val shouldBeListening =
 
                 wantListening &&
@@ -3891,6 +3918,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        // Busy-Brain PR 1: never start a second generation while one is
+        // already pending. A read-only check -- the actual isPending flip
+        // happens below, only once a real generation actually starts (see
+        // REQUEST_STARTED and tryTinyLlamaOrFallback()), since tryGemini()
+        // can also resolve synchronously (a cached reply, a cooldown block,
+        // an already-in-flight block) without ever truly starting one.
+        if (busyBrainState.isPending) {
+            respond("I'm still thinking about your last question.")
+            return
+        }
+
         val convo = convoDb.getLastTurns(limit = 6)
 
         val usedGemini = scoutGeminiManager.tryGemini(
@@ -3899,10 +3937,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 diagLog.logGeminiDecision(decision)
                 if (decision == DiagLog.GeminiDecision.REQUEST_STARTED) {
                     diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI)
+                    busyBrainState.tryBegin(System.currentTimeMillis())
                 }
             },
-            onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
-            onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) }
+            onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)"; busyBrainState.complete() },
+            onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) },
+            shouldDiscardResult = { busyBrainState.isDiscarded() },
+            onDiscarded = {
+                busyBrainState.discardReason?.let { diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.GEMINI) }
+                busyBrainState.complete()
+            }
         )
 
         if (usedGemini) return
@@ -3937,6 +3981,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 respond("${name.replaceFirstChar { it.uppercase() }} is your $relation.")
                 return
             }
+        }
+
+        // Busy-Brain PR 1: this is a second, genuinely new dispatch point
+        // into the AI backends (distinct from handleUnknownIntent()'s own
+        // check above -- reached only when the direct-lookup fast paths
+        // above didn't resolve it), so it needs the same gate.
+        if (busyBrainState.isPending) {
+            respond("I'm still thinking about your last question.")
+            return
         }
 
         tryTinyLlamaOrFallback(qNorm)
@@ -4044,10 +4097,22 @@ Respond only with Scout's next reply.
 
             sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
 
-            val myGeneration = ScoutLlamaController.currentToken
+            // Busy-Brain PR 1: the token is now bumped right here, only when a
+            // TinyLlama generation is actually about to be dispatched -- not
+            // unconditionally at the top of handleQuery() (see the comment
+            // there). Reached either as a fresh dispatch (already gated by
+            // busyBrainState.isPending checks in the two callers above) or as
+            // Gemini's own same-question fallback -- either way, a fresh
+            // token is correct here since it's a genuinely new native call.
+            val myGeneration = ScoutLlamaController.newGeneration()
             diagLog.logBrainStarted(DiagLog.BrainSource.TINYLLAMA)
             diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
             val llamaGenStart = System.currentTimeMillis()
+
+            // No-op if already pending (Gemini's REQUEST_STARTED already
+            // flipped this true for this same question, and this is its
+            // fallback continuation) -- see ScoutBusyBrainState.tryBegin().
+            busyBrainState.tryBegin(System.currentTimeMillis())
 
             // ScoutLlamaController runs this on its own process-wide single-thread
             // executor and already only invokes this callback (on the main thread) if
@@ -4063,6 +4128,22 @@ Respond only with Scout's next reply.
                 prompt = sb.toString(),
                 nPredict = 100
             ) { reply ->
+
+                // Busy-Brain PR 1: the conversation was explicitly closed, or
+                // the stuck-generation watchdog gave up waiting, while this
+                // generation was in flight -- its answer must never be
+                // spoken. Distinct from the token check above: that guards
+                // against a stale Activity instance/superseded question,
+                // this guards against a still-valid, still-expected result
+                // arriving after the user already said goodbye.
+                if (busyBrainState.isDiscarded()) {
+                    busyBrainState.discardReason?.let {
+                        diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.TINYLLAMA)
+                    }
+                    busyBrainState.complete()
+                    return@generateAsync
+                }
+                busyBrainState.complete()
 
                 val genMs = System.currentTimeMillis() - llamaGenStart
                 if (!reply.isNullOrBlank()) {
@@ -4573,7 +4654,10 @@ Respond only with Scout's next reply.
         respond(Phrases.pick("courtesy_${courtesy.name.lowercase()}", pool))
 
         if (courtesy == CourtesyIntent.GOOD_NIGHT || courtesy == CourtesyIntent.GOODBYE) {
-            if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+            if (conversationState.closeExplicitly(System.currentTimeMillis())) {
+                logConversationEnd()
+                discardPendingGenerationForClosedConversation()
+            }
         }
 
     }
@@ -4586,7 +4670,10 @@ Respond only with Scout's next reply.
 
         respond(Phrases.pick("goodbye", Phrases.GOODBYE))
 
-        if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+        if (conversationState.closeExplicitly(System.currentTimeMillis())) {
+            logConversationEnd()
+            discardPendingGenerationForClosedConversation()
+        }
 
     }
 
@@ -4597,7 +4684,10 @@ Respond only with Scout's next reply.
 
         respond("Okay.")
 
-        if (conversationState.closeExplicitly(System.currentTimeMillis())) logConversationEnd()
+        if (conversationState.closeExplicitly(System.currentTimeMillis())) {
+            logConversationEnd()
+            discardPendingGenerationForClosedConversation()
+        }
 
     }
 
@@ -4613,6 +4703,22 @@ Respond only with Scout's next reply.
     private fun ConversationEndReason.toDiagReason(): DiagLog.ConversationEndReason = when (this) {
         ConversationEndReason.SILENCE_TIMEOUT -> DiagLog.ConversationEndReason.SILENCE_TIMEOUT
         ConversationEndReason.EXPLICIT_END -> DiagLog.ConversationEndReason.EXPLICIT_END
+    }
+
+    private fun BusyBrainDiscardReason.toDiagReason(): DiagLog.BusyBrainDiscardReason = when (this) {
+        BusyBrainDiscardReason.CONVERSATION_CLOSED -> DiagLog.BusyBrainDiscardReason.CONVERSATION_CLOSED
+        BusyBrainDiscardReason.TIMEOUT -> DiagLog.BusyBrainDiscardReason.TIMEOUT
+    }
+
+    // Busy-Brain PR 1: called right after an explicit close (goodbye/stop
+    // listening/good night) actually transitions the conversation, so a
+    // Gemini/TinyLlama generation still pending from before the close never
+    // gets spoken once it returns. Harmless no-op if nothing is pending --
+    // see ScoutBusyBrainState.discard().
+    private fun discardPendingGenerationForClosedConversation() {
+        if (busyBrainState.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED)) {
+            journalDb.add("Busy-Brain: pending generation discarded (conversation closed).")
+        }
     }
 
     private fun handleAskDogNameIntent() {
@@ -4777,7 +4883,13 @@ Respond only with Scout's next reply.
         val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
         if (!presenceDecider.shouldRespondToInput(qNorm, currentScoutName)) return
 
-        ScoutLlamaController.newGeneration()
+        // Busy-Brain PR 1: ScoutLlamaController.newGeneration() used to be
+        // bumped unconditionally right here, on every query -- which meant a
+        // deterministic question asked while a TinyLlama generation was
+        // still pending would silently invalidate it (its result would be
+        // discarded as a stale generation once it returned). The token is
+        // now only bumped at the point a TinyLlama generation is actually
+        // dispatched -- see tryTinyLlamaOrFallback().
         isThinking = true
         thinkingStartedMs = System.currentTimeMillis()
 

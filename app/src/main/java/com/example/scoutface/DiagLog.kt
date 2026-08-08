@@ -107,6 +107,14 @@ class DiagLog(private val db: DiagnosticDb) {
     }
 
     /**
+     * Mirrors ScoutBusyBrainState's BusyBrainDiscardReason (defined in the
+     * brain package) as a controlled diagnostic token, the same way
+     * ConversationEndReason is mirrored below -- keeps this class independent
+     * of the brain package.
+     */
+    enum class BusyBrainDiscardReason { CONVERSATION_CLOSED, TIMEOUT }
+
+    /**
      * Mirrors every value in IntentType (defined in MainActivity.kt) as a
      * controlled diagnostic token. Callers map IntentType → DiagIntent at the
      * callsite; the compiler enforces that no arbitrary string can be passed.
@@ -320,6 +328,17 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logBrainStarted(source: BrainSource) = safe("BRAIN") {
         "started=${source.name.lowercase()}"
+    }
+
+    /**
+     * Recorded when a pending Gemini/TinyLlama generation's own completion
+     * callback finds it was marked discarded (ScoutBusyBrainState.discard())
+     * before it got a chance to speak -- either the conversation was
+     * explicitly closed while it was in flight, or the stuck-generation
+     * watchdog gave up waiting. Never includes the generated reply text.
+     */
+    fun logBusyBrainDiscarded(reason: BusyBrainDiscardReason, source: BrainSource) = safe("BUSY_BRAIN") {
+        "event=discarded reason=${reason.name.lowercase()} source=${source.name.lowercase()}"
     }
 
     /**
