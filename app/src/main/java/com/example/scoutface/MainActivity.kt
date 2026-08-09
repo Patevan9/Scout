@@ -328,9 +328,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Busy-Brain PR 2 status-feedback strings. Spoken via
     // respond(isStatusOnly = true) -- see that parameter's doc comment for
     // exactly what "status-only" excludes.
-    private val BUSY_BRAIN_FILLER = "Let me think about that for a moment."
+    private val BUSY_BRAIN_FILLERS = listOf(
+        "Let me think about that.",
+        "Give me a moment.",
+        "Let me think.",
+        "Let me work that out.",
+        "I'm thinking about that."
+    )
     private val BUSY_BRAIN_STILL_THINKING = "I'm still thinking about your last question."
     private val BUSY_BRAIN_DEFERRED = "I'll get to that once I've finished my last thought."
+
+    // Busy-Brain polish. How long a generation must stay pending before
+    // Scout actually says a thinking phrase out loud -- re-checked against
+    // busyBrainState.isPending at fire time in scheduleBusyBrainFiller(),
+    // not assumed. A fast answer (typical for Gemini) never triggers any
+    // filler at all. Named separately so it can be tuned from real-device
+    // testing without touching the scheduling logic itself.
+    private val BUSY_BRAIN_FILLER_DELAY_MS = 2000L
 
     // Reminder fires when speech is heard outside the conversation window while a face is visible.
     // Throttled to once every 2 minutes so it never becomes annoying.
@@ -3170,11 +3184,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         fmt.timeZone = cal.timeZone
 
-        val out = when ((0..2).random()) {
+        val out = when ((0..1).random()) {
 
             0 -> "It is ${fmt.format(cal.time)}."
-
-            1 -> "Hmm… it is ${fmt.format(cal.time)}."
 
             else -> "Right now, it is ${fmt.format(cal.time)}."
 
@@ -3831,9 +3843,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // the utterance for the TTS onDone callback to open the presence reply window.
     //
     // isStatusOnly (Busy-Brain PR 2): true for short Scout-side status
-    // feedback that isn't conversation content -- "Let me think about that
-    // for a moment," "I'm still thinking about your last question," "I'll
-    // get to that once I've finished my last thought." These still speak
+    // feedback that isn't conversation content -- a randomly-picked thinking
+    // phrase ("Let me think about that," "Give me a moment," ...), "I'm
+    // still thinking about your last question," "I'll get to that once I've
+    // finished my last thought." These still speak
     // normally, still extend the conversation, still protect the self-echo
     // guard (lastScoutUtteranceNormalized) exactly like any other respond()
     // call -- they're excluded only from convoDb (so they never leak into
@@ -3888,6 +3901,37 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             android.widget.Toast.makeText(this, src, android.widget.Toast.LENGTH_SHORT).show()
         }
 
+    }
+
+    // Busy-Brain polish. Called only when busyBrainState.tryBegin() has just
+    // returned true for this question -- i.e. once per question, never on a
+    // Gemini -> TinyLlama same-question fallback (tryBegin() is a no-op
+    // there, so this is never called a second time for it). Schedules a
+    // one-time check BUSY_BRAIN_FILLER_DELAY_MS from now; if the generation
+    // is still pending at that point, speaks exactly one randomly-picked
+    // thinking phrase as status-only speech. If the generation has already
+    // resolved (delivered normally if Scout was idle, held in
+    // pendingAiAnswer otherwise) or was discarded (explicit close/watchdog),
+    // busyBrainState.isPending is already false by then and nothing is said
+    // -- re-checked fresh at fire time, never assumed. Does not touch
+    // isThinking/mic-availability at all -- those are cleared immediately by
+    // the caller, unaffected by whether this filler ends up speaking.
+    //
+    // Also re-checks ScoutBusyBrainDelivery.shouldQueue() (the same busy
+    // check deliverAiResult() uses) before actually speaking -- without
+    // this, the filler could itself QUEUE_FLUSH over a deterministic answer
+    // Scout happens to be speaking right at the 2-second mark (e.g. the user
+    // asked a safe follow-up while the generation was pending, and that
+    // follow-up's own reply is still playing). If Scout is busy at the
+    // check, the filler is simply skipped for this question rather than
+    // rescheduled -- it's a reassurance, not essential information, and the
+    // user already hears Scout actively speaking in that exact moment.
+    private fun scheduleBusyBrainFiller() {
+        handler.postDelayed({
+            if (busyBrainState.isPending && !ScoutBusyBrainDelivery.shouldQueue(isSpeaking, isThinking)) {
+                respond(BUSY_BRAIN_FILLERS.random(), isStatusOnly = true)
+            }
+        }, BUSY_BRAIN_FILLER_DELAY_MS)
     }
 
     // Busy-Brain PR 2. The single delivery point for a real Gemini/TinyLlama
@@ -4009,13 +4053,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 diagLog.logGeminiDecision(decision)
                 if (decision == DiagLog.GeminiDecision.REQUEST_STARTED) {
                     diagLog.logBrainStarted(DiagLog.BrainSource.GEMINI)
-                    // Busy-Brain PR 2: mic reopens now, not once the real
-                    // answer arrives -- tryBegin() only returns true the
-                    // first time (never on a re-entrant call), so the filler
-                    // is spoken exactly once per question. respond()'s own
-                    // finishThinking() call clears isThinking.
+                    // Busy-Brain polish: mic reopens right here, immediately,
+                    // exactly as before -- tryBegin() only returns true the
+                    // first time (never on a re-entrant call). Only the
+                    // thinking-phrase SPEECH is now delayed (see
+                    // scheduleBusyBrainFiller()); finishThinking() is called
+                    // directly since nothing is spoken synchronously anymore
+                    // to clear isThinking via respond() the way it used to.
                     if (busyBrainState.tryBegin(System.currentTimeMillis())) {
-                        respond(BUSY_BRAIN_FILLER, isStatusOnly = true)
+                        finishThinking()
+                        scheduleBusyBrainFiller()
                     }
                 }
             },
@@ -4197,13 +4244,14 @@ Respond only with Scout's next reply.
             diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_STARTED)
             val llamaGenStart = System.currentTimeMillis()
 
-            // Busy-Brain PR 2: only speak the filler / reopen the mic the
-            // first time this question begins pending -- tryBegin() returns
-            // false (a no-op) when reached as Gemini's own same-question
-            // fallback, since Gemini's REQUEST_STARTED already did this and
-            // the mic is already open.
+            // Busy-Brain polish: only clear isThinking / schedule the filler
+            // check the first time this question begins pending --
+            // tryBegin() returns false (a no-op) when reached as Gemini's
+            // own same-question fallback, since Gemini's REQUEST_STARTED
+            // already did both and the mic is already open.
             if (busyBrainState.tryBegin(System.currentTimeMillis())) {
-                respond(BUSY_BRAIN_FILLER, isStatusOnly = true)
+                finishThinking()
+                scheduleBusyBrainFiller()
             }
 
             // ScoutLlamaController runs this on its own process-wide single-thread
