@@ -1,6 +1,6 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: August 9, 2026
+Last updated: August 8, 2026
 Based on commit: 7315fac0b0769298d9621452a0e055301f5204d2
 Status: Current
 
@@ -131,7 +131,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 9, 2026 | Version 24 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 8, 2026 | Version 24 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 

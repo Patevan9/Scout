@@ -1,6 +1,6 @@
 # Project Scout — Quick Start
 
-Last updated: August 9, 2026
+Last updated: August 8, 2026
 Based on commit: 7315fac0b0769298d9621452a0e055301f5204d2
 Status: Current
 
@@ -135,7 +135,7 @@ Scout must never fake a signal he cannot actually observe — no invented emotio
 
 ---
 
-*Project Scout Quick Start | Last updated: August 9, 2026 | Version 31 | Upload every session | For full details use Master Summary v59*
+*Project Scout Quick Start | Last updated: August 8, 2026 | Version 31 | Upload every session | For full details use Master Summary v59*
 
 ---
 

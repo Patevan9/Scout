@@ -1,6 +1,6 @@
 # Project Scout — Master Project Summary
 
-Last updated: August 9, 2026
+Last updated: August 8, 2026
 Based on commit: 7315fac0b0769298d9621452a0e055301f5204d2
 Status: Current. This pass catches up PRs #25–#29 — the documentation sync itself, Better Conversation State Phase 1, the weather-freshness and boot-greeting fixes, and Busy-Brain Phase 1 (both the pending-generation foundation and the microphone-availability/delivery behavior). Busy-Brain is merged and CI-verified but its real-device behavior has not yet been exercised on the Fold 7 — do not describe it as fully proven/stable until that test is completed.
 
@@ -1293,7 +1293,7 @@ Open-Meteo was replaced with NWS (api.weather.gov). Completely free for commerci
 
 ---
 
-*Project Scout Master Summary | Last updated: August 9, 2026 | Version 59 | Single source of truth — upload every session*
+*Project Scout Master Summary | Last updated: August 8, 2026 | Version 59 | Single source of truth — upload every session*
 
 ---
 
