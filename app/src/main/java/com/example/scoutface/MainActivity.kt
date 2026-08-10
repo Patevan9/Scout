@@ -1738,6 +1738,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         migrateDoublePrefixFacts()
 
+        cleanupUnverifiedPrimaryUserHabitNames()
+
     }
 
     private fun setupTts() {
@@ -1880,6 +1882,36 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Delete fact keys that were stored with a doubled "favorite_favorite_" prefix
         // due to a TeachExtractor bug (now fixed). Scout will re-learn them naturally.
         truthDb.deleteFactsWithKeyLike(ENTITY_USER_PRIMARY, "favorite_favorite_%")
+    }
+
+    // One-time cleanup for a real bug in the face-detection callback (fixed
+    // at its source in a separate PR: the primary user's name used to be
+    // passed to HabitLayer.logPersonSeen() for whichever face was merely
+    // first-detected in a frame, regardless of whether that face was ever
+    // actually verified as that person) that could label a habit-tracked
+    // face hash with the primary user's name it never earned. Guarded
+    // exactly like migrateDoublePrefixFacts() above -- set before running,
+    // so it can never re-run and re-clear a name HabitLayer has since
+    // genuinely re-learned through real recognition.
+    //
+    // The primary user's name is read fresh from TruthDb here, never
+    // hardcoded -- if it's ever renamed, this cleanup (already run once)
+    // stays a one-time pass against whatever name was current at the time
+    // this device first ran it, exactly as intended: a fix for old bad data,
+    // not an ongoing enforcement mechanism.
+    private fun cleanupUnverifiedPrimaryUserHabitNames() {
+        if (prefs.getBoolean("habit_primary_user_name_cleanup_done_v1", false)) return
+        prefs.edit().putBoolean("habit_primary_user_name_cleanup_done_v1", true).apply()
+
+        val primaryName = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME) ?: return
+        if (primaryName.isBlank()) return
+
+        val cleared = habitLayer.clearUnverifiedPersonName(primaryName) { faceHash, name ->
+            peopleDb.getName(faceHash)?.equals(name, ignoreCase = true) == true
+        }
+        if (cleared > 0) {
+            journalDb.add("Habit cleanup: cleared $cleared unverified primary-user name label(s) from HabitLayer.")
+        }
     }
 
     private fun ensureScoutIdentityDefaults() {

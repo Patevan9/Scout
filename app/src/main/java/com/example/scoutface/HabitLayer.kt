@@ -123,6 +123,44 @@ class HabitLayer(private val context: Context) {
         saveDebounced()
     }
 
+    /**
+     * One-time cleanup for a real bug (fixed at its source elsewhere) that
+     * could label a habit-tracked face hash with the primary user's name
+     * regardless of whether that hash was ever actually verified as that
+     * person. For every currently-stored person entry whose name matches
+     * [nameToVerify] (case-insensitive, matching this codebase's existing
+     * name-comparison convention), calls [isVerified] -- a caller-supplied
+     * lookup against the real identity store (e.g. PeopleDb) -- to confirm
+     * the label is genuine for that specific face hash. If not confirmed,
+     * clears only that entry's name back to blank; every other field
+     * (rawScore, lastSeenMs, totalSightings, slotCounts) is left completely
+     * untouched, and the entry itself is never removed from [persons] --
+     * this is an identity-label correction, not a data deletion. Entries
+     * whose name doesn't match [nameToVerify] at all (e.g. already correctly
+     * labeled with someone else's name) are never inspected or touched.
+     *
+     * Purely a persons-map operation -- does not touch PeopleDb, TruthDb, or
+     * any other store. The caller is responsible for the "run this at most
+     * once" guard; this function itself just performs the pass whenever
+     * asked.
+     *
+     * Returns the number of entries cleared, for diagnostic/journal logging.
+     */
+    fun clearUnverifiedPersonName(nameToVerify: String, isVerified: (faceHash: String, name: String) -> Boolean): Int {
+        if (nameToVerify.isBlank()) return 0
+        var cleared = 0
+        for ((hash, entry) in persons) {
+            if (entry.name.isNotBlank() && entry.name.equals(nameToVerify, ignoreCase = true)) {
+                if (!isVerified(hash, entry.name)) {
+                    entry.name = ""
+                    cleared++
+                }
+            }
+        }
+        if (cleared > 0) saveDebounced()
+        return cleared
+    }
+
     fun currentTimeSlot(): TimeSlot {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         return TIME_SLOTS.firstOrNull { hour >= it.startHour && hour < it.endHour }
