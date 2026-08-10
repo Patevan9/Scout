@@ -111,6 +111,7 @@ import com.example.scoutface.brain.ScoutBusyBrainState
 import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
+import com.example.scoutface.brain.ScoutBeepMuteGuard
 
 import com.google.mlkit.vision.common.InputImage
 
@@ -449,6 +450,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var savedSystemVolume: Int? = null
 
     private var savedNotificationVolume: Int? = null
+
+    // Extends TRY_MUTE_BEEP to cover stopListeningSafe()'s cancel() call as
+    // well as maybeStartListening()'s startListening() call -- see
+    // ScoutBeepMuteGuard's own doc comment for why a simple null-check on
+    // the two fields above is no longer enough once both sides can mute.
+    private val beepMuteGuard = ScoutBeepMuteGuard()
 
     private var lastRecognizerEventMs = 0L
 
@@ -1085,7 +1092,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             stopListeningSafe()
 
-            restoreSystemBeep()
+            // forceRestoreSystemBeep(), not restoreSystemBeep(): the app is
+            // closing for good, so every outstanding mute window (there can
+            // now be more than one -- see ScoutBeepMuteGuard) must be
+            // guaranteed closed here, not left to a scheduled callback that
+            // handler.removeCallbacksAndMessages(null) above may have just
+            // purged.
+            forceRestoreSystemBeep()
 
             try {
 
@@ -3288,6 +3301,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun stopListeningSafe() {
 
+        // Mirrors maybeStartListening()'s TRY_MUTE_BEEP handling on the start
+        // side (see tryMuteSystemBeep()/restoreSystemBeep()) -- muting just
+        // before cancel() suppresses whatever "stop" earcon the recognition
+        // service plays when a session is cancelled, the same way muting
+        // just before startListening() suppresses its "start" earcon. Reuses
+        // the same 380ms window and the same guard pair; ScoutBeepMuteGuard
+        // is what makes the two sides safe to overlap.
+        if (TRY_MUTE_BEEP) {
+            tryMuteSystemBeep()
+            handler.postDelayed({ restoreSystemBeep() }, 380L)
+        }
+
         try {
 
             speechRecognizer?.cancel()
@@ -3462,19 +3487,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // beginMute()/endMute() run unconditionally, outside the try block below --
+    // that bookkeeping must never be skipped just because an AudioManager call
+    // happens to throw, or a later matching call would desync from this one.
+    // Only the actual capture/mute (or restore) is best-effort, same as before.
     private fun tryMuteSystemBeep() {
+
+        if (!beepMuteGuard.beginMute()) return
 
         try {
 
             val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-            if (savedSystemVolume == null) savedSystemVolume =
+            savedSystemVolume = am.getStreamVolume(AudioManager.STREAM_SYSTEM)
 
-                am.getStreamVolume(AudioManager.STREAM_SYSTEM)
-
-            if (savedNotificationVolume == null) savedNotificationVolume =
-
-                am.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+            savedNotificationVolume = am.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
 
             am.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
 
@@ -3487,6 +3514,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun restoreSystemBeep() {
+
+        if (!beepMuteGuard.endMute()) return
+
+        try {
+
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+            val sys = savedSystemVolume
+
+            val noti = savedNotificationVolume
+
+            if (sys != null) am.setStreamVolume(AudioManager.STREAM_SYSTEM, sys, 0)
+
+            if (noti != null) am.setStreamVolume(AudioManager.STREAM_NOTIFICATION, noti, 0)
+
+        } catch (_: Exception) {
+
+        }
+
+        savedSystemVolume = null
+
+        savedNotificationVolume = null
+
+    }
+
+    // Guaranteed shutdown-only restore. A normal restoreSystemBeep() call
+    // can close out at most one outstanding mute window per call, but
+    // shutdownSystems() purges every pending Handler callback
+    // (removeCallbacksAndMessages(null)) before this runs -- so if more than
+    // one mute window happened to be outstanding (e.g. a stop-side mute from
+    // the final stopListeningSafe() plus an unrelated still-pending
+    // start-side one), whichever window's own scheduled restore was purged
+    // would otherwise never fire, leaving the stream volumes permanently
+    // muted after Scout closes. This forces every outstanding window closed
+    // and restores once, regardless of how many were pending.
+    private fun forceRestoreSystemBeep() {
+
+        if (!beepMuteGuard.forceReset()) return
 
         try {
 
