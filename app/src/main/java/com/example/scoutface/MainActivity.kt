@@ -2333,9 +2333,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     if (primaryHash != null) {
 
+                                        // Scout must never assume the first detected face in a
+                                        // frame is ENTITY_USER_PRIMARY (Patrick) -- that's a fact
+                                        // about who the app is registered to, not about which
+                                        // face this is. Look up the real, already-known name for
+                                        // THIS specific face hash instead (peopleDb.touchSeen(fp)
+                                        // above already operates on these same hashes) -- if
+                                        // Scout has genuinely identified this person before, via
+                                        // the family-introduction/naming flow, that name is used;
+                                        // otherwise no name at all, matching logPersonSeen()'s own
+                                        // default. HabitLayer then only ever learns a name for a
+                                        // hash when it's actually earned by that hash's own
+                                        // recognition history, never assumed from the primary user.
+
                                         val knownName =
 
-                                            truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
+                                            peopleDb.getName(primaryHash)
 
                                                 ?: ""
 
@@ -4171,7 +4184,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // once the fact count exceeds 12, a newer fact that's actually the one
             // being asked about could still get pushed out. Selecting only the
             // facts relevant to the current question is a later hardening step.
-            val allFacts = getAllKnownFacts().take(12)
+            //
+            // Speaker-neutral by default: knowing the primary user's own name is
+            // Patrick does not mean whoever is currently speaking IS Patrick --
+            // there's no speaker identification in this app today (see
+            // ConversationDb's role column: every recognized utterance is logged
+            // as generic "user", regardless of who spoke it). Excluded here only
+            // from this generic conversational fact dump, so an ordinary reply to
+            // Diana or Elijah can't casually address them as "Patrick". Not
+            // excluded from getAllKnownFacts() itself, which stays untouched and
+            // still feeds the personal-memory gate above ("who is Patrick" still
+            // needs to see this fact to route correctly) and TruthDb, which stays
+            // untouched -- handleAskMyNameIntent() and the personal-memory direct
+            // lookup already answer "what's my name"/"who is Patrick" straight
+            // from TruthDb, not from this list.
+            val allFacts = getAllKnownFacts()
+                .filterNot { (entity, key, _) -> entity == ENTITY_USER_PRIMARY && key == FactKey.NAME }
+                .take(12)
             val factsLine = if (allFacts.isNotEmpty()) {
                 "Known facts: " +
                     allFacts.joinToString(" ") { (entity, k, v) ->
