@@ -112,6 +112,8 @@ import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
 import com.example.scoutface.brain.ScoutBeepMuteGuard
+import com.example.scoutface.brain.ScoutVoiceSelector
+import com.example.scoutface.brain.VoiceCandidate
 
 import com.google.mlkit.vision.common.InputImage
 
@@ -714,6 +716,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var visionAnswerBuilder: VisionAnswerBuilder
 
     private lateinit var tts: TextToSpeech
+
+    // Verified by a human actually listening to the voice on real Fold 7 /
+    // A32 hardware (see the TTS-voice diagnostic investigation) -- never
+    // inferred from the name string, since Android's public Voice API has
+    // no gender field. Ordered so a future verified name for another
+    // device can be appended without disturbing this one.
+    private val PREFERRED_VOICE_NAMES = listOf("en-us-x-iom-local")
+
+    private val TARGET_TTS_ENGINE = "com.google.android.tts"
+
+    // Guards setupTts()'s two-stage engine-preference fallback (see
+    // onInit()) so the second (device-default) TextToSpeech construction
+    // is only ever attempted once, not repeatedly if it also fails.
+    private var awaitingDeviceDefaultTts = false
 
     private var speechRecognizer: SpeechRecognizer? = null
 
@@ -1757,7 +1773,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupTts() {
 
-        tts = TextToSpeech(this, this)
+        // Explicit 3-arg constructor: request this engine specifically,
+        // rather than whatever the device's current default happens to be.
+        // Requesting an engine here is a per-instance bind -- it does not
+        // change Settings.Secure.tts_default_synth or any other device-wide
+        // default engine setting. If this specific engine can't be used,
+        // onInit() below retries once with the device's own default engine
+        // (the 2-arg constructor, Scout's original behavior).
+        tts = TextToSpeech(this, this, TARGET_TTS_ENGINE)
 
     }
 
@@ -3686,6 +3709,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         logStartupTiming("tts_oninit status=$status")
 
+        // Two-stage engine preference: setupTts() requests com.google.android.tts
+        // explicitly (see its own comment). If that attempt fails outright, retry
+        // once with the device's own default engine instead of falling through
+        // to the failure branch below -- exactly Scout's original (pre-this-
+        // change) behavior for devices where Google TTS isn't available. A
+        // SUCCESS status from the Google-engine request does NOT by itself
+        // prove Google TTS is what actually bound (see ScoutVoiceSelector's
+        // doc comment) -- this guard only decides whether to retry, it never
+        // claims which engine ended up bound; applyPreferredVoice() below is
+        // what actually verifies the result, from the resolved voice itself.
+        if (!awaitingDeviceDefaultTts && status != TextToSpeech.SUCCESS) {
+
+            awaitingDeviceDefaultTts = true
+
+            try { tts.shutdown() } catch (_: Exception) { }
+
+            tts = TextToSpeech(this, this)
+
+            return
+
+        }
+
         if (status == TextToSpeech.SUCCESS) {
 
             tts.language = Locale.US
@@ -3693,6 +3738,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             tts.setPitch(scoutPrefs.getFloat("voice_pitch", 0.98f))
 
             tts.setSpeechRate(scoutPrefs.getFloat("voice_speed", 0.88f))
+
+            applyPreferredVoice()
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
 
@@ -3854,6 +3901,59 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             journalDb.add("TTS init failed at boot.")
             diagLog.logError(DiagLog.ErrorArea.TTS)
         }
+
+    }
+
+    // Picks Scout's default voice from whatever the currently bound TTS
+    // engine actually reports -- see ScoutVoiceSelector's own doc comment
+    // for exactly why this never assumes or claims which engine that is.
+    // Called once from onInit(), right after language/pitch/speed are set
+    // and before the utterance listener is attached -- the same point
+    // Scout's voice has always been finalized by, just with an actual
+    // choice made instead of silently accepting whatever the engine
+    // defaulted to.
+    private fun applyPreferredVoice() {
+
+        val allVoices = try {
+            tts.voices.orEmpty()
+        } catch (_: Exception) {
+            emptySet()
+        }
+
+        val candidates = allVoices.map { voice ->
+            VoiceCandidate(
+                name = voice.name,
+                languageEn = voice.locale.language == "en",
+                countryUs = voice.locale.country == "US",
+                quality = voice.quality,
+                networkRequired = voice.isNetworkConnectionRequired,
+                notInstalled = voice.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+            )
+        }
+
+        val resolvedName = ScoutVoiceSelector.choose(candidates, PREFERRED_VOICE_NAMES)
+        val chosenVoice = resolvedName?.let { name -> allVoices.firstOrNull { it.name == name } }
+
+        if (chosenVoice != null) {
+            try { tts.voice = chosenVoice } catch (_: Exception) { }
+        }
+
+        // Ground truth, read back after selection -- never assumed, never
+        // inferred from engine identity. TextToSpeech.getCurrentEngine()
+        // exists at runtime but is annotated @UnsupportedAppUsage (excluded
+        // from the public SDK), so it is never used here or anywhere else
+        // in this file. getVoice() is public and is the only thing this log
+        // line trusts.
+        val activeVoiceName = try { tts.voice?.name } catch (_: Exception) { null }
+        val diagLine = when {
+            activeVoiceName != null && PREFERRED_VOICE_NAMES.contains(activeVoiceName) ->
+                "TTS: preferred voice active ($activeVoiceName)"
+            activeVoiceName != null ->
+                "TTS: fallback voice active ($activeVoiceName) -- preferred voice not found on this device/engine"
+            else ->
+                "TTS: no offline en-US voice resolved -- using engine's own default"
+        }
+        journalDb.add(diagLine)
 
     }
 

@@ -6,6 +6,18 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <!--
+          Package-visibility declarations for Scout's TTS engine preference
+          (Android 11+ / API 30+). Without these, PackageManager and the
+          explicit-engine TextToSpeech bind can be silently filtered even
+          when com.google.android.tts is actually installed. Read-only
+          visibility grants; they do not install, enable, or change
+          anything on the device.
+        -->
+        <package android:name="com.google.android.tts" />
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <uses-feature android:name="android.hardware.camera.any" />
