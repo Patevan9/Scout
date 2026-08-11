@@ -1,8 +1,8 @@
 # Project Scout — Play Store Launch Checklist
 
 Last updated: August 11, 2026
-Based on commit: 319ce79c6ec9d249403cf87bb548647b49bcdd60
-Status: Current
+Based on commit: ee00d9bf27b21530e12c4bc0f9fb8e7da725bb7a
+Status: Current. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending.
 
 **Version 25**
 
@@ -26,7 +26,7 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - Boot greeting now opens Scout's own Better Conversation State turn (PR #27, Aug 8) — an immediate reply to Scout's own greeting no longer requires saying his name first.
 - Scout no longer uses Patrick's name in ordinary conversation with Diana or Elijah when he has no way to know who's actually speaking (PR #32 + one-time cleanup PR #33, Aug 9–10) — he can still use it for genuinely relevant questions ("what's my name," "who is Patrick").
 - Microphone start/stop chime muted on both sides of the recognizer cycle, not just the start side (PR #34, Aug 10) — real-device finding on the Fold 7, made more noticeable by Busy-Brain's more frequent mic cycling.
-- TTS default voice consistency (PR #35, Aug 11) — Scout requests Google TTS explicitly and applies a specific, human-verified offline voice instead of inheriting whatever a device's default TTS engine happens to be, addressing an unwanted female voice observed on a Samsung Galaxy S24 (confirmed via Android Settings only — default engine Samsung TTS, "Voice 1"; not yet installed or tested on that device). **Open, CI green, not yet merged — do not treat as shipped, or as confirmed fixed on the S24, until reviewed and tested there.**
+- TTS default voice consistency (PR #35, Aug 11) — Scout requests Google TTS explicitly and applies a specific, human-verified offline voice instead of inheriting whatever a device's default TTS engine happens to be, addressing an unwanted female voice observed on a Samsung Galaxy S24 (confirmed via Android Settings only — default engine Samsung TTS, "Voice 1"). **Merged** — commit `ee00d9bf27b21530e12c4bc0f9fb8e7da725bb7a`. **Not yet installed or tested on Diana's S24 specifically — real-device validation there is still pending, not yet confirmed fixed on that device.**
 
 **Memory & family recognition**
 - Flexible fact memory — teaching and recall for any fact, via real entity+property extraction with multi-alias support (not brittle sentence-template matching).
