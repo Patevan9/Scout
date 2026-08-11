@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: August 8, 2026
-Based on commit: 7315fac0b0769298d9621452a0e055301f5204d2
+Last updated: August 11, 2026
+Based on commit: 319ce79c6ec9d249403cf87bb548647b49bcdd60
 Status: Current
 
-**Version 24**
+**Version 25**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -22,8 +22,11 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - TinyLlama 1.1B offline brain — runs fully on-device, no internet required, with automatic Gemini fallback. Delivery to a real device now works end-to-end (in-app download through a unified startup gate) — testers no longer need to manually push the model file to the device.
 - Wake word filter, 30-second open-conversation window (now with an explicit "closed on purpose" override via Better Conversation State Phase 1, PR #26 — see below), boot-ready window, "repeat that" intent.
 - Weather via NWS (free for commercial use). Never speaks stale cached weather as though it were current when fresh weather can't be obtained — offline, or online but NWS unreachable, both get an honest "can't check right now" answer instead (PR #27, Aug 8). The existing per-type freshness-window cache is unchanged for normal online efficiency. Total offline mode ("go offline" blocks all internet features).
-- Busy-Brain Phase 1 (PR #28 + PR #29, Aug 8) — while TinyLlama/Gemini is generating an answer, the microphone can reopen for an approved set of read-only/conversational requests instead of staying fully closed for the whole generation. **Merged and CI-verified; real-device behavior not yet exercised on the Fold 7 — see item 4 below.**
+- Busy-Brain Phase 1 (PR #28 + PR #29, Aug 8; filler-timing polish PR #31, Aug 9) — while TinyLlama/Gemini is generating an answer, the microphone can reopen for an approved set of read-only/conversational requests instead of staying fully closed for the whole generation. **Merged and CI-verified; real-device behavior not yet exercised on the Fold 7 — see item 4 below.**
 - Boot greeting now opens Scout's own Better Conversation State turn (PR #27, Aug 8) — an immediate reply to Scout's own greeting no longer requires saying his name first.
+- Scout no longer uses Patrick's name in ordinary conversation with Diana or Elijah when he has no way to know who's actually speaking (PR #32 + one-time cleanup PR #33, Aug 9–10) — he can still use it for genuinely relevant questions ("what's my name," "who is Patrick").
+- Microphone start/stop chime muted on both sides of the recognizer cycle, not just the start side (PR #34, Aug 10) — real-device finding on the Fold 7, made more noticeable by Busy-Brain's more frequent mic cycling.
+- TTS default voice consistency (PR #35, Aug 11) — Scout requests Google TTS explicitly and applies a specific, human-verified offline voice instead of inheriting whatever a device's default TTS engine happens to be, fixing an unwanted female voice observed on a Samsung Galaxy S24. **Open, CI green, not yet merged — do not treat as shipped until reviewed.**
 
 **Memory & family recognition**
 - Flexible fact memory — teaching and recall for any fact, via real entity+property extraction with multi-alias support (not brittle sentence-template matching).
@@ -131,7 +134,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 8, 2026 | Version 24 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 11, 2026 | Version 25 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 
