@@ -40,7 +40,23 @@ object ScoutIntentRouter {
             clean.contains("family's names") ||
             clean.contains("families names") ||
             clean.contains("who are the people in my family") ||
-            (clean.contains("family") && clean.contains("member") && clean.contains("name"))
+            (clean.contains("family") && clean.contains("member") && clean.contains("name")) ||
+            // Real-device finding (Fold 7): "who is a part of my family" fell
+            // through every literal check above and reached the TinyLlama
+            // fallback, which hallucinated family members TruthDb never had.
+            // These cover the natural family-summary phrasings that name no
+            // single relation -- still gated on the word "family" plus a
+            // clear question/request word, so an unrelated mention of
+            // "family" elsewhere doesn't get swept in here.
+            (clean.contains("family") && (
+                clean.contains("part of my family") ||
+                clean.contains("members of my family") ||
+                clean.contains("member of my family") ||
+                clean.contains("tell me about my family") ||
+                clean.contains("what do you know about my family") ||
+                clean.contains("do you know about my family") ||
+                clean.contains("who do you know in my family")
+            ))
         ) {
             return IntentType.FAMILY_NAMES
         }

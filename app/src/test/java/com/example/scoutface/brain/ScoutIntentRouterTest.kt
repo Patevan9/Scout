@@ -2,6 +2,7 @@ package com.example.scoutface.brain
 
 import com.example.scoutface.IntentType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class ScoutIntentRouterTest {
@@ -22,6 +23,49 @@ class ScoutIntentRouterTest {
 
     @Test fun `family names summary phrasing still routes directly`() {
         assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who's in my family"))
+    }
+
+    // --- Real-device regression: "who is a part of my family" and close
+    // relatives fell through to TinyLlama, which hallucinated family members
+    // TruthDb never had. FAMILY_NAMES's phrasing was widened to cover these. ---
+
+    @Test fun `who is a part of my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who is a part of my family"))
+    }
+
+    @Test fun `who is part of my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who is part of my family"))
+    }
+
+    @Test fun `who are the members of my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who are the members of my family"))
+    }
+
+    @Test fun `tell me about my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("tell me about my family"))
+    }
+
+    @Test fun `who do you know in my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who do you know in my family"))
+    }
+
+    @Test fun `what do you know about my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("what do you know about my family"))
+    }
+
+    @Test fun `family summary phrasings never fall through to UNKNOWN`() {
+        val phrasings = listOf(
+            "who is a part of my family", "who is part of my family",
+            "who are the members of my family", "tell me about my family",
+            "who do you know in my family", "what do you know about my family"
+        )
+        phrasings.forEach {
+            assertNotEquals("UNKNOWN for: $it", IntentType.UNKNOWN, ScoutIntentRouter.route(it))
+        }
+    }
+
+    @Test fun `wife name question still routes to ASK_WIFE_NAME, not swept into the widened FAMILY_NAMES check`() {
+        assertEquals(IntentType.ASK_WIFE_NAME, ScoutIntentRouter.route("what is my wife's name"))
     }
 
     @Test fun `turn on the calendar still matches with the optional the`() {
