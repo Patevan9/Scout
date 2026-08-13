@@ -140,10 +140,17 @@ object Phrases {
     // acknowledgment is also the more honest fit for Scout's own philosophy --
     // he shouldn't sound like he understood or is tracking a medical detail he
     // never actually processed.
+    //
+    // Every phrase in this pool must stay neutral even against a completely
+    // benign reply ("it's just my yearly checkup") -- none may presume
+    // something is wrong or needs recovering from. "I hope you feel better
+    // soon" was cut for exactly this reason: said after a benign reply, it
+    // would make Scout sound as though he understood something was medically
+    // wrong, contradicting the entire point of this path never inspecting
+    // the answer.
 
     val DOCTOR_CHECKIN_ACK = listOf(
         "I'm glad you told me. I hope it goes well.",
-        "Thanks for letting me know. I hope you feel better soon.",
         "I appreciate you telling me. Take care of yourself."
     )
 
