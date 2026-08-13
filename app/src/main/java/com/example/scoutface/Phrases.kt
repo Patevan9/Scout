@@ -132,6 +132,21 @@ object Phrases {
         "I'll remember {name}."
     )
 
+    // ── Calendar Follow-up: doctor check-in ────────────────────────────────
+    // Deliberately content-blind -- spoken regardless of what the user actually
+    // said in reply to "Is everything okay?", never referencing specifics.
+    // Scout doesn't parse, extract, or store anything from that reply (see
+    // MainActivity's PendingCalendarFollowup.DoctorCheckIn handling); a plain
+    // acknowledgment is also the more honest fit for Scout's own philosophy --
+    // he shouldn't sound like he understood or is tracking a medical detail he
+    // never actually processed.
+
+    val DOCTOR_CHECKIN_ACK = listOf(
+        "I'm glad you told me. I hope it goes well.",
+        "Thanks for letting me know. I hope you feel better soon.",
+        "I appreciate you telling me. Take care of yourself."
+    )
+
     // ── Goodbye ──────────────────────────────────────────────────────────────
 
     val GOODBYE = listOf(

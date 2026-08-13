@@ -18,7 +18,7 @@ object ScoutMemoryGate {
 
     private val TOPIC_WORDS = listOf(
         "family", "wife", "husband", "spouse", "son", "daughter", "kid", "child",
-        "dog", "cat", "pet", "name", "birthday", "favorite", "remember",
+        "dog", "cat", "pet", "name", "birthday", "anniversary", "favorite", "remember",
         "learned", "learn", "taught", "told", "household", "lives with", "live with"
     )
 

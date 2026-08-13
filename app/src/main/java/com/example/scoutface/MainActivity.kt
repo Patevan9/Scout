@@ -75,6 +75,10 @@ import com.example.scoutface.brain.ScoutMemoryGate
 
 import com.example.scoutface.brain.TeachExtractor
 import com.example.scoutface.brain.ScoutEntityResolver
+import com.example.scoutface.brain.CalendarFollowupMatcher
+import com.example.scoutface.brain.CalendarFollowupTopic
+import com.example.scoutface.brain.PendingCalendarFollowup
+import com.example.scoutface.brain.DateOwnerMatch
 import com.example.scoutface.brain.ScoutFactExtractor
 
 import com.example.scoutface.brain.ScoutPromptBuilder
@@ -186,6 +190,8 @@ enum class IntentType {
     WEATHER,
 
     CALENDAR,
+
+    WHOSE_DATE_EVENT,
 
     UNKNOWN
 
@@ -552,6 +558,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @Volatile
 
     private var pendingFaceIntroName: String? = null
+
+    // Calendar Follow-up -- single, mutually-exclusive, RAM-only pending state
+    // (see PendingCalendarFollowup's own doc comment). Resolved or dropped on
+    // the very next user utterance in handleQuery(), unconditionally, before
+    // the busyBrainState.isPending gate.
+    @Volatile
+
+    private var pendingCalendarFollowup: PendingCalendarFollowup? = null
 
     @Volatile
 
@@ -4751,14 +4765,24 @@ Respond only with Scout's next reply.
         // the most specific, unambiguous signal available.
         val parsedDate = CalendarDateParser.parseDate(clean)
 
+        // Captured only by the three branches below that name exactly one
+        // unambiguous event -- never by the multi-event listings (today/
+        // tomorrow/this-week), which stay deliberately silent on follow-up
+        // since there'd be no way to know which event a reply refers to.
+        var singleEvent: CalendarEvent? = null
+
         val out = if (parsedDate != null) {
+            val events = calendarReader.eventsOnDate(parsedDate.timeInMillis)
+            if (events.size == 1) singleEvent = events[0]
             describeCalendarForDate(
-                calendarReader.eventsOnDate(parsedDate.timeInMillis),
+                events,
                 parsedDate,
                 isFreeBusyPhrasing = clean.contains("free") || clean.contains("busy") || clean.contains("available")
             )
         } else if (clean.contains("next event") || clean.contains("next appointment")) {
-            describeNextCalendarEvent(calendarReader.nextEvent(), timeOnly = clean.contains("what time"))
+            val event = calendarReader.nextEvent()
+            singleEvent = event
+            describeNextCalendarEvent(event, timeOnly = clean.contains("what time"))
         } else {
             // Checked before the bare day-keyword branches below — otherwise a title
             // question that happens to end in a day word ("when is the vet appointment
@@ -4778,8 +4802,11 @@ Respond only with Scout's next reply.
                 ?.trim()
 
             when {
-                !keyword.isNullOrBlank() ->
-                    describeCalendarTitleMatch(calendarReader.findByTitle(keyword), keyword)
+                !keyword.isNullOrBlank() -> {
+                    val event = calendarReader.findByTitle(keyword)
+                    singleEvent = event
+                    describeCalendarTitleMatch(event, keyword)
+                }
 
                 clean.contains("tomorrow") ->
                     describeCalendarEvents(calendarReader.eventsTomorrow(), "tomorrow")
@@ -4792,7 +4819,41 @@ Respond only with Scout's next reply.
             }
         }
 
-        respond(out)
+        respond(singleEvent?.let { appendCalendarFollowupIfWarranted(it, out) } ?: out)
+
+    }
+
+    // Calendar Follow-up -- notice/ask/learn/remember. Purely reactive: only
+    // ever called from handleCalendarIntent() above, with the single
+    // unambiguous event a direct question just described -- never from a
+    // background scan. Birthday/Anniversary: asks at most once, only if
+    // TruthDb doesn't already know, and sets pendingCalendarFollowup so the
+    // very next turn can resolve it (see handleQuery()). Doctor: a one-off
+    // caring question with no data path at all.
+    private fun appendCalendarFollowupIfWarranted(event: CalendarEvent, baseAnswer: String): String {
+
+        val topic = CalendarFollowupMatcher.matchTopic(event.title) ?: return baseAnswer
+
+        if (topic == CalendarFollowupTopic.DOCTOR) {
+            pendingCalendarFollowup = PendingCalendarFollowup.DoctorCheckIn(System.currentTimeMillis())
+            return "$baseAnswer Is everything okay?"
+        }
+
+        val (month, day) = CalendarFollowupMatcher.canonicalMonthDay(event.startMs, event.allDay)
+        val factKeyPrefix = if (topic == CalendarFollowupTopic.ANNIVERSARY) "anniversary" else "birthday"
+        val alreadyKnown = CalendarFollowupMatcher.findDateOwners(getAllKnownFacts(), factKeyPrefix, month, day).isNotEmpty()
+        if (alreadyKnown) return baseAnswer
+
+        pendingCalendarFollowup = PendingCalendarFollowup.Clarification(
+            topic = topic,
+            eventTitle = event.title,
+            eventDateMs = event.startMs,
+            eventAllDay = event.allDay,
+            askedAtMs = System.currentTimeMillis()
+        )
+
+        val question = if (topic == CalendarFollowupTopic.ANNIVERSARY) "Whose anniversary is that?" else "Whose birthday is that?"
+        return "$baseAnswer $question"
 
     }
 
@@ -4848,6 +4909,112 @@ Respond only with Scout's next reply.
             val fullFmt = SimpleDateFormat("h:mm a 'on' EEEE, MMMM d", Locale.US)
             "${event.title} is at ${fullFmt.format(Date(event.startMs))}."
         }
+    }
+
+    // Resolves a reply to a pending birthday/anniversary Clarification against
+    // Scout's already-known entities/relations only -- never guesses. On
+    // success, writes the durable fact to TruthDb (participant-scoped key for
+    // anniversary -- see FactKey.custom() usage below) and speaks a
+    // deterministic confirmation; on failure, changes nothing and returns
+    // false so the caller falls through to normal handling of whatever the
+    // user actually said.
+    private fun tryResolveCalendarClarification(qNorm: String, pending: PendingCalendarFollowup.Clarification): Boolean {
+
+        val aliasMap = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY)
+        val knownEntitySlugs = aliasMap.values.toSet()
+
+        // Reuses ScoutEntityResolver's existing wife/son/dog relationship
+        // resolution rather than a separate name-only understanding system.
+        // resolveEntity() falls back to returning the bare relation word
+        // itself (e.g. "wife") when that relation isn't actually known yet --
+        // only entries that resolve to the primary user or a genuinely known
+        // entity are kept, so a not-yet-taught relation is never guessed.
+        val resolvedRelations = mutableMapOf<String, String>()
+        for (rel in setOf("wife", "husband", "spouse", "son", "daughter", "kid", "child", "dog", "cat", "pet")) {
+            val resolved = ScoutEntityResolver.resolveEntity(rel, truthDb, ENTITY_USER_PRIMARY)
+            if (resolved == ENTITY_USER_PRIMARY || resolved in knownEntitySlugs) {
+                resolvedRelations[rel] = resolved
+            }
+        }
+
+        val resolvedEntity = CalendarFollowupMatcher.resolveClarificationReply(
+            qNorm, pending.topic, knownEntitySlugs, resolvedRelations, ENTITY_USER_PRIMARY
+        ) ?: return false
+
+        val (month, day) = CalendarFollowupMatcher.canonicalMonthDay(pending.eventDateMs, pending.eventAllDay)
+        // 2000 (a leap year) is used as the display-only placeholder year, not
+        // an unset/cleared Calendar's implicit 1970 default -- 1970 isn't a
+        // leap year, so a February 29th date would otherwise silently roll
+        // over to March 1st here.
+        val cal = Calendar.getInstance().apply { clear(); set(2000, month, day) }
+        val displayDate = SimpleDateFormat("MMMM d", Locale.US).format(cal.time)
+        val displayName = ScoutEntityResolver.displayName(resolvedEntity)
+
+        when (pending.topic) {
+
+            CalendarFollowupTopic.BIRTHDAY -> {
+                truthDb.upsertFact(resolvedEntity, "birthday", displayDate, 1.0f, "calendar_clarification")
+                val possessive = if (resolvedEntity == ENTITY_USER_PRIMARY) "your" else "$displayName's"
+                respond("Got it. I'll remember $possessive birthday is $displayDate.")
+            }
+
+            CalendarFollowupTopic.ANNIVERSARY -> {
+                // Participant-scoped key -- FactKey.custom() is the same
+                // flexible-key builder TeachExtractor's own relation-prefixed
+                // facts already use (e.g. "daughter_name"). Binds to the
+                // specific named entity, not to whichever name WIFE_NAME
+                // happens to point at, so this stays correct even if that
+                // pointer is ever corrected later.
+                truthDb.upsertFact(
+                    ENTITY_USER_PRIMARY, FactKey.custom("anniversary_with_$resolvedEntity"),
+                    displayDate, 1.0f, "calendar_clarification"
+                )
+                respond("Got it. I'll remember your anniversary with $displayName is $displayDate.")
+            }
+
+            CalendarFollowupTopic.DOCTOR -> return false // unreachable -- Clarification never carries DOCTOR
+
+        }
+
+        return true
+
+    }
+
+    // "whose birthday/anniversary is [date]" -- deterministic TruthDb recall,
+    // never Gemini or TinyLlama. See CalendarFollowupMatcher.findDateOwners().
+    private fun handleWhoseDateEventIntent(qNorm: String) {
+
+        val clean = qNorm.lowercase().trim()
+
+        val parsedDate = CalendarDateParser.parseDate(clean)
+        if (parsedDate == null) {
+            respond("I'm not sure which date you mean.")
+            return
+        }
+
+        val prefix = if (clean.contains("anniversary")) "anniversary" else "birthday"
+        val matches = CalendarFollowupMatcher.findDateOwners(
+            getAllKnownFacts(), prefix,
+            parsedDate.get(Calendar.MONTH), parsedDate.get(Calendar.DAY_OF_MONTH)
+        )
+
+        respond(describeDateOwnerMatches(matches, prefix))
+
+    }
+
+    private fun describeDateOwnerMatches(matches: List<DateOwnerMatch>, prefix: String): String {
+        if (matches.isEmpty()) return "I don't have a $prefix on record for that date."
+        val parts = matches.map { m ->
+            when {
+                prefix == "anniversary" && m.participantSlug != null ->
+                    "your anniversary with ${ScoutEntityResolver.displayName(m.participantSlug)}"
+                prefix == "anniversary" ->
+                    "your anniversary — I don't have a record of who it's with"
+                m.entity == ENTITY_USER_PRIMARY -> "your birthday"
+                else -> "${ScoutEntityResolver.displayName(m.entity)}'s birthday"
+            }
+        }
+        return "That's " + parts.joinToString(", and ") + "."
     }
 
     private fun handleRecallIntent(qNorm: String) {
@@ -5244,6 +5411,30 @@ Respond only with Scout's next reply.
 
     private fun handleQuery(qNorm: String) {
 
+        // Calendar Follow-up: resolve or drop a pending clarification/check-in
+        // before anything else -- unconditional, not gated by busyBrainState
+        // below. This answers a specific question Scout itself just asked,
+        // not a new arbitrary generation; placing it inside handleTeaching()'s
+        // busyBrainState.isPending gate further down would let an unrelated
+        // still-pending generation silently swallow the user's answer.
+        when (val pending = pendingCalendarFollowup) {
+            is PendingCalendarFollowup.Clarification -> {
+                pendingCalendarFollowup = null
+                if (tryResolveCalendarClarification(qNorm, pending)) return
+                // Unresolved: already cleared above, falls through to normal
+                // handling of whatever the user actually said below.
+            }
+            is PendingCalendarFollowup.DoctorCheckIn -> {
+                pendingCalendarFollowup = null
+                // Full early return -- never reaches handleTeaching(),
+                // ScoutIntentRouter, Gemini, or TinyLlama. The reply's content
+                // is never parsed, extracted, or stored; see Phrases.DOCTOR_CHECKIN_ACK.
+                respond(Phrases.pick("doctor_checkin_ack", Phrases.DOCTOR_CHECKIN_ACK))
+                return
+            }
+            null -> {}
+        }
+
         if (qNorm == "settings" || qNorm.contains("open settings") || qNorm.contains("go to settings")) {
 
             // Busy-Brain PR 2: screen navigation stays blocked while a
@@ -5328,7 +5519,7 @@ Respond only with Scout's next reply.
             IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
             IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
             IntentType.FAMILY_NAMES, IntentType.OPEN_CALENDAR_SETTINGS,
-            IntentType.WEATHER, IntentType.CALENDAR -> true
+            IntentType.WEATHER, IntentType.CALENDAR, IntentType.WHOSE_DATE_EVENT -> true
             else -> false
         }
         if (isDirect) diagLog.logBrainStarted(DiagLog.BrainSource.DIRECT)
@@ -5393,6 +5584,8 @@ Respond only with Scout's next reply.
             IntentType.WEATHER -> weatherManager.fetchWeather(qNorm)
 
             IntentType.CALENDAR -> handleCalendarIntent(qNorm)
+
+            IntentType.WHOSE_DATE_EVENT -> handleWhoseDateEventIntent(qNorm)
 
             else -> handleUnknownIntent(qNorm)
 
@@ -6118,6 +6311,9 @@ Respond only with Scout's next reply.
         IntentType.TEACH_MY_NAME   -> DiagLog.DiagIntent.TEACH_MY_NAME
         IntentType.WEATHER         -> DiagLog.DiagIntent.WEATHER
         IntentType.CALENDAR        -> DiagLog.DiagIntent.CALENDAR
+        // Reuses RECALL_FACT -- same precedent as FAMILY_NAMES above, a
+        // deterministic TruthDb recall question, not a new diagnostic category.
+        IntentType.WHOSE_DATE_EVENT -> DiagLog.DiagIntent.RECALL_FACT
         IntentType.UNKNOWN         -> DiagLog.DiagIntent.UNKNOWN
     }
 

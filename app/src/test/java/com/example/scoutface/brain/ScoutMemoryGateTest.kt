@@ -129,4 +129,33 @@ class ScoutMemoryGateTest {
         assertTrue(gate("where is Nicky", withAliases))
         assertFalse(gate("I need a mechanic", withAliases))
     }
+
+    // --- Calendar Follow-up: "anniversary" added to TOPIC_WORDS -- narrow,
+    // self-referential phrasings only ("my"/"our" + "anniversary"). Deliberately
+    // does NOT cover "whose anniversary is on August 13th" (no self word) --
+    // that phrasing is protected instead by ScoutIntentRouter's dedicated
+    // WHOSE_DATE_EVENT intent, never by this gate. See the negative test below,
+    // which documents that boundary rather than assuming it away. ---
+
+    @Test fun `what's my anniversary -- self plus the new anniversary topic word`() {
+        // Note: "our" is not itself a recognized SELF_WORD (only "my"/"your"/
+        // "me"/"i"/"mine"/"us"/"we"/"you" are) -- unrelated pre-existing gate
+        // behavior, not something this change touches. "my" is used here so
+        // this test actually exercises the self-plus-topic path it names.
+        assertTrue(gate("what's my anniversary"))
+    }
+
+    @Test fun `do you know my anniversary -- self plus the new anniversary topic word`() {
+        assertTrue(gate("do you know my anniversary"))
+    }
+
+    @Test fun `whose anniversary is on a date is NOT caught by this gate -- no self word present`() {
+        // Intentional boundary, not an oversight: this phrasing has no self
+        // word (no my/your/you) and names no known person, so it can never
+        // trip hasSelfWord && hasTopicWord regardless of which topic words are
+        // listed. It's protected by a separate, deterministic router intent
+        // instead (WHOSE_DATE_EVENT) -- documented here so this isn't silently
+        // assumed fixed by a future TOPIC_WORDS edit.
+        assertFalse(gate("whose anniversary is on august 13th"))
+    }
 }
