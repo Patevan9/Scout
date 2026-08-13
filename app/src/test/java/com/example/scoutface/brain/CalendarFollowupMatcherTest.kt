@@ -74,7 +74,10 @@ class CalendarFollowupMatcherTest {
 
     // --- resolveClarificationReply(): known entities/relations only, never guesses ---
 
-    private val knownNames = setOf("diana", "elijah")
+    // Mirrors the shape ScoutEntityResolver.buildAliasMap() actually returns --
+    // each entity's own slug as an identity entry, plus any taught aliases
+    // mapped to that same entity slug (e.g. "nick" -> "nicolas").
+    private val knownNames = mapOf("diana" to "diana", "elijah" to "elijah")
     private val relations = mapOf("wife" to "diana", "son" to "elijah")
 
     @Test fun `a known name mentioned directly resolves`() {
@@ -148,6 +151,81 @@ class CalendarFollowupMatcherTest {
         assertNull(
             CalendarFollowupMatcher.resolveClarificationReply("I don't remember.", CalendarFollowupTopic.BIRTHDAY, knownNames, relations, "user_primary")
         )
+    }
+
+    // A taught alias/nickname ("nick" -> "nicolas") must resolve through its
+    // entity, the same way the canonical slug would -- regression test for a
+    // bug where the caller collapsed the alias map down to just its distinct
+    // entity-slug values before calling in here, silently losing every alias
+    // key ("nick", "nicky") and leaving only "nicolas" recognizable.
+    private val aliasedNames = mapOf("nicolas" to "nicolas", "nick" to "nicolas", "nicky" to "nicolas")
+
+    @Test fun `a taught nickname resolves to the entity it's an alias for, not just the canonical name`() {
+        assertEquals(
+            "nicolas",
+            CalendarFollowupMatcher.resolveClarificationReply("That's Nick's birthday.", CalendarFollowupTopic.BIRTHDAY, aliasedNames, relations, "user_primary")
+        )
+    }
+
+    @Test fun `a second taught alias for the same entity also resolves`() {
+        assertEquals(
+            "nicolas",
+            CalendarFollowupMatcher.resolveClarificationReply("It's Nicky's.", CalendarFollowupTopic.BIRTHDAY, aliasedNames, relations, "user_primary")
+        )
+    }
+
+    @Test fun `two distinct aliases for two different entities in one reply is still ambiguous`() {
+        val twoEntityAliases = mapOf("nicolas" to "nicolas", "nick" to "nicolas", "diana" to "diana")
+        assertNull(
+            CalendarFollowupMatcher.resolveClarificationReply("Nick and Diana", CalendarFollowupTopic.BIRTHDAY, twoEntityAliases, relations, "user_primary")
+        )
+    }
+
+    // --- describeKnownOwner(): speak already-known ownership, never guess ---
+
+    @Test fun `a single known birthday owner is spoken by name`() {
+        val owners = listOf(DateOwnerMatch("elijah", "birthday", null))
+        assertEquals(
+            "That's Elijah's birthday.",
+            CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.BIRTHDAY, "user_primary")
+        )
+    }
+
+    @Test fun `a single known birthday owner who is the primary user is spoken as your birthday`() {
+        val owners = listOf(DateOwnerMatch("user_primary", "birthday", null))
+        assertEquals(
+            "That's your birthday.",
+            CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.BIRTHDAY, "user_primary")
+        )
+    }
+
+    @Test fun `two people sharing a birthday on the same date is ambiguous -- no name is guessed`() {
+        val owners = listOf(
+            DateOwnerMatch("elijah", "birthday", null),
+            DateOwnerMatch("diana", "birthday", null)
+        )
+        assertNull(CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.BIRTHDAY, "user_primary"))
+    }
+
+    @Test fun `a known anniversary participant is spoken by name`() {
+        val owners = listOf(DateOwnerMatch("user_primary", "anniversary_with_diana", "diana"))
+        assertEquals(
+            "That's your anniversary with Diana.",
+            CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.ANNIVERSARY, "user_primary")
+        )
+    }
+
+    @Test fun `a bare legacy anniversary key with no recorded participant names no one`() {
+        val owners = listOf(DateOwnerMatch("user_primary", "anniversary", null))
+        assertNull(CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.ANNIVERSARY, "user_primary"))
+    }
+
+    @Test fun `two different anniversary participants on the same date is ambiguous -- no name is guessed`() {
+        val owners = listOf(
+            DateOwnerMatch("user_primary", "anniversary_with_diana", "diana"),
+            DateOwnerMatch("user_primary", "anniversary_with_susan", "susan")
+        )
+        assertNull(CalendarFollowupMatcher.describeKnownOwner(owners, CalendarFollowupTopic.ANNIVERSARY, "user_primary"))
     }
 
     // --- findDateOwners(): compare-time canonicalization, format-agnostic ---

@@ -53,13 +53,16 @@ object CalendarFollowupMatcher {
 
     // Resolves a reply to a pending Clarification against Scout's already-known
     // entities and relations only -- never invents a relationship or guesses a
-    // date. [knownEntitySlugs] is every name/alias Scout currently recognizes
-    // (ScoutEntityResolver.buildAliasMap().values). [resolvedRelations] is a
-    // small precomputed map (e.g. "wife" -> "diana") of only the relation
-    // words that resolved to a genuinely known entity -- reusing
-    // ScoutEntityResolver's existing wife/son/dog relationship resolution
-    // rather than a separate name-only understanding system. A relation word
-    // with no confirmed entry is simply absent, never guessed.
+    // date. [aliasMap] is every name/alias Scout currently recognizes, mapped
+    // to the entity slug its facts live under (ScoutEntityResolver.buildAliasMap()
+    // itself, not just its values) -- so a taught nickname ("nick") resolves to
+    // its entity ("nicolas") the same way the canonical slug would, instead of
+    // being silently dropped. [resolvedRelations] is a small precomputed map
+    // (e.g. "wife" -> "diana") of only the relation words that resolved to a
+    // genuinely known entity -- reusing ScoutEntityResolver's existing
+    // wife/son/dog relationship resolution rather than a separate name-only
+    // understanding system. A relation word with no confirmed entry is simply
+    // absent, never guessed.
     //
     // ANNIVERSARY is inherently self-inclusive (it's always "my" anniversary),
     // so a bare "mine"/"my own" alone is deliberately NOT enough to resolve --
@@ -73,7 +76,7 @@ object CalendarFollowupMatcher {
     fun resolveClarificationReply(
         reply: String,
         topic: CalendarFollowupTopic,
-        knownEntitySlugs: Set<String>,
+        aliasMap: Map<String, String>,
         resolvedRelations: Map<String, String>,
         selfEntity: String
     ): String? {
@@ -83,8 +86,8 @@ object CalendarFollowupMatcher {
         val candidates = mutableSetOf<String>()
         val mentionsSelf = Regex("""\b(mine|my own)\b""").containsMatchIn(s)
 
-        for (slug in knownEntitySlugs) {
-            if (Regex("""\b${Regex.escape(slug)}\b""").containsMatchIn(s)) candidates.add(slug)
+        for ((alias, entity) in aliasMap) {
+            if (Regex("""\b${Regex.escape(alias)}\b""").containsMatchIn(s)) candidates.add(entity)
         }
         for ((rel, entity) in resolvedRelations) {
             if (Regex("""\bmy\s+${Regex.escape(rel)}\b""").containsMatchIn(s)) candidates.add(entity)
@@ -100,6 +103,41 @@ object CalendarFollowupMatcher {
             CalendarFollowupTopic.DOCTOR -> null // unreachable -- never called for DOCTOR
         }
     }
+
+    // When TruthDb already knows who a generic Birthday/Anniversary event
+    // belongs to, Scout should say so instead of only suppressing the "whose
+    // is that?" follow-up question. [owners] is findDateOwners()'s result for
+    // this event's own date -- already date-filtered, never a broader scan.
+    // Returns null (no clause added, caller falls back to the plain base
+    // answer) whenever ownership isn't a single clear name: zero owners (the
+    // "already known" caller never reaches here), a bare legacy key with no
+    // recorded participant (the date is known but who it belongs to isn't),
+    // or more than one distinct entity/participant (e.g. two people share a
+    // birthday) -- never guessed.
+    fun describeKnownOwner(owners: List<DateOwnerMatch>, topic: CalendarFollowupTopic, selfEntity: String): String? =
+        when (topic) {
+            CalendarFollowupTopic.BIRTHDAY -> {
+                val entity = owners.map { it.entity }.toSet().singleOrNull()
+                when {
+                    entity == null -> null
+                    entity == selfEntity -> "That's your birthday."
+                    else -> "That's ${slugDisplayName(entity)}'s birthday."
+                }
+            }
+            CalendarFollowupTopic.ANNIVERSARY -> {
+                val participant = owners.mapNotNull { it.participantSlug }.toSet().singleOrNull()
+                if (participant == null) null else "That's your anniversary with ${slugDisplayName(participant)}."
+            }
+            CalendarFollowupTopic.DOCTOR -> null // unreachable -- findDateOwners() is never called for DOCTOR
+        }
+
+    // Local copy of ScoutEntityResolver.displayName()'s capitalization, not a
+    // call to it -- that file imports TruthDb, and this file is deliberately
+    // Android/TruthDb-free (see class doc above) so it stays testable in the
+    // plain JVM unit test suite without pulling Android in transitively.
+    private fun slugDisplayName(entity: String): String =
+        entity.trim().split(" ", "_").filter { it.isNotBlank() }
+            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
 
     private fun looksLikeQuestion(s: String): Boolean {
         if (s.endsWith("?")) return true

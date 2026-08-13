@@ -4827,9 +4827,11 @@ Respond only with Scout's next reply.
     // ever called from handleCalendarIntent() above, with the single
     // unambiguous event a direct question just described -- never from a
     // background scan. Birthday/Anniversary: asks at most once, only if
-    // TruthDb doesn't already know, and sets pendingCalendarFollowup so the
-    // very next turn can resolve it (see handleQuery()). Doctor: a one-off
-    // caring question with no data path at all.
+    // TruthDb doesn't already know; if it does already know, that knowledge
+    // is spoken (see describeKnownOwner()) rather than only suppressing the
+    // question. Otherwise, sets pendingCalendarFollowup so the very next turn
+    // can resolve it (see handleQuery()). Doctor: a one-off caring question
+    // with no data path at all.
     private fun appendCalendarFollowupIfWarranted(event: CalendarEvent, baseAnswer: String): String {
 
         val topic = CalendarFollowupMatcher.matchTopic(event.title) ?: return baseAnswer
@@ -4841,8 +4843,16 @@ Respond only with Scout's next reply.
 
         val (month, day) = CalendarFollowupMatcher.canonicalMonthDay(event.startMs, event.allDay)
         val factKeyPrefix = if (topic == CalendarFollowupTopic.ANNIVERSARY) "anniversary" else "birthday"
-        val alreadyKnown = CalendarFollowupMatcher.findDateOwners(getAllKnownFacts(), factKeyPrefix, month, day).isNotEmpty()
-        if (alreadyKnown) return baseAnswer
+        val knownOwners = CalendarFollowupMatcher.findDateOwners(getAllKnownFacts(), factKeyPrefix, month, day)
+        if (knownOwners.isNotEmpty()) {
+            // Already known -- never ask again. Where TruthDb's match is a
+            // single unambiguous name, speak it instead of only suppressing
+            // the question; an ambiguous or unowned match (see
+            // describeKnownOwner()) falls back to the plain base answer
+            // rather than guessing.
+            val known = CalendarFollowupMatcher.describeKnownOwner(knownOwners, topic, ENTITY_USER_PRIMARY)
+            return if (known != null) "$baseAnswer $known" else baseAnswer
+        }
 
         pendingCalendarFollowup = PendingCalendarFollowup.Clarification(
             topic = topic,
@@ -4938,7 +4948,7 @@ Respond only with Scout's next reply.
         }
 
         val resolvedEntity = CalendarFollowupMatcher.resolveClarificationReply(
-            qNorm, pending.topic, knownEntitySlugs, resolvedRelations, ENTITY_USER_PRIMARY
+            qNorm, pending.topic, aliasMap, resolvedRelations, ENTITY_USER_PRIMARY
         ) ?: return false
 
         val (month, day) = CalendarFollowupMatcher.canonicalMonthDay(pending.eventDateMs, pending.eventAllDay)
