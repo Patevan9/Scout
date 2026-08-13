@@ -26,7 +26,7 @@ object ScoutBusyBrainPolicy {
         IntentType.CONNECTIVITY, IntentType.WEATHER, IntentType.CALENDAR, IntentType.VISION,
         IntentType.IDENTITY, IntentType.ASK_SCOUT_NAME, IntentType.ASK_MY_NAME,
         IntentType.ASK_WIFE_NAME, IntentType.ASK_SON_NAME, IntentType.ASK_DOG_NAME,
-        IntentType.FAMILY_NAMES, IntentType.RECALL_FACT,
+        IntentType.FAMILY_NAMES, IntentType.RECALL_FACT, IntentType.WHOSE_DATE_EVENT,
         // "Normal conversational courtesy where appropriate" -- canned-phrase
         // replies, no state change, no memory write.
         IntentType.GREET, IntentType.HOW_ARE_YOU, IntentType.PRAISE, IntentType.AFFECTION,

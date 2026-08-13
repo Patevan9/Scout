@@ -35,6 +35,7 @@ class ScoutBusyBrainPolicyTest {
         assertTrue(ScoutBusyBrainPolicy.isSafeWhilePending(IntentType.ASK_DOG_NAME))
         assertTrue(ScoutBusyBrainPolicy.isSafeWhilePending(IntentType.FAMILY_NAMES))
         assertTrue(ScoutBusyBrainPolicy.isSafeWhilePending(IntentType.RECALL_FACT))
+        assertTrue(ScoutBusyBrainPolicy.isSafeWhilePending(IntentType.WHOSE_DATE_EVENT))
     }
 
     @Test fun `conversational courtesy is safe while a generation is pending`() {

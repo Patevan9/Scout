@@ -76,6 +76,27 @@ class ScoutIntentRouterTest {
         assertEquals(IntentType.CALENDAR, ScoutIntentRouter.route("do I need my calendar today"))
     }
 
+    // --- Calendar Follow-up: deterministic "whose birthday/anniversary is
+    // [date]" recall, checked before RECALL_FACT even though it also names a
+    // date -- must never fall through to CALENDAR or the generative fallback. ---
+
+    @Test fun `whose anniversary is on a date routes to WHOSE_DATE_EVENT`() {
+        assertEquals(IntentType.WHOSE_DATE_EVENT, ScoutIntentRouter.route("whose anniversary is on august 13th"))
+    }
+
+    @Test fun `whose birthday is on a date routes to WHOSE_DATE_EVENT`() {
+        assertEquals(IntentType.WHOSE_DATE_EVENT, ScoutIntentRouter.route("whose birthday is august 13th"))
+    }
+
+    @Test fun `whose birthday with no parseable date does not route to WHOSE_DATE_EVENT`() {
+        assertNotEquals(IntentType.WHOSE_DATE_EVENT, ScoutIntentRouter.route("whose birthday is it"))
+    }
+
+    @Test fun `existing calendar and recall-fact phrasings are unaffected by the new WHOSE_DATE_EVENT branch`() {
+        assertEquals(IntentType.CALENDAR, ScoutIntentRouter.route("do I need my calendar today"))
+        assertEquals(IntentType.RECALL_FACT, ScoutIntentRouter.route("what is my birthday"))
+    }
+
     // --- Compound relation questions no longer short-circuit on the first match ---
 
     @Test fun `wife and son mentioned together no longer resolves to just the wife`() {

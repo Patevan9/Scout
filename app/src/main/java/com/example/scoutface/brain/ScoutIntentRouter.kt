@@ -353,6 +353,18 @@ clean.contains("go on the internet")
             return IntentType.CALENDAR
         }
 
+        // "whose birthday/anniversary is [date]" -- a TruthDb recall question,
+        // not a calendar-provider lookup, checked before RECALL_FACT below even
+        // though it also names a date. Routes to a deterministic reverse
+        // lookup (handleWhoseDateEventIntent()) that never touches Gemini or
+        // TinyLlama, same as FAMILY_NAMES above.
+        if (
+            (clean.contains("whose birthday") || clean.contains("whose anniversary")) &&
+            CalendarDateParser.parseDate(clean) != null
+        ) {
+            return IntentType.WHOSE_DATE_EVENT
+        }
+
         if (
 clean.contains("what is my") ||
 clean.contains("what's my") ||

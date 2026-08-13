@@ -132,6 +132,28 @@ object Phrases {
         "I'll remember {name}."
     )
 
+    // ── Calendar Follow-up: doctor check-in ────────────────────────────────
+    // Deliberately content-blind -- spoken regardless of what the user actually
+    // said in reply to "Is everything okay?", never referencing specifics.
+    // Scout doesn't parse, extract, or store anything from that reply (see
+    // MainActivity's PendingCalendarFollowup.DoctorCheckIn handling); a plain
+    // acknowledgment is also the more honest fit for Scout's own philosophy --
+    // he shouldn't sound like he understood or is tracking a medical detail he
+    // never actually processed.
+    //
+    // Every phrase in this pool must stay neutral even against a completely
+    // benign reply ("it's just my yearly checkup") -- none may presume
+    // something is wrong or needs recovering from. "I hope you feel better
+    // soon" was cut for exactly this reason: said after a benign reply, it
+    // would make Scout sound as though he understood something was medically
+    // wrong, contradicting the entire point of this path never inspecting
+    // the answer.
+
+    val DOCTOR_CHECKIN_ACK = listOf(
+        "I'm glad you told me. I hope it goes well.",
+        "I appreciate you telling me. Take care of yourself."
+    )
+
     // ── Goodbye ──────────────────────────────────────────────────────────────
 
     val GOODBYE = listOf(
