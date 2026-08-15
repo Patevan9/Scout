@@ -4292,7 +4292,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             },
             onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
             onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) },
-            deliverResult = { answer -> deliverAiResult(answer) },
+            // Memory-confirmation integrity backstop -- Gemini is fact-blind and
+            // has no write path of its own, so a free-text reply that happens to
+            // claim durable retention ("I'll remember that!") for a teaching-
+            // shaped question would otherwise be spoken as-is. Only substitutes
+            // when the original question also looked teaching-shaped -- see
+            // ScoutFactExtractor.applyRetentionClaimGuard()'s doc comment.
+            deliverResult = { answer -> deliverAiResult(ScoutFactExtractor.applyRetentionClaimGuard(qNorm, answer)) },
             shouldDiscardResult = { busyBrainState.isDiscarded() },
             onDiscarded = {
                 busyBrainState.discardReason?.let { diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.GEMINI) }
@@ -4534,7 +4540,10 @@ Respond only with Scout's next reply.
                 if (!reply.isNullOrBlank()) {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
                     pendingBrainSource = "TinyLlama (offline)"
-                    deliverAiResult(cleanOfflineReply(reply.trim()))
+                    // Memory-confirmation integrity backstop -- same reasoning
+                    // as the Gemini deliverResult above, applied after the
+                    // existing identity-leak cleanup rather than instead of it.
+                    deliverAiResult(ScoutFactExtractor.applyRetentionClaimGuard(qNorm, cleanOfflineReply(reply.trim())))
                 } else {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
                     deliverAiResult("I'm not sure about that one.")
@@ -5805,7 +5814,7 @@ Respond only with Scout's next reply.
         // improvise a reply that sounds like confirmation without anything
         // actually having been learned.
         if (ScoutFactExtractor.looksLikeUnrecognizedTeaching(qNorm, aliasMap.keys)) {
-            respond("I want to make sure I get that right -- can you say that a different way?")
+            respond(ScoutFactExtractor.UNRECOGNIZED_TEACHING_CLARIFICATION)
             return true
         }
 

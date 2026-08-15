@@ -115,4 +115,136 @@ class ScoutFactExtractorTest {
         assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
             "it is a beautiful day outside", known))
     }
+
+    // --- Layer 1: first-introduction safety net for relation words findSubject()
+    // doesn't recognize (friend, neighbor, coworker, ...) -- these have no
+    // structured write path, so without this they'd silently reach Gemini/
+    // TinyLlama with nothing written and no clarification asked. ---
+
+    @Test fun `an appositive introduction with an unsupported relation word is flagged`() {
+        assertTrue(ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "This is my friend, Janice.", emptySet()))
+    }
+
+    @Test fun `a that-is-my-neighbor introduction is flagged`() {
+        assertTrue(ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "That's my neighbor, Bob.", emptySet()))
+    }
+
+    @Test fun `a name-first introduction is flagged`() {
+        assertTrue(ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "Janice is my friend.", emptySet()))
+    }
+
+    @Test fun `an appositive introduction still works without a comma, matching real normalized input`() {
+        // TextNormalizer strips commas to plain whitespace before this ever runs
+        // in production -- confirm the comma-free form matches too, not just the
+        // comma-containing form a person would naturally type.
+        assertTrue(ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "this is my coworker sarah", emptySet()))
+    }
+
+    @Test fun `my coworker is Sarah is unaffected -- already extracted by TeachExtractor's generic pattern`() {
+        // TeachExtractor.extract() already matches "my X is Y" generically and
+        // writes a real fact for this phrasing (mislabeled as favorite_coworker
+        // rather than coworker_name, a separate pre-existing quirk, out of scope
+        // here) -- so it never reaches looksLikeUnrecognizedTeaching() in
+        // production. Documented here to confirm the new patterns don't
+        // separately (mis)flag it either, since "my coworker is sarah" contains
+        // no "is my <relation>" substring at all.
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "My coworker is Sarah.", emptySet()))
+    }
+
+    @Test fun `a pronoun is never mistaken for a name in a name-first introduction`() {
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "He is my friend.", emptySet()))
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "This is my friend.", emptySet()))
+    }
+
+    @Test fun `an ordinary possessive statement about an object is never flagged as an introduction`() {
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "This is my favorite show.", emptySet()))
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "This is my house.", emptySet()))
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "This is my new car.", emptySet()))
+    }
+
+    @Test fun `an unsupported relation word alone with no name is not flagged`() {
+        // "friend" is a PERSON_RELATION_HINTS word, but with no plausible name
+        // token following it there's nothing to ask a clarifying question about.
+        assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
+            "I have a friend", emptySet()))
+    }
+
+    // --- Layer 2: looksTeachingShaped() -- broader trigger for the output
+    // backstop below, no known-entity/relation anchor required. ---
+
+    @Test fun `a hint word in a statement is teaching-shaped even with no known entity`() {
+        assertTrue(ScoutFactExtractor.looksTeachingShaped("my favorite team lost yesterday"))
+    }
+
+    @Test fun `a question is never teaching-shaped`() {
+        assertTrue(!ScoutFactExtractor.looksTeachingShaped("what is my favorite color"))
+    }
+
+    @Test fun `ordinary small talk with no hint word is not teaching-shaped`() {
+        assertTrue(!ScoutFactExtractor.looksTeachingShaped("how is the weather today"))
+    }
+
+    // --- Layer 2: containsRetentionClaim() -- narrow, explicit phrases only,
+    // never a bare acknowledgment. ---
+
+    @Test fun `explicit retention-claim phrasing is recognized`() {
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("Got it, I'll remember that about Janice!"))
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("Okay, I'll keep that in mind."))
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("I've saved that for later."))
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("I'll make a note of that."))
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("I won't forget that."))
+        assertTrue(ScoutFactExtractor.containsRetentionClaim("I’ll remember that too.")) // curly apostrophe
+    }
+
+    @Test fun `an ordinary acknowledgment alone is never treated as a retention claim`() {
+        assertTrue(!ScoutFactExtractor.containsRetentionClaim("Got it."))
+        assertTrue(!ScoutFactExtractor.containsRetentionClaim("Noted. Sounds good."))
+        assertTrue(!ScoutFactExtractor.containsRetentionClaim("Okay!"))
+        assertTrue(!ScoutFactExtractor.containsRetentionClaim("That's nice, thanks for sharing."))
+    }
+
+    // --- Layer 2: applyRetentionClaimGuard() -- both conditions required
+    // together, never a blanket filter on its own. ---
+
+    @Test fun `a teaching-shaped input with a retention-claim reply is replaced with the honest clarification`() {
+        val out = ScoutFactExtractor.applyRetentionClaimGuard(
+            "this is my friend janice",
+            "That's nice! I'll remember Janice."
+        )
+        assertEquals(ScoutFactExtractor.UNRECOGNIZED_TEACHING_CLARIFICATION, out)
+    }
+
+    @Test fun `a retention-claim reply to ordinary small talk is left untouched -- input was not teaching-shaped`() {
+        val out = ScoutFactExtractor.applyRetentionClaimGuard(
+            "how is the weather today",
+            "I'll remember to check back on that for you!"
+        )
+        assertEquals("I'll remember to check back on that for you!", out)
+    }
+
+    @Test fun `a plain Got it reply to teaching-shaped input is left untouched -- no retention claim made`() {
+        val out = ScoutFactExtractor.applyRetentionClaimGuard(
+            "my favorite team lost yesterday",
+            "Got it, sorry to hear that."
+        )
+        assertEquals("Got it, sorry to hear that.", out)
+    }
+
+    @Test fun `a plain Got it reply to ordinary small talk is left untouched`() {
+        val out = ScoutFactExtractor.applyRetentionClaimGuard(
+            "how is the weather today",
+            "Got it! Looks sunny."
+        )
+        assertEquals("Got it! Looks sunny.", out)
+    }
 }

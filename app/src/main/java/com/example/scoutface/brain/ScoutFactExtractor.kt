@@ -43,10 +43,57 @@ object ScoutFactExtractor {
         "phone", "email"
     )
 
+    // Relation words for the person-introduction safety net below -- deliberately
+    // a *finite vocabulary*, not "any noun after my," so an ordinary possessive
+    // statement ("this is my favorite show," "this is my house") never matches.
+    // Broader than RELATION_WORDS above (which TeachExtractor/findSubject() use
+    // for actual extraction) since this list only ever triggers a clarifying
+    // question, never a write -- see looksLikeUnknownPersonIntroduction().
+    private val PERSON_RELATION_HINTS = setOf(
+        "friend", "neighbor", "neighbour", "coworker", "colleague", "boss",
+        "roommate", "brother", "sister", "sibling", "cousin", "uncle", "aunt",
+        "grandma", "grandmother", "grandpa", "grandfather", "nephew", "niece",
+        "teacher", "boyfriend", "girlfriend", "fiance", "fiancee", "partner",
+        "babysitter", "nanny", "doctor"
+    )
+
+    // Words that can follow "is my <relation>" or precede "is my <relation>"
+    // without being an actual name -- pronouns and question/filler words.
+    // Narrower than TeachExtractor's own NON_NAME_WORDS (that list guards a much
+    // broader set of patterns); this only needs to cover the two shapes below.
+    private val NAME_TOKEN_BLOCKLIST = setOf(
+        "it", "this", "that", "he", "she", "they", "we", "i", "you",
+        "who", "what", "here", "there"
+    )
+
     private val QUESTION_LEAD_WORDS = setOf(
         "what", "who", "when", "where", "why", "how",
         "do", "does", "did", "is", "are", "can", "could", "will", "would"
     )
+
+    // Explicit claims of durable retention -- "I'll remember," "I've saved
+    // that," etc. Deliberately narrow and literal, matching the substring-list
+    // style cleanOfflineReply() already uses for identity-leak phrases below in
+    // MainActivity.kt. Ordinary conversational acknowledgment ("Got it,"
+    // "Noted," "Okay") is intentionally NOT in this list -- see
+    // containsRetentionClaim()'s doc comment.
+    private val RETENTION_CLAIM_PHRASES = listOf(
+        "i'll remember", "i will remember", "ill remember",
+        "i won't forget", "i will not forget", "i wont forget",
+        "keep that in mind", "keep this in mind", "keeping that in mind",
+        "i've saved that", "i have saved that", "i'll save that", "ive saved that",
+        "i'll make a note", "i've made a note", "i have made a note",
+        "i'll note that", "i've noted that down", "noted that down", "ive noted that down",
+        "i'll write that down", "i've written that down", "ill write that down",
+        "committing that to memory", "committed that to memory",
+        "i'll hold onto that", "i'll retain that", "ill hold onto that"
+    )
+
+    // Shared with MainActivity's Layer-1 clarification response (handleTeaching())
+    // and the Layer-2 output backstop (applyRetentionClaimGuard()) so both speak
+    // identically -- single source of truth, no risk of the two drifting apart.
+    const val UNRECOGNIZED_TEACHING_CLARIFICATION =
+        "I want to make sure I get that right -- can you say that a different way?"
 
     private val DATE_VALUE = Regex(
         """\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun[e]?|jul[y]?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?|\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b"""
@@ -109,13 +156,100 @@ object ScoutFactExtractor {
     // differently" instead of letting the sentence fall through to TinyLlama,
     // which would improvise a reply that sounds like confirmation without
     // anything actually having been learned.
+    //
+    // Also catches a first-time introduction using a relation word outside
+    // RELATION_WORDS/findSubject()'s narrow vocabulary ("This is my friend,
+    // Janice," "Janice is my friend") -- see looksLikeUnknownPersonIntroduction().
+    // Those never had a subject findSubject() could anchor on, so without this
+    // second check they'd silently fall all the way through to Gemini/TinyLlama
+    // with nothing written and no clarification asked -- exactly the gap this
+    // function exists to close.
     fun looksLikeUnrecognizedTeaching(input: String, knownNames: Set<String>): Boolean {
         val s = normalize(input)
         if (looksLikeQuestion(s)) return false
         val mentionsEntity = findSubject(s, knownNames) != null
         val hasHint = HINT_WORDS.any { containsWord(s, it) }
-        return mentionsEntity && hasHint
+        if (mentionsEntity && hasHint) return true
+        return looksLikeUnknownPersonIntroduction(s)
     }
+
+    // "This is my friend, Janice." / "That's my neighbor, Bob." / "Janice is my
+    // friend." -- a person introduction using a relation word findSubject()
+    // doesn't recognize (so structured extraction can't safely write anything),
+    // but is still unmistakably an attempt to tell Scout about someone. Gated on
+    // PERSON_RELATION_HINTS' finite vocabulary specifically so an ordinary
+    // possessive statement about an object ("this is my favorite show," "this
+    // is my house" -- only one word after "my," or a word not in the list)
+    // never matches. [s] is expected to already be normalize()'d by the caller.
+    // Deliberately detection-only: never writes anything, never invents a
+    // relation type TruthDb/ScoutEntityResolver don't already model.
+    private fun looksLikeUnknownPersonIntroduction(s: String): Boolean {
+        val relHints = PERSON_RELATION_HINTS.joinToString("|") { Regex.escape(it) }
+
+        // "this is/that is my <relation>[,] <name>" -- [,\s]+ tolerates either a
+        // raw comma (a natural appositive pause, e.g. in a test string typed the
+        // way a person would write it) or the plain whitespace TextNormalizer
+        // already reduces a comma to in the real runtime pipeline.
+        Regex("""\b(?:this is|that is) my (?:$relHints)[,\s]+([a-z]+)\b""").find(s)?.let { m ->
+            if (m.groupValues[1] !in NAME_TOKEN_BLOCKLIST) return true
+        }
+
+        // "<name> is my <relation>" -- name-first introduction.
+        Regex("""\b([a-z]+) is my (?:$relHints)\b""").find(s)?.let { m ->
+            if (m.groupValues[1] !in NAME_TOKEN_BLOCKLIST) return true
+        }
+
+        return false
+    }
+
+    // Broader than looksLikeUnrecognizedTeaching() above -- no known-entity or
+    // relation-word anchor required, just a teaching-hint word in a statement
+    // (not a question), or a person-introduction shape. Used only to gate the
+    // retention-claim backstop below (applyRetentionClaimGuard()), never to
+    // decide whether to write or ask a clarifying question -- deliberately
+    // over-triggering here is safe because the only thing it enables is a
+    // *check*, not an action, matching the same recall-over-precision
+    // philosophy ScoutMemoryGate already documents.
+    //
+    // Also checks looksLikeUnknownPersonIntroduction(): in the real call graph
+    // that's provably redundant (any input matching those shapes was already
+    // fully handled inside MainActivity.handleTeaching(), which returns before
+    // Gemini/TinyLlama is ever reached for that same turn) -- but this function
+    // is a safety backstop, and a backstop shouldn't depend on an unenforced
+    // assumption about what its caller already checked. Kept in for that
+    // reason: cheap, and it's what makes this function correct when called on
+    // its own, not just correct given today's one call graph.
+    fun looksTeachingShaped(input: String): Boolean {
+        val s = normalize(input)
+        if (looksLikeQuestion(s)) return false
+        return HINT_WORDS.any { containsWord(s, it) } || looksLikeUnknownPersonIntroduction(s)
+    }
+
+    // Explicit, literal retention-claim phrases only -- "Got it," "Noted," and
+    // "Okay" alone never match, on purpose (see RETENTION_CLAIM_PHRASES' doc
+    // comment). [reply] is a model's raw free-text output, not qNorm, so it is
+    // not assumed to be pre-normalized -- lowercased and curly quotes folded to
+    // straight ones here, matching TextNormalizer's own apostrophe handling,
+    // rather than requiring the caller to normalize first.
+    fun containsRetentionClaim(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        return RETENTION_CLAIM_PHRASES.any { lower.contains(it) }
+    }
+
+    // The Layer-2 backstop: only ever substitutes when BOTH the original
+    // utterance looked teaching-shaped AND the model's own reply explicitly
+    // claims durable retention. Never applied to the deterministic teaching or
+    // calendar-clarification paths (see MainActivity), which already only speak
+    // a confirmation after a real TruthDb write -- this exists solely for the
+    // generative (Gemini/TinyLlama) fallback paths, as a contextual backstop for
+    // whatever looksLikeUnrecognizedTeaching() above didn't already intercept
+    // before either model was ever called.
+    fun applyRetentionClaimGuard(originalInput: String, reply: String): String =
+        if (looksTeachingShaped(originalInput) && containsRetentionClaim(reply)) {
+            UNRECOGNIZED_TEACHING_CLARIFICATION
+        } else {
+            reply
+        }
 
     private fun looksLikeQuestion(s: String): Boolean {
         if (s.trim().endsWith("?")) return true
