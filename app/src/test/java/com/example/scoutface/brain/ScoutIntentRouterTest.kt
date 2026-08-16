@@ -240,4 +240,37 @@ class ScoutIntentRouterTest {
     @Test fun `stop listening does not route to GOODBYE`() {
         assertEquals(IntentType.STOP_LISTENING, ScoutIntentRouter.route("scout stop listening"))
     }
+
+    // --- New memory-capability routing: "can you learn?" etc. now route to
+    // IDENTITY for a deterministic, TruthDb-grounded answer instead of falling
+    // through to UNKNOWN and reaching Gemini/TinyLlama. See
+    // ScoutFactExtractor.looksLikeMemoryCapabilityQuestion() for the detection
+    // logic and its false-positive guards. ---
+
+    @Test fun `can you learn routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Can you learn?"))
+    }
+
+    @Test fun `do you have a memory routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Do you have a memory?"))
+    }
+
+    @Test fun `are you capable of remembering routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Are you capable of remembering?"))
+    }
+
+    // A specific referent right after "remember" is a real recall/task
+    // question, not a capability question, and must keep routing normally.
+
+    @Test fun `do you remember my birthday still routes to RECALL_FACT, not IDENTITY`() {
+        assertEquals(IntentType.RECALL_FACT, ScoutIntentRouter.route("do you remember my birthday"))
+    }
+
+    @Test fun `can you remember to grab milk does not route to IDENTITY`() {
+        assertNotEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Can you remember to grab milk?"))
+    }
+
+    @Test fun `do you remember the movie does not route to IDENTITY`() {
+        assertNotEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Do you remember the movie?"))
+    }
 }

@@ -95,6 +95,106 @@ object ScoutFactExtractor {
     const val UNRECOGNIZED_TEACHING_CLARIFICATION =
         "I want to make sure I get that right -- can you say that a different way?"
 
+    // Layer-2 replacement for a global capability-denial reply (see
+    // containsCapabilityDenial() below) -- truthful about what Scout actually
+    // does: writes real facts to TruthDb and never claims retention beyond that.
+    const val MEMORY_CAPABILITY_CLARIFICATION =
+        "Actually, I do remember things -- I can learn facts you teach me and store them locally. I only say I remember something once it's actually been saved."
+
+    // Layer-2 replacement for a reminder-scheduling promise (see
+    // containsReminderPromise() below) -- Scout has no reminder system yet, so
+    // this is the honest answer until one exists (see MainActivity's future
+    // ReminderDb/AlarmManager design notes).
+    const val REMINDER_NOT_AVAILABLE = "I can't set reminders yet."
+
+    // Self-referential "are you even capable of learning/remembering" questions
+    // -- "Can you learn?", "Do you have a memory?", "Are you capable of
+    // remembering?". Deliberately narrow modal/capability phrasing, gated so a
+    // specific referent right after the verb ("Can you remember my birthday?",
+    // "Can you remember to grab milk?") is excluded -- those are real recall
+    // questions or task requests, not questions about Scout's capability, and
+    // must keep routing normally (RECALL_FACT, or an ordinary conversational
+    // reply). Verified against both real capability phrasings and adversarial
+    // specific-referent phrasings before this was written.
+    private val CAPABILITY_SAFE_TRAILERS = setOf(
+        "", "anything", "something", "things", "stuff", "at all", "in general",
+        "information", "facts", "memories", "from others", "or remember",
+        "or remember from others", "or remember things"
+    )
+    private val CAPABILITY_REFERENT_LEAD_WORDS = setOf(
+        "my", "the", "this", "that", "a", "an", "our", "his", "her", "their", "to"
+    )
+    private val CAPABILITY_QUESTION_PATTERNS = listOf(
+        Regex("""\b(?:can|could) you (?:learn|remember)\b(.*)$"""),
+        Regex("""\bare you (?:able|capable) (?:to|of) (?:learn|learning|remember|remembering)\b(.*)$"""),
+        Regex("""\bdo you (?:even |really |actually )?have (?:a )?(?:memory|the ability to learn|the capacity to learn|the ability to remember)\b(.*)$"""),
+        Regex("""\bdo you (?:have the capability|have the ability|have the capacity) to (?:learn|remember)\b(.*)$"""),
+        Regex("""\b(?:can|could) you (?:retain|store|hold onto|keep) (?:information|memories|things|facts)\b(.*)$"""),
+        Regex("""\bdo you remember\b(.*)$""")
+    )
+
+    // Global capability-denial phrases only -- "I cannot learn," "I don't have
+    // the capability to learn," etc. Deliberately excludes a truthful,
+    // specific-fact-absence answer like "I don't have a memory of that" or
+    // "I'm unable to remember your dog's name right now" -- those are correct
+    // things for Scout to say and must never be rewritten. See
+    // containsCapabilityDenial()'s trailer-gated patterns below for the two
+    // constructions ambiguous enough to need that distinction.
+    private val GLOBAL_DENIAL_LITERALS = listOf(
+        "i cannot learn", "i can't learn", "i can not learn",
+        "i do not have the capability to learn", "i don't have the capability to learn",
+        "i do not have the ability to learn", "i don't have the ability to learn",
+        "i am unable to learn", "i'm unable to learn",
+        "i do not retain information", "i don't retain information",
+        "i cannot remember anything", "i can't remember anything", "i can not remember anything",
+        "i am unable to remember anything", "i'm unable to remember anything",
+        "i have no memory of my own", "i have no ability to learn", "i have no capacity to learn",
+        "i do not have a memory of my own", "i don't have a memory of my own"
+    )
+    private val GLOBAL_DENIAL_SAFE_TRAILERS = setOf("", "at all", "of my own", "in general", "period")
+    private val GLOBAL_DENIAL_PATTERNS = listOf(
+        Regex("""\bi (?:do not|don't) have (?:a |any )?memory\b(.*)$"""),
+        Regex("""\bi'?m unable to remember\b(.*)$"""),
+        Regex("""\bi am unable to remember\b(.*)$""")
+    )
+
+    // Future-scheduling / completion-claim reminder phrases only -- "I'll
+    // remind you on January 27th," "I've set a reminder," "Would you like me
+    // to remind you tomorrow?" Deliberately excludes ordinary recollection
+    // language like "I can remind you what you told me earlier" -- that's
+    // Scout offering to restate something already known, not a promise to
+    // schedule a future nudge Scout has no way to deliver. See
+    // containsReminderPromise()'s trailer-gated patterns below.
+    private val REMINDER_ALWAYS_BLOCK_LITERALS = listOf(
+        "would you like me to remind you", "do you want me to remind you",
+        "want me to remind you", "should i remind you", "shall i remind you",
+        "i've set a reminder", "i have set a reminder", "i'll set a reminder", "i will set a reminder",
+        "i've set an alarm", "i have set an alarm", "i'll set an alarm", "i will set an alarm",
+        "i've scheduled a reminder", "i have scheduled a reminder",
+        "i'll schedule a reminder", "i will schedule a reminder",
+        "i've created a reminder", "i have created a reminder"
+    )
+    private val REMINDER_PROMISE_PATTERNS = listOf(
+        Regex("""\bi'?ll remind you\b(.*)$"""),
+        Regex("""\bi will remind you\b(.*)$"""),
+        Regex("""\bi can remind you\b(.*)$"""),
+        Regex("""\bi could remind you\b(.*)$""")
+    )
+    // A future/time cue anywhere in the trailer means "remind you ___" is a
+    // scheduling promise. A starter set for this pass, not exhaustive -- Layer
+    // 1 (deterministic routing) and the system-prompt line are the other two
+    // legs of defense, not just this list.
+    private val REMINDER_FUTURE_TIME_CUES = Regex(
+        """\b(tomorrow|tonight|later|soon|next\s+\w+|in an?\s+\w+|in\s+\d|at\s+\d|""" +
+        """on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|""" +
+        """on\s+(?:mon|tues|wednes|thurs|fri|satur|sun)day|this\s+(?:morning|afternoon|evening|weekend))\b"""
+    )
+    // A recollection/past-information cue means "remind you ___" is about
+    // re-stating something already known, not scheduling a future nudge.
+    private val REMINDER_RECOLLECTION_CUES = Regex(
+        """\b(what you (?:told|said)|what i (?:told|said)|of (?:that|what|the)|about (?:that|what|the)|earlier|before|last time|already (?:told|said))\b"""
+    )
+
     private val DATE_VALUE = Regex(
         """\b((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun[e]?|jul[y]?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?|\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b"""
     )
@@ -250,6 +350,100 @@ object ScoutFactExtractor {
         } else {
             reply
         }
+
+    // Layer 1 (before either model): is this a self-referential question about
+    // whether Scout is even capable of learning/remembering, as opposed to a
+    // question about a specific fact ("do you remember my birthday") or a
+    // comprehension check ("did you learn how that works")? Callers route a
+    // match to IntentType.IDENTITY for a deterministic, TruthDb-grounded
+    // answer -- see MainActivity.handleIdentityIntent().
+    fun looksLikeMemoryCapabilityQuestion(input: String): Boolean {
+        val s = input.lowercase().trim().trimEnd('?', '.', '!')
+        for (re in CAPABILITY_QUESTION_PATTERNS) {
+            val m = re.find(s) ?: continue
+            val rest = if (m.groupValues.size > 1) m.groupValues[1] else ""
+            if (capabilityTrailerIsSafe(rest)) return true
+        }
+        return false
+    }
+
+    private fun capabilityTrailerIsSafe(rest: String): Boolean {
+        val trimmed = rest.trim()
+        if (trimmed in CAPABILITY_SAFE_TRAILERS) return true
+        val firstWord = trimmed.substringBefore(' ')
+        if (firstWord in CAPABILITY_REFERENT_LEAD_WORDS) return false
+        return trimmed.isBlank() || firstWord in CAPABILITY_SAFE_TRAILERS
+    }
+
+    // Layer 2: does [reply] contain a GLOBAL claim that Scout cannot learn or
+    // remember at all -- "I cannot learn," "I don't have the capability to
+    // learn," "I don't retain information"? Deliberately excludes a truthful,
+    // specific-fact-absence answer ("I don't have a memory of that," "I'm
+    // unable to remember your dog's name right now") via the trailer check on
+    // the two ambiguous constructions -- see GLOBAL_DENIAL_PATTERNS' doc
+    // comment above. [reply] is a model's raw free-text output, so it is not
+    // assumed pre-normalized here, matching containsRetentionClaim().
+    fun containsCapabilityDenial(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        if (GLOBAL_DENIAL_LITERALS.any { lower.contains(it) }) return true
+        for (re in GLOBAL_DENIAL_PATTERNS) {
+            val m = re.find(lower) ?: continue
+            val rest = if (m.groupValues.size > 1) m.groupValues[1] else ""
+            if (globalDenialTrailerIsGlobal(rest)) return true
+        }
+        return false
+    }
+
+    private fun globalDenialTrailerIsGlobal(rest: String): Boolean {
+        val trimmed = rest.trim().trimEnd('.', '!')
+        if (trimmed in GLOBAL_DENIAL_SAFE_TRAILERS) return true
+        val firstWord = trimmed.substringBefore(' ')
+        // "of"/"about"/"that"/"this"/"right"/"for" all introduce a specific
+        // referent ("of that," "about your trip," "right now") -- never global.
+        if (firstWord in setOf("of", "about", "that", "this", "right", "for")) return false
+        return false
+    }
+
+    // Layer 2: does [reply] contain a future reminder-scheduling promise or a
+    // completion claim -- "I'll remind you on January 27th," "I've set a
+    // reminder," "Would you like me to remind you tomorrow?" Deliberately
+    // excludes ordinary recollection language ("I can remind you what you told
+    // me earlier") via the future-time-cue/recollection-cue trailer check --
+    // see REMINDER_PROMISE_PATTERNS' doc comment above.
+    fun containsReminderPromise(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        if (REMINDER_ALWAYS_BLOCK_LITERALS.any { lower.contains(it) }) return true
+        for (re in REMINDER_PROMISE_PATTERNS) {
+            val m = re.find(lower) ?: continue
+            val rest = if (m.groupValues.size > 1) m.groupValues[1] else ""
+            if (reminderTrailerImpliesPromise(rest)) return true
+        }
+        return false
+    }
+
+    private fun reminderTrailerImpliesPromise(rest: String): Boolean {
+        val trimmed = rest.trim()
+        if (trimmed.isBlank()) return true  // bare "I'll remind you." -- a promise by default
+        if (REMINDER_FUTURE_TIME_CUES.containsMatchIn(trimmed)) return true
+        if (REMINDER_RECOLLECTION_CUES.containsMatchIn(trimmed)) return false
+        // Neither cue present: conservatively treat short trailing filler
+        // ("I'll remind you!") as a promise -- only a recognized recollection
+        // cue earns the exemption.
+        return true
+    }
+
+    // Combined Layer-2 output guard for the generative (Gemini/TinyLlama)
+    // fallback paths -- see MainActivity's two deliverAiResult() call sites.
+    // Order: capability-denial and reminder-promise checks run unconditionally
+    // on every reply (neither has a legitimate reading once matched, so no
+    // input-shape gate is needed, unlike the retention-claim guard below).
+    // applyRetentionClaimGuard() keeps its own existing teaching-shaped gate,
+    // unchanged from its original PR.
+    fun applyMemoryIntegrityGuards(originalInput: String, reply: String): String {
+        if (containsCapabilityDenial(reply)) return MEMORY_CAPABILITY_CLARIFICATION
+        if (containsReminderPromise(reply)) return REMINDER_NOT_AVAILABLE
+        return applyRetentionClaimGuard(originalInput, reply)
+    }
 
     private fun looksLikeQuestion(s: String): Boolean {
         if (s.trim().endsWith("?")) return true

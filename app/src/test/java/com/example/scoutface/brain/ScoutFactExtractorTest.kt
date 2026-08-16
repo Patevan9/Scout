@@ -247,4 +247,117 @@ class ScoutFactExtractorTest {
         )
         assertEquals("Got it! Looks sunny.", out)
     }
+
+    // --- looksLikeMemoryCapabilityQuestion() -- self-referential "are you even
+    // capable of learning/remembering" questions, gated so a specific referent
+    // right after the verb is excluded (a real recall question or task
+    // request, not a capability question). ---
+
+    @Test fun `genuine capability questions are recognized`() {
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Can you learn?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Can you remember things?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you have a memory?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Are you able to learn?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Are you capable of learning?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you have the ability to learn?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Can you learn or remember from others?"))
+        assertTrue(ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you even have a memory?"))
+    }
+
+    @Test fun `a specific referent after remember is a recall question, never a capability question`() {
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you remember the movie?"))
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Did you learn how that works?"))
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you remember my birthday?"))
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you remember Diana?"))
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Do you remember what I said?"))
+    }
+
+    @Test fun `a future-task request is not a capability question`() {
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Can you remember to grab milk?"))
+    }
+
+    @Test fun `an unrelated learn-a-skill question is not a memory capability question`() {
+        assertTrue(!ScoutFactExtractor.looksLikeMemoryCapabilityQuestion("Can you learn a new language?"))
+    }
+
+    // --- containsCapabilityDenial() -- global denial only, never a truthful
+    // specific-fact-absence answer. ---
+
+    @Test fun `global capability denial phrases are recognized`() {
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I cannot learn."))
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I do not have the capability to learn."))
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I am unable to remember anything."))
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I don't retain information."))
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I don't have a memory."))
+        assertTrue(ScoutFactExtractor.containsCapabilityDenial("I don't have a memory at all."))
+    }
+
+    @Test fun `a truthful specific-fact-absence answer is never treated as capability denial`() {
+        assertTrue(!ScoutFactExtractor.containsCapabilityDenial("I don't have a memory of that."))
+        assertTrue(!ScoutFactExtractor.containsCapabilityDenial("I don't have a memory of your birthday."))
+        assertTrue(!ScoutFactExtractor.containsCapabilityDenial("I'm unable to remember your dog's name right now."))
+        assertTrue(!ScoutFactExtractor.containsCapabilityDenial("I don't have a memory of what you said yesterday."))
+    }
+
+    // --- containsReminderPromise() -- future scheduling offers/completion
+    // claims only, never ordinary recollection language. ---
+
+    @Test fun `reminder scheduling promises are recognized`() {
+        assertTrue(ScoutFactExtractor.containsReminderPromise("I'll remind you on January 27th."))
+        assertTrue(ScoutFactExtractor.containsReminderPromise("Would you like me to remind you tomorrow?"))
+        assertTrue(ScoutFactExtractor.containsReminderPromise("I've set a reminder."))
+        assertTrue(ScoutFactExtractor.containsReminderPromise("I'll set an alarm."))
+        assertTrue(ScoutFactExtractor.containsReminderPromise("I'll remind you at 3 PM."))
+        assertTrue(ScoutFactExtractor.containsReminderPromise("I'll remind you."))
+    }
+
+    @Test fun `ordinary recollection language is never treated as a reminder promise`() {
+        assertTrue(!ScoutFactExtractor.containsReminderPromise("I can remind you what you told me earlier."))
+        assertTrue(!ScoutFactExtractor.containsReminderPromise("I can remind you of the facts I have about Diana."))
+        assertTrue(!ScoutFactExtractor.containsReminderPromise("I'll remind you what you already told me."))
+    }
+
+    // --- applyMemoryIntegrityGuards() -- combines all three checks; each
+    // substitution is independent of whether the input looked teaching-shaped
+    // (unlike the retention-claim guard, which still requires that). ---
+
+    @Test fun `a global capability denial reply is replaced regardless of the question shape`() {
+        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+            "what have you learned today",
+            "I do not have the capability to learn or learn from others."
+        )
+        assertEquals(ScoutFactExtractor.MEMORY_CAPABILITY_CLARIFICATION, out)
+    }
+
+    @Test fun `a reminder scheduling promise reply is replaced regardless of the question shape`() {
+        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+            "remind me about january 27th",
+            "Sure, I'll remind you on January 27th!"
+        )
+        assertEquals(ScoutFactExtractor.REMINDER_NOT_AVAILABLE, out)
+    }
+
+    @Test fun `a specific-fact-absence reply is left untouched by the combined guard`() {
+        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+            "do you remember my dog's name",
+            "I don't have a memory of that yet."
+        )
+        assertEquals("I don't have a memory of that yet.", out)
+    }
+
+    @Test fun `ordinary recollection language is left untouched by the combined guard`() {
+        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+            "can you remind me what diana likes",
+            "I can remind you of the facts I have about Diana."
+        )
+        assertEquals("I can remind you of the facts I have about Diana.", out)
+    }
+
+    @Test fun `the combined guard still applies the existing teaching-shaped retention-claim check`() {
+        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+            "this is my friend janice",
+            "That's nice! I'll remember Janice."
+        )
+        assertEquals(ScoutFactExtractor.UNRECOGNIZED_TEACHING_CLARIFICATION, out)
+    }
 }
