@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: August 11, 2026
-Based on commit: ee00d9bf27b21530e12c4bc0f9fb8e7da725bb7a
-Status: Current. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending.
+Last updated: August 15, 2026
+Based on commit: 92c6d57f84ef8f0f651a6a89937532fcaa954d42
+Status: Current. PRs #37–39 reviewed — none change any launch-blocker status (see "Must Fix" section below, unchanged). #37 and #39 are reliability/trust fixes, noted below under "Memory & family recognition." #38 (Calendar Follow-up) is new feature work with no launch-readiness relevance and is intentionally not tracked here — see `Scout_Master_Summary.md` and `Scout_Quick_Start.md` instead. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending.
 
-**Version 25**
+**Version 26**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -33,6 +33,8 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - Face recognition — ArcFace-based (512-dim), margin-checked, profile-pollution-gated so borderline matches can't corrupt a profile. Family introduction flow ("this is my son Elijah") and a "Scout, forget [name]" re-registration command.
 - Personal-memory questions ("what's my wife's name") are structurally gated before they can ever reach Gemini — a hard privacy guarantee, not something that depends on exact phrasing.
 - Presence layer — idle-silence acknowledgment and a real proactive "welcome back" greeting, both gated by genuine sustained camera presence rather than a flag that was almost always true.
+- Natural family-summary questions ("who is a part of my family," "tell me about my family") now route to Scout's real, deterministic family list instead of occasionally reaching TinyLlama, which had fabricated fictional family members (PR #37, Aug 12).
+- Scout can no longer claim to have learned or saved something that was never actually written to memory — closes a real gap where an unrecognized teaching attempt could reach a fact-blind Gemini or an ungrounded TinyLlama, either of which could say "I'll remember that" with nothing stored (PR #39, Aug 15).
 
 **Stability & privacy**
 - A32 confirmed stable through multiple root-caused crash classes, most recently a camera/ML Kit/SpeechRecognizer startup collision (July 28) — fixed via staggered subsystem startup, not a guess.
@@ -134,7 +136,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 11, 2026 | Version 25 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 15, 2026 | Version 26 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 
