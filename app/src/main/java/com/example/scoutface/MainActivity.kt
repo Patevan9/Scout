@@ -6069,6 +6069,17 @@ Respond only with Scout's next reply.
             isThinking -> "thinking"
             !bootFinishedSpeaking -> "still starting up"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            // Real-device finding: secondFaceJustAppeared is a latched signal
+            // (see SECOND_FACE_ARRIVAL_MAX_PENDING_MS -- up to 5 minutes old by
+            // the time it's even consumed), and nothing between candidate
+            // creation and this point re-checks whether a second person is
+            // still actually present. Without this, Scout could say "It's nice
+            // having you both around" well after the second person already
+            // left. lastFaceCount is the same live per-frame field the arrival
+            // signal itself is derived from, just re-read at the last possible
+            // moment instead of trusting the stale latch.
+            candidate.category == MomentCategory.ENVIRONMENT && lastFaceCount < 2 ->
+                "environment candidate no longer matches live face count ($lastFaceCount)"
             else -> null
         }
         if (blockReason != null) {
