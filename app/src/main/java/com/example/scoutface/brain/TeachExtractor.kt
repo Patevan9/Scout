@@ -108,6 +108,17 @@ object TeachExtractor {
         Regex("""\bthat person is my wife[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.WIFE_NAME to cleanName(it.groupValues[1])
         }
+        // "my wife is Diana" -- the bare introduction, without "'s name is" or
+        // "this is". Real-device finding: this natural phrasing fell all the
+        // way through to the generic FLEXIBLE fallback below and got
+        // mislabeled as favorite_wife = "Diana" instead of wife_name =
+        // "Diana". Guarded by NON_NAME_WORDS like the other bare "is X"
+        // patterns above/below, so "my wife is happy" doesn't register
+        // "Happy" as her name.
+        Regex("""\bmy wife is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.WIFE_NAME to cleanName(word)
+        }
 
         // -------------------------
         // SON
@@ -126,6 +137,12 @@ object TeachExtractor {
         }
         Regex("""\bthat person is my son[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.SON_NAME to cleanName(it.groupValues[1])
+        }
+        // "my son is Elijah" -- the bare introduction. Same real-device
+        // finding and NON_NAME_WORDS guard as the bare wife pattern above.
+        Regex("""\bmy son is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.SON_NAME to cleanName(word)
         }
 
         // -------------------------
@@ -157,6 +174,12 @@ object TeachExtractor {
         // "that is my dog Nicolas" (also catches "that's my dog Nicolas" via contraction expansion above)
         Regex("""\bthat is my dog[,\s]+([a-z]+)\b""").find(s)?.let {
             return FactKey.DOG_NAME to cleanName(it.groupValues[1])
+        }
+        // "my dog is Nicolas" -- the bare introduction. Same real-device
+        // finding and NON_NAME_WORDS guard as the bare wife/son patterns above.
+        Regex("""\bmy dog is ([a-z]+)\b""").find(s)?.let {
+            val word = it.groupValues[1]
+            if (word !in NON_NAME_WORDS) return FactKey.DOG_NAME to cleanName(word)
         }
 
         // -------------------------
@@ -195,11 +218,24 @@ object TeachExtractor {
             val value = cleanName(it.groupValues[2])
             return label to value
         }
-Regex("""\bmy ([a-z ]+?) is ([a-z0-9,'\-/ ]+)""").find(s)?.let {
+        // Real-device finding: this used to auto-prepend "favorite_" to
+        // *any* label here that didn't already start with the word
+        // "favorite" -- so "my son is Elijah" silently became favorite_son
+        // = "Elijah" instead of son_name = "Elijah" (now handled above by
+        // the dedicated wife/son/dog blocks), and "my mentor is Sam" became
+        // favorite_mentor = "Sam" even though the user never said
+        // "favorite" and Scout has no such concept modeled. Recall
+        // (handleRecallIntent()) already tries a plain, unprefixed key as a
+        // fallback after favorite_/_name, so there's no need to invent a
+        // "favorite" meaning here at all -- rawLabel is stored exactly as
+        // spoken. This means favorite_<label> is now created ONLY when the
+        // user's own words literally start with "favorite" (rawLabel itself
+        // begins with "favorite", e.g. "my favorite color is teal" ->
+        // rawLabel "favorite color" -> FactKey.custom() already turns that
+        // into "favorite_color" with no special-casing needed).
+        Regex("""\bmy ([a-z ]+?) is ([a-z0-9,'\-/ ]+)""").find(s)?.let {
             val rawLabel = it.groupValues[1].trim()
-            // Don't double-prefix: "my favorite color is X" → "favorite_color", not "favorite_favorite_color"
-            val label = if (rawLabel.startsWith("favorite")) FactKey.custom(rawLabel)
-                        else FactKey.custom("favorite_$rawLabel")
+            val label = FactKey.custom(rawLabel)
             val value = cleanDateValue(it.groupValues[2])
             return label to value
         }
