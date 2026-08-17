@@ -147,10 +147,10 @@ class ScoutFactExtractorTest {
 
     @Test fun `my coworker is Sarah is unaffected -- already extracted by TeachExtractor's generic pattern`() {
         // TeachExtractor.extract() already matches "my X is Y" generically and
-        // writes a real fact for this phrasing (mislabeled as favorite_coworker
-        // rather than coworker_name, a separate pre-existing quirk, out of scope
-        // here) -- so it never reaches looksLikeUnrecognizedTeaching() in
-        // production. Documented here to confirm the new patterns don't
+        // writes a real fact for this phrasing (as a plain coworker key, not
+        // coworker_name -- see TeachExtractorTest for the write-side coverage
+        // of that fix) -- so it never reaches looksLikeUnrecognizedTeaching()
+        // in production. Documented here to confirm the new patterns don't
         // separately (mis)flag it either, since "my coworker is sarah" contains
         // no "is my <relation>" substring at all.
         assertTrue(!ScoutFactExtractor.looksLikeUnrecognizedTeaching(
