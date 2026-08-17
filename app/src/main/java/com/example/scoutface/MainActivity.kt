@@ -97,6 +97,7 @@ import com.example.scoutface.brain.CourtesyIntent
 import com.example.scoutface.brain.MomentCandidate
 import com.example.scoutface.brain.MomentCategory
 import com.example.scoutface.brain.ScoutArrivalLatch
+import com.example.scoutface.brain.ScoutCompanionMemoryEligibility
 import com.example.scoutface.brain.ScoutCompanionMomentsEngine
 import com.example.scoutface.brain.ScoutCourtesyMatcher
 import com.example.scoutface.brain.ScoutMemoryPhraser
@@ -6101,8 +6102,14 @@ Respond only with Scout's next reply.
     ): CompanionSignals {
         // Comfortably longer than the engine's longest category cooldown (24h for
         // Memory) so a still-relevant "last fired" entry is never missed -- not
-        // coupled to that exact constant, just safely larger than it.
-        val noveltyLookbackMs = 48L * 60L * 60L * 1_000L
+        // coupled to that exact constant, just safely larger than it. Widened from
+        // 48h to 30 days: Memory only fires when it happens to out-score every
+        // other category, which real-world usage can easily go several days
+        // without -- a 48h window meant a fact's "recently spoken" signal quietly
+        // expired long before that, silently reverting its staleness clock back to
+        // its original (often very old) TruthDb write time and letting the same
+        // fact win the stalest-wins tie-break again and again across boots.
+        val noveltyLookbackMs = 30L * 24L * 60L * 60L * 1_000L
         val recentMoments = journalDb.getEntriesSince("companion_moment", nowMs - noveltyLookbackMs)
 
         val lastFiredMsByCategory: Map<MomentCategory, Long> = recentMoments
@@ -6122,18 +6129,30 @@ Respond only with Scout's next reply.
         ).size
 
         val msPerDay = 24L * 60L * 60L * 1_000L
-        val staleTaughtFacts = truthDb.getAllEntities().flatMap { entity ->
-            truthDb.getAllFactsWithTimestamp(entity).map { (factKey, _, updatedAt) ->
-                val contentKey = "memory:$entity:$factKey"
-                // "Days since last surfaced" combines both halves of the story:
-                // when the user last taught/changed the fact (TruthDb), and when
-                // Scout last spoke it as a companion moment (JournalDb) -- whichever
-                // is more recent resets the staleness clock.
-                val effectiveLastSurfaced = maxOf(updatedAt, lastFiredMsByContentKey[contentKey] ?: 0L)
-                val days = ((nowMs - effectiveLastSurfaced) / msPerDay).toInt().coerceAtLeast(0)
-                StaleFact(contentKey = contentKey, daysSinceLastSurfaced = days)
+        // Memory-eligibility filtering, real-device findings:
+        //  - ENTITY_SCOUT is excluded the same way getAllKnownFacts() already
+        //    excludes it elsewhere in this file -- Scout's own facts (e.g. its own
+        //    name) must never be offered as an "I've been thinking about
+        //    something you told me..." callback.
+        //  - Bootstrap/identity keys and person-ranking favorite_<relation-word>
+        //    keys are excluded via ScoutCompanionMemoryEligibility -- see its doc
+        //    comment for the full "your favorite son is Elijah" trace.
+        val staleTaughtFacts = truthDb.getAllEntities()
+            .filter { it != ENTITY_SCOUT }
+            .flatMap { entity ->
+                truthDb.getAllFactsWithTimestamp(entity)
+                    .filter { (factKey, _, _) -> ScoutCompanionMemoryEligibility.isCompanionMemoryEligible(factKey) }
+                    .map { (factKey, _, updatedAt) ->
+                        val contentKey = "memory:$entity:$factKey"
+                        // "Days since last surfaced" combines both halves of the story:
+                        // when the user last taught/changed the fact (TruthDb), and when
+                        // Scout last spoke it as a companion moment (JournalDb) -- whichever
+                        // is more recent resets the staleness clock.
+                        val effectiveLastSurfaced = maxOf(updatedAt, lastFiredMsByContentKey[contentKey] ?: 0L)
+                        val days = ((nowMs - effectiveLastSurfaced) / msPerDay).toInt().coerceAtLeast(0)
+                        StaleFact(contentKey = contentKey, daysSinceLastSurfaced = days)
+                    }
             }
-        }
 
         val curiosityContentKey = "curiosity:light_question"
         val lastCuriosityMs = lastFiredMsByContentKey[curiosityContentKey]
