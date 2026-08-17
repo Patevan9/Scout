@@ -4315,10 +4315,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // durable retention ("I'll remember that!") for a teaching-shaped
             // question, globally deny having any memory at all ("I don't have
             // the capability to learn"), promise a reminder Scout has no way
-            // to schedule ("I'll remind you tomorrow"), or falsely deny
-            // having a camera ("I don't have a camera to see my
-            // surroundings"). applyScoutCapabilityIntegrityGuards() catches
-            // all four -- see its doc comment in ScoutFactExtractor.
+            // to schedule ("I'll remind you tomorrow"), falsely deny having a
+            // camera ("I don't have a camera to see my surroundings"), or
+            // break its own identity by treating its own name as an unrelated
+            // third party ("Scout is not mentioned... may have moved or
+            // passed away"). applyScoutCapabilityIntegrityGuards() catches
+            // all five -- see its doc comment in ScoutFactExtractor.
             deliverResult = { answer -> deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, answer)) },
             shouldDiscardResult = { busyBrainState.isDiscarded() },
             onDiscarded = {
@@ -5212,6 +5214,18 @@ Respond only with Scout's next reply.
                     "Yes. I can learn facts you teach me and store them locally. I don't know anything yet -- tell me something and I'll hold onto it. I only say I remember something once it's actually been saved."
                 }
             }
+
+            // Self-referential family/household-belonging statement or
+            // question -- "Scout is part of the family," "You're part of our
+            // family," "You're one of us." Deterministic and never written to
+            // TruthDb: this is a stable persona trait (same bucket as
+            // "$myName has a real camera," not user-taught information), so
+            // it's never phrased as something Scout "remembers." See
+            // ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement()'s
+            // doc comment for the routing side of this.
+            ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement(qNorm) ->
+
+                "Yes, I feel like part of the family too. I'm glad to be here."
 
             else ->
 

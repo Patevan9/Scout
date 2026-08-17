@@ -1,6 +1,7 @@
 package com.example.scoutface.brain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -401,5 +402,103 @@ class ScoutFactExtractorTest {
             "I don't see anything I recognize right now."
         )
         assertEquals("I don't see anything I recognize right now.", out)
+    }
+
+    // --- looksLikeSelfFamilyBelongingStatement() -- self-referential
+    // family/household-belonging statements and questions. Real-device
+    // finding: "Scout is part of the family," "You're part of our family,"
+    // and "You're one of us" all reached a fact-blind Gemini or an
+    // empty-TruthDb TinyLlama fallback with nothing telling the model that
+    // its own name means itself, producing a reply that treated "Scout" as
+    // an unrelated third party it had no information about. Deliberately
+    // subject-anchored (see the function's doc comment) so a real
+    // FAMILY_NAMES question about OTHER family members never matches here. ---
+
+    @Test fun `self family belonging positives`() {
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout is part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are part of our family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("don't forget you are family too"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout you are part of our family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are one of us"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("are you part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("is scout part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("are you family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout is family too"))
+    }
+
+    @Test fun `self family belonging adversarial -- other subjects never match`() {
+        // The real FAMILY_NAMES trigger from PR #45 -- subject is "who," not
+        // Scout/you, so it must keep routing to FAMILY_NAMES, not IDENTITY.
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout who is a part of my family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("who is a part of my family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("is my family okay"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("my dog is part of the family too"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("nicolas is part of our family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("one of us has to tell you the truth"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("my family loves having scout around"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("tell me about my family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("what are the names in my family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are one of a kind"))
+    }
+
+    // --- containsSelfThirdPersonConfusion() -- Layer-2 backstop for a self/
+    // third-person identity break. Deliberately conservative per Patrick's
+    // explicit instruction: generic phrases like "the context provided" or
+    // "the given text" must NOT be blocked on their own, since they can
+    // appear in an otherwise legitimate answer -- every pattern below
+    // requires Scout's own name to be the direct subject of the denial or
+    // disappearance language itself. ---
+
+    @Test fun `the actual reported real-device reply is caught`() {
+        val reply = "I don't have access to your personal information or the context in which Scout " +
+            "was mentioned. However, based on the given text, Scout is not mentioned in the context " +
+            "of any personal information or events. It's possible that Scout has moved or passed " +
+            "away, but there is no indication of that in the given text."
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion(reply))
+    }
+
+    @Test fun `self third person confusion positives`() {
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion("Scout may have moved to a new home."))
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion("I'm not sure, but Scout might have passed away."))
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion("There's no indication of Scout in this data."))
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion("Scout is no longer around."))
+        assertTrue(ScoutFactExtractor.containsSelfThirdPersonConfusion("Scout is not with the family anymore."))
+    }
+
+    @Test fun `self third person confusion adversarial -- generic phrases alone are never enough`() {
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Based on the context provided, your dog's name is Nicolas."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Based on the given text, here's what I found about your schedule."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "I don't have access to your personal information about your neighbor."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion("My name is Scout."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Scout loves spending time with the family."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Scout mentioned you have a dog named Nicolas."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "I have no information about Scout's schedule today."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Scout has learned a lot about your family."))
+        assertFalse(ScoutFactExtractor.containsSelfThirdPersonConfusion(
+            "Scout is no longer confused about the question."))
+    }
+
+    @Test fun `the combined guard replaces a self third person confusion reply`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "scout is part of the family",
+            "Scout is not mentioned in the given text."
+        )
+        assertEquals(ScoutFactExtractor.SELF_IDENTITY_CLARIFICATION, out)
+    }
+
+    @Test fun `the combined guard leaves an unrelated reply untouched by the identity check`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "what is my dog's name",
+            "Your dog's name is Nicolas."
+        )
+        assertEquals("Your dog's name is Nicolas.", out)
     }
 }

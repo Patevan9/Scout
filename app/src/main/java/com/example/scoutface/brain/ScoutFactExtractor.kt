@@ -113,6 +113,13 @@ object ScoutFactExtractor {
     const val VISION_CAPABILITY_CLARIFICATION =
         "Actually, I do have a real camera -- I might not always recognize what I'm seeing, but I can see."
 
+    // Layer-2 replacement for a self/third-person identity break (see
+    // containsSelfThirdPersonConfusion() below) -- brings Scout back into
+    // first person rather than leaving a reply that treated its own name as
+    // an unrelated third party, or speculated about its own absence.
+    const val SELF_IDENTITY_CLARIFICATION =
+        "That's me you're asking about -- I'm right here, I haven't gone anywhere."
+
     // Self-referential "are you even capable of learning/remembering" questions
     // -- "Can you learn?", "Do you have a memory?", "Are you capable of
     // remembering?". Deliberately narrow modal/capability phrasing, gated so a
@@ -237,6 +244,56 @@ object ScoutFactExtractor {
         Regex("""\bi (?:cannot|can't|can not) see\b(.*)$"""),
         Regex("""\bi'?m unable to see\b(.*)$"""),
         Regex("""\bi am unable to see\b(.*)$""")
+    )
+
+    // Layer 1: self-referential family/household-belonging statements and
+    // questions -- "Scout is part of the family," "You're part of our
+    // family," "You're one of us." Deliberately subject-anchored (the
+    // belonging phrase must sit directly next to "you are"/"scout is"/"are
+    // you"/"is scout") rather than a loose "self-word anywhere + topic-word
+    // anywhere" check like ScoutMemoryGate's -- that looser shape would also
+    // catch "Scout, who is a part of my family?" (subject is "who," a real
+    // FAMILY_NAMES question about OTHER members, already fixed in PR #45),
+    // which must keep routing there, not here. Matched against real-device
+    // finding: these phrasings previously matched no router intent and no
+    // ScoutMemoryGate self+topic pair (no "you"/"my"/etc. present in "Scout
+    // is part of the family," and no topic word at all in "You're one of
+    // us"), so they reached a fact-blind Gemini or a TruthDb-empty TinyLlama
+    // fallback with nothing grounding Scout's own identity -- see
+    // MainActivity.handleIdentityIntent() for the deterministic answer this
+    // routes to. "scout" is matched as a literal, not the configured/renamed
+    // name, matching existing precedent elsewhere in ScoutIntentRouter (e.g.
+    // GREET's "hi scout"/"hello scout"/"hey scout").
+    private val SELF_FAMILY_BELONGING_PATTERNS = listOf(
+        Regex("""\byou are part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\bscout is part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\byou are family too\b"""),
+        Regex("""\bscout is family too\b"""),
+        Regex("""\byou are one of (?:the family|us)\b"""),
+        Regex("""\bscout is one of (?:the family|us)\b"""),
+        Regex("""\bare you part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\bis scout part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\bare you (?:family|one of (?:the family|us))\b""")
+    )
+
+    // Layer 2: a strong, unambiguous indication that a generative reply broke
+    // Scout's own identity -- referring to itself as an unrelated third party
+    // it has no information about, or speculating that it "moved" or "passed
+    // away." Deliberately conservative and NOT a generic document-analysis
+    // phrase list: something like "based on the given text" or "the context
+    // provided" can legitimately appear in an otherwise correct answer (e.g.
+    // "Based on the context provided, your dog's name is Nicolas"), so those
+    // phrases alone are never enough here. Every pattern below requires
+    // Scout's own name to be the direct grammatical subject of the
+    // denial/analysis/disappearance language itself, not just present
+    // somewhere else in the same reply -- see containsSelfThirdPersonConfusion()'s
+    // doc comment for the real-device finding this backstops.
+    private val SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS = listOf(
+        Regex("""\bscout (?:is not|isn't|was not|wasn't) mentioned\b"""),
+        Regex("""\bcontext in which scout was mentioned\b"""),
+        Regex("""\bno (?:indication|information|mention) of scout\b"""),
+        Regex("""\bscout (?:has|have|had|may(?:\s+have)?|might(?:\s+have)?|could(?:\s+have)?) (?:moved|relocated|passed away|died|left)\b"""),
+        Regex("""\bscout (?:is|was) (?:no longer|not) (?:around|here|with (?:us|the family))\b""")
     )
 
     private val DATE_VALUE = Regex(
@@ -508,19 +565,52 @@ object ScoutFactExtractor {
         return false
     }
 
+    // Layer 1: is [clean] a self-referential family/household-belonging
+    // statement or question -- see SELF_FAMILY_BELONGING_PATTERNS' doc
+    // comment above for the real-device finding and the false-positive
+    // reasoning. Callers route a match to IntentType.IDENTITY for a
+    // deterministic answer -- see MainActivity.handleIdentityIntent().
+    // [clean] is expected to already be TextNormalizer-normalized (lowercase,
+    // contractions expanded), matching looksLikeMemoryCapabilityQuestion()'s
+    // convention.
+    fun looksLikeSelfFamilyBelongingStatement(clean: String): Boolean =
+        SELF_FAMILY_BELONGING_PATTERNS.any { it.containsMatchIn(clean) }
+
+    // Layer 2: does [reply] contain a strong, unambiguous break in Scout's own
+    // identity -- referring to itself by name as an unrelated third party it
+    // has no information about ("Scout is not mentioned," "the context in
+    // which Scout was mentioned"), or speculating about its own absence
+    // ("Scout may have moved or passed away," "Scout is no longer around")?
+    // Real-device finding: asked a self-referential family-belonging question
+    // that reached a fact-blind Gemini or an empty-TruthDb TinyLlama fallback
+    // with nothing telling the model that its own name mentioned in the
+    // conversation means itself, the model treated the transcript as "the
+    // given text" to search for a third party named Scout, found nothing, and
+    // free-associated mundane real-world absence explanations ("moved,"
+    // "passed away") about itself. See SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS'
+    // doc comment for why this is deliberately narrow, unlike a generic
+    // "sounds like document analysis" phrase list -- every pattern requires
+    // Scout's own name to be the direct subject of the denial/disappearance
+    // language, so a legitimate answer that happens to say "based on the
+    // given text" about something else entirely is never blocked here.
+    fun containsSelfThirdPersonConfusion(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        return SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS.any { it.containsMatchIn(lower) }
+    }
+
     // Combined Layer-2 output guard for the generative (Gemini/TinyLlama)
     // fallback paths -- see MainActivity's two deliverAiResult() call sites.
-    // Renamed from applyMemoryIntegrityGuards() now that it also covers
-    // vision-capability denial, not just memory/reminders. Order: capability-
-    // denial, reminder-promise, and vision-denial checks all run
-    // unconditionally on every reply (none has a legitimate global reading
-    // once matched, so no input-shape gate is needed, unlike the
-    // retention-claim guard below). applyRetentionClaimGuard() keeps its own
-    // existing teaching-shaped gate, unchanged from its original PR.
+    // Order: capability-denial, reminder-promise, vision-denial, and
+    // self-third-person-confusion checks all run unconditionally on every
+    // reply (none has a legitimate global reading once matched, so no
+    // input-shape gate is needed, unlike the retention-claim guard below).
+    // applyRetentionClaimGuard() keeps its own existing teaching-shaped gate,
+    // unchanged from its original PR.
     fun applyScoutCapabilityIntegrityGuards(originalInput: String, reply: String): String {
         if (containsCapabilityDenial(reply)) return MEMORY_CAPABILITY_CLARIFICATION
         if (containsReminderPromise(reply)) return REMINDER_NOT_AVAILABLE
         if (containsVisionCapabilityDenial(reply)) return VISION_CAPABILITY_CLARIFICATION
+        if (containsSelfThirdPersonConfusion(reply)) return SELF_IDENTITY_CLARIFICATION
         return applyRetentionClaimGuard(originalInput, reply)
     }
 

@@ -347,4 +347,44 @@ class ScoutIntentRouterTest {
     @Test fun `look around still routes to VISION`() {
         assertEquals(IntentType.VISION, ScoutIntentRouter.route("Look around"))
     }
+
+    // --- New self/family-belonging routing: real-device finding that
+    // self-referential statements/questions like "Scout is part of the
+    // family" and "You're one of us" matched no router intent and no
+    // ScoutMemoryGate self+topic pair, reaching a fact-blind Gemini or an
+    // empty-TruthDb TinyLlama fallback with nothing grounding Scout's own
+    // identity. Passed here already contraction-expanded ("you are," not
+    // "you're"), matching the real pipeline: ScoutIntentRouter.route()
+    // always receives TextNormalizer's output, which already expands
+    // "you're" -> "you are" before routing ever sees it -- see
+    // ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement()'s doc
+    // comment. ---
+
+    @Test fun `scout is part of the family routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("scout is part of the family"))
+    }
+
+    @Test fun `you are part of our family routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("you are part of our family"))
+    }
+
+    @Test fun `you are one of us routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("you are one of us"))
+    }
+
+    @Test fun `dont forget you are family too routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("don't forget you are family too"))
+    }
+
+    // --- Adversarial: a real FAMILY_NAMES question, including with the wake
+    // word, must keep routing to FAMILY_NAMES rather than being swept into
+    // the new self-belonging IDENTITY check. ---
+
+    @Test fun `scout who is a part of my family still routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("scout who is a part of my family"))
+    }
+
+    @Test fun `who is a part of my family still routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who is a part of my family"))
+    }
 }
