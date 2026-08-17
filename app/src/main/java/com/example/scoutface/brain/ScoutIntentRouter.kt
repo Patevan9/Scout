@@ -29,6 +29,18 @@ object ScoutIntentRouter {
             return IntentType.IDENTITY
         }
 
+        // Self-referential "are you even capable of learning/remembering"
+        // questions -- "Can you learn?", "Do you have a memory?" -- routed to
+        // IDENTITY for a deterministic, TruthDb-grounded answer instead of
+        // reaching Gemini/TinyLlama, which (confirmed on a real device) can
+        // default to describing itself as an ordinary AI model with no
+        // memory. Deliberately excludes specific-referent phrasings ("can you
+        // remember my birthday," "can you remember to grab milk") -- see
+        // ScoutFactExtractor.looksLikeMemoryCapabilityQuestion()'s doc comment.
+        if (ScoutFactExtractor.looksLikeMemoryCapabilityQuestion(clean)) {
+            return IntentType.IDENTITY
+        }
+
         // "what are the names in my family" / "who's in my family" -- a summary across
         // wife/son/dog, checked before the individual wife/son/dog checks below since
         // it doesn't name any one relation specifically.
