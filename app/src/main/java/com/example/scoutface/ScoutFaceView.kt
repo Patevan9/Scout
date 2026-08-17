@@ -1220,9 +1220,19 @@ class ScoutFaceView @JvmOverloads constructor(
         // Gaze-driven face drift: face slowly follows where the eyes are pointing.
         // Thinking uses 220ms tau so the face catches up within the short glance window.
         // Face-tracking of a real person uses 900ms — natural "head turns to look" lag.
+        // Amplitude tune (conservative first pass): 0.32/0.26 → 0.60/0.38. At
+        // lookX/Y's max (±80/±55), the old coefficients capped whole-face travel
+        // at ~26/14 virtual px on a 1920x1080 canvas -- under 1.5% of screen
+        // width, effectively unreadable on a real device even though the eyes
+        // (which travel at lookX*1.10 in drawEye()) were clearly moving. Raising
+        // just this coefficient is safe: sockets sit with ~340px of margin to the
+        // canvas edge at neutral, so even the new max travel (~48/21px) leaves a
+        // wide margin, and every other feature keyed off faceCx/faceCy (both
+        // sockets, both brows, the mouth) rides along automatically since they
+        // already derive from it -- no other animation logic changed.
         val gazeDriftTau = if (vThinking) 220f else 900f
-        faceGazeDriftX += (lookX * 0.32f - faceGazeDriftX) * smoothAlpha(dtMs, gazeDriftTau)
-        faceGazeDriftY += (lookY * 0.26f - faceGazeDriftY) * smoothAlpha(dtMs, gazeDriftTau)
+        faceGazeDriftX += (lookX * 0.60f - faceGazeDriftX) * smoothAlpha(dtMs, gazeDriftTau)
+        faceGazeDriftY += (lookY * 0.38f - faceGazeDriftY) * smoothAlpha(dtMs, gazeDriftTau)
 
         // FIX 2: spring tuned for snappier iris motion.
         // springK 0.24 → 0.28 — faster acceleration toward gaze target.
