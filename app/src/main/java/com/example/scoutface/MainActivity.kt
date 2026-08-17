@@ -3630,7 +3630,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 thinkingStartedMs = 0L
                 wantListening = true
                 faceView.setSpeaking(false)
-                faceView.setThinking(false)
+                refreshThinkingFaceState()
             }
 
             // If TinyLlama hung and never called respond(), isThinking stays true forever
@@ -3640,7 +3640,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 isThinking = false
                 thinkingStartedMs = 0L
                 wantListening = true
-                faceView.setThinking(false)
+                refreshThinkingFaceState()
                 scheduleListenRestart(immediate = true)
             }
 
@@ -3657,6 +3657,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (busyBrainState.isStuck(now, MAX_THINKING_DURATION_MS)) {
                 if (busyBrainState.discard(BusyBrainDiscardReason.TIMEOUT)) {
                     journalDb.add("Busy-Brain watchdog: pending generation stuck — discarding.")
+                    refreshThinkingFaceState()
                 }
             }
 
@@ -3787,7 +3788,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     isThinking = false
 
-                    faceView.setThinking(false)
+                    refreshThinkingFaceState()
 
                     if (captionsEnabled) {
                         handler.postDelayed(captionHideRunnable, 2500L)
@@ -3842,7 +3843,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     isThinking = false
 
-                    faceView.setThinking(false)
+                    refreshThinkingFaceState()
 
                     // TTS never finished, so no reply window should open for it --
                     // just clear the flag rather than leave it to misattribute later.
@@ -3986,7 +3987,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         isSpeaking = true
         speakingStartedMs = System.currentTimeMillis()
 
-        faceView.setThinking(false)
+        refreshThinkingFaceState()
 
         if (captionsEnabled) {
             handler.removeCallbacks(captionHideRunnable)
@@ -4040,7 +4041,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 speakingStartedMs = 0L
                 wantListening = true
                 faceView.setSpeaking(false)
-                faceView.setThinking(false)
+                refreshThinkingFaceState()
                 scheduleListenRestart(immediate = true)
             }
 
@@ -4175,6 +4176,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // prefix.
     private fun deliverAiResult(answer: String) {
         busyBrainState.complete()
+        refreshThinkingFaceState()
         if (ScoutBusyBrainDelivery.shouldQueue(isSpeaking, isThinking)) {
             pendingAiAnswer = answer
         } else {
@@ -4326,6 +4328,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             onDiscarded = {
                 busyBrainState.discardReason?.let { diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.GEMINI) }
                 busyBrainState.complete()
+                refreshThinkingFaceState()
             }
         )
 
@@ -4403,6 +4406,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // so free the gate here. Harmless no-op on a fresh dispatch
                 // (isPending is already false in that case).
                 busyBrainState.complete()
+                // speakUnavailableIfNeeded() already spoke (and refreshed the
+                // face) above -- that refresh ran before isPending flipped
+                // false here, so a second refresh is needed or the face could
+                // be left showing "thinking" after this generation's slot is
+                // actually free.
+                refreshThinkingFaceState()
                 return
             }
         }
@@ -4550,6 +4559,7 @@ Respond only with Scout's next reply.
                         diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.TINYLLAMA)
                     }
                     busyBrainState.complete()
+                    refreshThinkingFaceState()
                     return@generateAsync
                 }
 
@@ -4588,6 +4598,11 @@ Respond only with Scout's next reply.
             // respond() directly, for the same TTS-collision safety as any
             // other AI-path outcome.
             busyBrainState.complete()
+            // Explicit refresh, not left to deliverAiResult() below --
+            // warmingUpSaidThisSession can make that call conditional
+            // (spoken once per session only), so this branch can return
+            // without ever calling deliverAiResult() at all.
+            refreshThinkingFaceState()
 
             if (!warmingUpSaidThisSession) {
                 warmingUpSaidThisSession = true
@@ -4604,6 +4619,9 @@ Respond only with Scout's next reply.
         if (LlamaEngine.isLoading) {
 
             busyBrainState.complete()
+            // Same reasoning as the branch above -- warmingUpSaidThisSession
+            // can skip deliverAiResult() entirely.
+            refreshThinkingFaceState()
 
             if (!warmingUpSaidThisSession) {
                 warmingUpSaidThisSession = true
@@ -4615,6 +4633,7 @@ Respond only with Scout's next reply.
         }
 
         busyBrainState.complete()
+        refreshThinkingFaceState()
 
         // Nothing available — only report a connectivity problem if online features were
         // actually expected to work. When the user deliberately turned off online features,
@@ -5342,6 +5361,7 @@ Respond only with Scout's next reply.
     private fun discardPendingGenerationForClosedConversation() {
         if (busyBrainState.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED)) {
             journalDb.add("Busy-Brain: pending generation discarded (conversation closed).")
+            refreshThinkingFaceState()
         }
     }
 
@@ -5551,7 +5571,7 @@ Respond only with Scout's next reply.
         isThinking = true
         thinkingStartedMs = System.currentTimeMillis()
 
-        faceView.setThinking(true)
+        refreshThinkingFaceState()
 
         // Busy-Brain PR 2: teaching/forgetting/corrections are memory writes,
         // deliberately not on the approved safe-while-pending list -- skipped
@@ -5903,7 +5923,30 @@ Respond only with Scout's next reply.
 
     private fun finishThinking() {
         isThinking = false
-        faceView.setThinking(false)
+        refreshThinkingFaceState()
+    }
+
+    // Thinking-face lifecycle fix: the face's visual thinking state used to
+    // be tied 1:1 to isThinking, which finishThinking() clears the moment a
+    // Gemini/TinyLlama request actually dispatches -- deliberately early, so
+    // maybeStartListening()'s `if (isThinking) return` gate doesn't block the
+    // mic from reopening for Busy-Brain's "ask a follow-up while I'm still
+    // generating" interruption feature. That left the face showing no
+    // thinking cue at all for the entire real generation wait (the part a
+    // user actually perceives), since busyBrainState.isPending -- which
+    // already spans that whole window by design (see ScoutBusyBrainState's
+    // own doc comment) -- was never consulted for the face at all.
+    //
+    // This derives the face's thinking visual from BOTH existing signals
+    // without changing what either one means or how long it lasts: isThinking
+    // keeps gating the microphone exactly as before, busyBrainState.isPending
+    // keeps tracking the real generation window exactly as before. No new
+    // persistent state -- purely a read of the two existing booleans, called
+    // anywhere either one changes so the face never goes stale. Redundant
+    // calls (e.g. right after a downstream call that will also refresh) are
+    // intentional and harmless, not accidental duplication.
+    private fun refreshThinkingFaceState() {
+        faceView.setThinking(isThinking || busyBrainState.isPending)
     }
 
     // =======================
