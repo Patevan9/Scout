@@ -18,6 +18,25 @@ object ScoutPromptBuilder {
 
     private const val ENTITY_SCOUT = "scout"
 
+    // Secondary reinforcement only -- NOT the guarantee that Scout never
+    // falsely denies having a camera (that's ScoutVisionGate's deterministic
+    // routing plus ScoutFactExtractor.containsVisionCapabilityDenial()'s
+    // Layer-2 output guard, both unaffected by prompt wording). This line
+    // exists solely to reduce how often the guard even needs to fire.
+    //
+    // Deliberately distinguishes two separate truths, since conflating them
+    // is what caused the original false "I don't have a camera" reply: (1)
+    // Scout the app/device genuinely has a real camera and local vision
+    // system -- Gemini must never deny that -- but (2) THIS Gemini request
+    // carries no live camera frame or scene data, so Gemini must not invent
+    // a current visual observation either. A model told only "you can see"
+    // with no data attached could just as easily hallucinate a fake scene
+    // description as deny having eyes at all -- this line heads off both
+    // failure modes, not just the one originally reported.
+    const val GEMINI_VISION_CAPABILITY_LINE =
+        "Scout has a real camera and local vision system. Do not claim Scout has no camera or no vision capability. " +
+        "You do not receive the live camera view in this request, so never invent or claim current visual observations unless they were explicitly provided to you."
+
     fun buildSystemInstruction(
         truthDb: TruthDb,
         habitLayer: HabitLayer
@@ -31,6 +50,8 @@ You are $scoutName, a calm, friendly family companion robot.
 Be concise, safe, and helpful. If you don't know, say you don't know.
 
 Do not claim abilities you don't have.
+
+$GEMINI_VISION_CAPABILITY_LINE
 
 Keep responses short (1–3 sentences) unless asked for more. Always end on a complete sentence — never stop mid-sentence.
 

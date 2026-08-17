@@ -273,4 +273,78 @@ class ScoutIntentRouterTest {
     @Test fun `do you remember the movie does not route to IDENTITY`() {
         assertNotEquals(IntentType.IDENTITY, ScoutIntentRouter.route("Do you remember the movie?"))
     }
+
+    // --- New FAMILY_NAMES routing: natural family-roster phrasings that
+    // don't match any single relation word. Real-device finding: these fell
+    // through to UNKNOWN, reached TinyLlama with only a flat fact dump, and
+    // produced a hallucinated generic answer ("some popular names for
+    // families include..."). handleFamilyNamesQuery() is fully deterministic. ---
+
+    @Test fun `what names do you know in my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("What names do you know in my family?"))
+    }
+
+    @Test fun `who in my family do you know routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("Who in my family do you know?"))
+    }
+
+    @Test fun `tell me the names of my family routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("Tell me the names of my family"))
+    }
+
+    @Test fun `which family members do you know routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("Which family members do you know?"))
+    }
+
+    // False positives: ordinary mentions of "family" that aren't a roster
+    // request must not be swept into FAMILY_NAMES.
+
+    @Test fun `what is my family doing this weekend does not route to FAMILY_NAMES`() {
+        assertNotEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("What is my family doing this weekend?"))
+    }
+
+    @Test fun `what's a good family name for a dog does not route to FAMILY_NAMES`() {
+        assertNotEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("What's a good family name for a dog?"))
+    }
+
+    @Test fun `do you know if my family is coming over does not route to FAMILY_NAMES`() {
+        assertNotEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("Do you know if my family is coming over?"))
+    }
+
+    @Test fun `is my family okay does not route to FAMILY_NAMES`() {
+        assertNotEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("Is my family okay?"))
+    }
+
+    // --- New VISION routing: natural phrasings that don't match the existing
+    // "what/can you see"/"look around"/"describe" checks. Real-device
+    // finding: "Do you see anything?" and "Who's/What's in front of you?"
+    // fell through to UNKNOWN, with no vision signal in ScoutMemoryGate's
+    // vocabulary, reached fact-blind Gemini directly, and produced a false
+    // "I don't have a camera" reply. ---
+
+    @Test fun `do you see anything routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("Do you see anything?"))
+    }
+
+    @Test fun `who's in front of you routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("Who's in front of you?"))
+    }
+
+    @Test fun `can you see anyone routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("Can you see anyone?"))
+    }
+
+    @Test fun `what's in front of you routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("What's in front of you?"))
+    }
+
+    // --- VISION regression: existing phrasing routes exactly as before ---
+
+    @Test fun `what do you see still routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("What do you see?"))
+    }
+
+    @Test fun `look around still routes to VISION`() {
+        assertEquals(IntentType.VISION, ScoutIntentRouter.route("Look around"))
+    }
 }

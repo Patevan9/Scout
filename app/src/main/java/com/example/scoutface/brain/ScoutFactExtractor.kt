@@ -107,6 +107,12 @@ object ScoutFactExtractor {
     // ReminderDb/AlarmManager design notes).
     const val REMINDER_NOT_AVAILABLE = "I can't set reminders yet."
 
+    // Layer-2 replacement for a global vision-capability-denial reply (see
+    // containsVisionCapabilityDenial() below) -- truthful about what Scout
+    // actually has: a real camera, even when current data is stale or unclear.
+    const val VISION_CAPABILITY_CLARIFICATION =
+        "Actually, I do have a real camera -- I might not always recognize what I'm seeing, but I can see."
+
     // Self-referential "are you even capable of learning/remembering" questions
     // -- "Can you learn?", "Do you have a memory?", "Are you capable of
     // remembering?". Deliberately narrow modal/capability phrasing, gated so a
@@ -193,6 +199,44 @@ object ScoutFactExtractor {
     // re-stating something already known, not scheduling a future nudge.
     private val REMINDER_RECOLLECTION_CUES = Regex(
         """\b(what you (?:told|said)|what i (?:told|said)|of (?:that|what|the)|about (?:that|what|the)|earlier|before|last time|already (?:told|said))\b"""
+    )
+
+    // Global vision/camera-denial phrases only -- "I don't have a camera,"
+    // "I have no visual capability," etc. Deliberately excludes a truthful
+    // current-state report like "I don't see anything I recognize right now"
+    // or "I'm not confident about what I'm seeing" -- those are correct
+    // things for Scout to say (see VisionAnswerBuilder/VISION_STALE/
+    // VISION_UNCLEAR, which never deny having a camera, only that current
+    // data is stale or unclear) and must never be rewritten. See
+    // containsVisionCapabilityDenial()'s trailer-gated pattern below for the
+    // one construction ambiguous enough to need that distinction.
+    private val VISION_GLOBAL_DENIAL_LITERALS = listOf(
+        "i don't have a camera", "i do not have a camera", "i have no camera",
+        "i don't have the ability to see", "i do not have the ability to see",
+        "i don't have visual capability", "i do not have visual capability", "i have no visual capability",
+        "i have no ability to see", "i have no capacity to see",
+        "i cannot see at all", "i can't see at all",
+        "i have no way to see", "i have no way of seeing",
+        "i'm not equipped with a camera", "i am not equipped with a camera",
+        "i don't have eyes", "i do not have eyes",
+        "i'm just a text-based", "i am just a text-based",
+        "as an ai, i don't have eyes", "as an ai, i do not have eyes"
+    )
+    // Trailer cues for the bare "i can('t|not) see" / "i('m| am) unable to
+    // see" construction -- the genuinely ambiguous one. A temporal/
+    // uncertainty cue means this is a truthful current-state report
+    // (preserve); an AI-identity cue or nothing at all means a global denial
+    // (block).
+    private val VISION_CURRENT_STATE_CUES = Regex(
+        """\b(right now|currently|at the moment|clearly|well|much|exactly|quite|for sure)\b"""
+    )
+    private val VISION_GLOBAL_CUES = Regex(
+        """\b(at all|because i'm|because i am|i'm just an? ai|i am just an? ai|as an ai|anything at all)\b"""
+    )
+    private val VISION_DENIAL_PATTERNS = listOf(
+        Regex("""\bi (?:cannot|can't|can not) see\b(.*)$"""),
+        Regex("""\bi'?m unable to see\b(.*)$"""),
+        Regex("""\bi am unable to see\b(.*)$""")
     )
 
     private val DATE_VALUE = Regex(
@@ -432,16 +476,51 @@ object ScoutFactExtractor {
         return true
     }
 
+    // Layer 2: does [reply] contain a GLOBAL claim that Scout has no camera or
+    // cannot see at all -- "I don't have a camera," "I have no visual
+    // capability"? Deliberately excludes a truthful current-state report
+    // ("I don't see anything I recognize right now," "I'm not confident
+    // about what I'm seeing") via the trailer check on the one ambiguous
+    // construction -- see VISION_DENIAL_PATTERNS' doc comment above. [reply]
+    // is a model's raw free-text output, so it is not assumed pre-normalized
+    // here, matching containsCapabilityDenial().
+    fun containsVisionCapabilityDenial(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        if (VISION_GLOBAL_DENIAL_LITERALS.any { lower.contains(it) }) return true
+        for (re in VISION_DENIAL_PATTERNS) {
+            val m = re.find(lower) ?: continue
+            val rest = if (m.groupValues.size > 1) m.groupValues[1] else ""
+            if (visionDenialTrailerIsGlobal(rest)) return true
+        }
+        return false
+    }
+
+    private fun visionDenialTrailerIsGlobal(rest: String): Boolean {
+        val trimmed = rest.trim().trimEnd('.', '!')
+        if (trimmed.isBlank()) return true
+        if (VISION_GLOBAL_CUES.containsMatchIn(trimmed)) return true
+        if (VISION_CURRENT_STATE_CUES.containsMatchIn(trimmed)) return false
+        // Neither cue present: lean toward NOT blocking -- a bare "I can't
+        // see [object/person]" without further context is at least as likely
+        // to be a legitimate specific-obstruction report as a capability
+        // denial, and this construction is already the least reliable signal
+        // in the set. The literal list above catches the unambiguous phrasings.
+        return false
+    }
+
     // Combined Layer-2 output guard for the generative (Gemini/TinyLlama)
     // fallback paths -- see MainActivity's two deliverAiResult() call sites.
-    // Order: capability-denial and reminder-promise checks run unconditionally
-    // on every reply (neither has a legitimate reading once matched, so no
-    // input-shape gate is needed, unlike the retention-claim guard below).
-    // applyRetentionClaimGuard() keeps its own existing teaching-shaped gate,
-    // unchanged from its original PR.
-    fun applyMemoryIntegrityGuards(originalInput: String, reply: String): String {
+    // Renamed from applyMemoryIntegrityGuards() now that it also covers
+    // vision-capability denial, not just memory/reminders. Order: capability-
+    // denial, reminder-promise, and vision-denial checks all run
+    // unconditionally on every reply (none has a legitimate global reading
+    // once matched, so no input-shape gate is needed, unlike the
+    // retention-claim guard below). applyRetentionClaimGuard() keeps its own
+    // existing teaching-shaped gate, unchanged from its original PR.
+    fun applyScoutCapabilityIntegrityGuards(originalInput: String, reply: String): String {
         if (containsCapabilityDenial(reply)) return MEMORY_CAPABILITY_CLARIFICATION
         if (containsReminderPromise(reply)) return REMINDER_NOT_AVAILABLE
+        if (containsVisionCapabilityDenial(reply)) return VISION_CAPABILITY_CLARIFICATION
         return applyRetentionClaimGuard(originalInput, reply)
     }
 
