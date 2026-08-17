@@ -7,8 +7,9 @@ package com.example.scoutface.brain
  * job -- they only handle the mechanical bits around it: latching a one-frame
  * camera signal until it's actually consumed, recognizing a stale background
  * result, tracking the continuous-presence streak that defines a "session" for
- * curiosity's own bookkeeping, and phrasing a Memory fact honestly for whichever
- * entity it actually belongs to.
+ * curiosity's own bookkeeping, phrasing a Memory fact honestly for whichever
+ * entity it actually belongs to, and deciding which fact keys are even
+ * eligible to be offered as a Memory candidate in the first place.
  */
 
 /**
@@ -99,5 +100,75 @@ object ScoutMemoryPhraser {
     ): String? {
         val possessive = possessive(entity, userEntity, scoutEntity, displayName) ?: return null
         return "$intro $possessive $humanFactKey is $value."
+    }
+}
+
+/**
+ * Companion Moments Memory-category eligibility filter -- decides which
+ * TruthDb fact *keys* are appropriate to resurface as "I've been thinking
+ * about something you told me..." (see MainActivity.buildCompanionSignals(),
+ * the only caller -- ENTITY_SCOUT itself is excluded there, the same way
+ * getAllKnownFacts() already excludes it, so this only needs to reason about
+ * fact keys, not entities). Two independent, real-device-confirmed problems:
+ *
+ * 1. Bootstrap/identity facts ("name", "aliases") are functional data Scout
+ *    needs to operate, not a shared personal memory -- "Your name is
+ *    Patrick" is a poor fit for this feature's intended tone, and tends to
+ *    dominate the Memory category since it's usually the oldest (and
+ *    therefore stalest) fact in the whole database.
+ *
+ * 2. A confirmed, separate real-device finding: TeachExtractor's generic
+ *    "my X is Y" fallback auto-prefixes ANY unrecognized label with
+ *    "favorite_" -- including plain relationship statements that never
+ *    matched a more specific pattern, e.g. "my son is Elijah" (no "'s name
+ *    is") silently becomes favorite_son = "Elijah" rather than son_name =
+ *    "Elijah" (confirmed by tracing TeachExtractor.extract()'s regex chain).
+ *    Rendered through ScoutMemoryPhraser's honest template above, that
+ *    becomes "...your favorite son is Elijah" -- a person-ranking statement
+ *    Scout must never make, especially in a household with more than one
+ *    child. This is a write-path mislabeling bug in TeachExtractor,
+ *    intentionally NOT fixed here (out of scope for this change) -- see the
+ *    PR this shipped in. Filtering here instead is a read-side safety net
+ *    that also covers any other route that could produce the same shape of
+ *    key (e.g. a legitimately-phrased "Diana's favorite family member is
+ *    Elijah"), not just this one write-path bug.
+ *
+ * MEMORY_PERSON_RELATION_WORDS mirrors the union of TeachExtractor's own
+ * RELATION_WORDS and ScoutFactExtractor's PERSON_RELATION_HINTS in this same
+ * package. Duplicated here rather than referenced directly since
+ * TeachExtractor is explicitly out of scope for this change -- widening its
+ * visibility as a side effect of an eligibility-only fix would blur that
+ * boundary. Flagged for a future consolidation pass instead.
+ */
+object ScoutCompanionMemoryEligibility {
+
+    private val MEMORY_BOOTSTRAP_FACT_KEYS = setOf("name", "aliases")
+
+    private val MEMORY_PERSON_RELATION_WORDS = setOf(
+        // TeachExtractor.RELATION_WORDS
+        "wife", "husband", "spouse", "son", "daughter", "kid", "child", "dog", "cat", "pet",
+        // ScoutFactExtractor.PERSON_RELATION_HINTS
+        "friend", "neighbor", "neighbour", "coworker", "colleague", "boss",
+        "roommate", "brother", "sister", "sibling", "cousin", "uncle", "aunt",
+        "grandma", "grandmother", "grandpa", "grandfather", "nephew", "niece",
+        "teacher", "boyfriend", "girlfriend", "fiance", "fiancee", "partner",
+        "babysitter", "nanny", "doctor"
+    )
+
+    /**
+     * True if [factKey] is safe to resurface as a Companion Moment memory --
+     * false for bootstrap/identity keys, and false for any
+     * favorite_<relation-word> key that would imply ranking one person above
+     * others in the same relationship category. Ordinary preferences
+     * ("favorite_color", "favorite_food", ...) stay eligible -- only the
+     * person-ranking shape (the suffix after "favorite_" being a known
+     * relation word) is excluded.
+     */
+    fun isCompanionMemoryEligible(factKey: String): Boolean {
+        val key = factKey.trim().lowercase()
+        if (key in MEMORY_BOOTSTRAP_FACT_KEYS) return false
+        val relationSuffix = key.removePrefix("favorite_")
+        if (relationSuffix != key && relationSuffix in MEMORY_PERSON_RELATION_WORDS) return false
+        return true
     }
 }

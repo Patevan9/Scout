@@ -151,4 +151,71 @@ class ScoutCompanionMomentsWiringTest {
         )
         assertNull(sentence)
     }
+
+    // ---- ScoutCompanionMemoryEligibility ----
+    // Real-device findings: bootstrap/identity facts and person-ranking
+    // favorite_<relation-word> facts must never be offered as a Companion
+    // Moment memory. (ENTITY_SCOUT exclusion itself is a separate,
+    // entity-level filter applied by the caller -- MainActivity -- before any
+    // fact key reaches this eligibility check, so it isn't re-tested here.)
+
+    @Test fun `bootstrap identity keys are not eligible`() {
+        assertFalse(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("name"))
+        assertFalse(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("aliases"))
+    }
+
+    @Test fun `favorite son is not eligible -- the confirmed real-device finding`() {
+        // Traced root cause: TeachExtractor's generic fallback mislabels "my son
+        // is Elijah" as favorite_son = "Elijah" instead of son_name = "Elijah".
+        // Rendered honestly by ScoutMemoryPhraser, that becomes "...your
+        // favorite son is Elijah" -- a person-ranking statement this filter
+        // exists to stop, independent of how the key was created.
+        assertFalse(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("favorite_son"))
+    }
+
+    @Test fun `favorite relation-word keys are not eligible across the whole vocabulary`() {
+        val riskyKeys = listOf(
+            "favorite_son", "favorite_daughter", "favorite_child", "favorite_kid",
+            "favorite_wife", "favorite_husband", "favorite_dog", "favorite_cat", "favorite_pet",
+            "favorite_friend", "favorite_coworker", "favorite_neighbor", "favorite_sister",
+            "favorite_brother", "favorite_cousin", "favorite_teacher", "favorite_boss"
+        )
+        riskyKeys.forEach {
+            assertFalse("expected $it to be ineligible", ScoutCompanionMemoryEligibility.isCompanionMemoryEligible(it))
+        }
+    }
+
+    @Test fun `ordinary object and activity preferences remain eligible`() {
+        val safeKeys = listOf(
+            "favorite_color", "favorite_food", "favorite_movie", "favorite_show",
+            "favorite_place", "favorite_team", "favorite_animal", "favorite_hobby"
+        )
+        safeKeys.forEach {
+            assertTrue("expected $it to remain eligible", ScoutCompanionMemoryEligibility.isCompanionMemoryEligible(it))
+        }
+    }
+
+    @Test fun `dedicated relationship-name keys remain eligible -- only the favorite_ prefix shape is excluded`() {
+        // "Nicolas is your dog" (dog_name) and "your anniversary with Diana is
+        // August 13th" (anniversary) are exactly the kind of meaningful memory
+        // this feature should still be able to surface.
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("dog_name"))
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("wife_name"))
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("son_name"))
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("birthday"))
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("anniversary"))
+    }
+
+    @Test fun `a bare relation word with no favorite_ prefix is unaffected`() {
+        // "son_name" (above) is the real key TeachExtractor should have used;
+        // a literal bare "son" key isn't one this codebase actually produces,
+        // but confirms the filter only excludes the favorite_ shape, not the
+        // word "son" appearing anywhere in a key.
+        assertTrue(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("son"))
+    }
+
+    @Test fun `matching is case-insensitive`() {
+        assertFalse(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("Favorite_Son"))
+        assertFalse(ScoutCompanionMemoryEligibility.isCompanionMemoryEligible("NAME"))
+    }
 }
