@@ -41,6 +41,21 @@ object ScoutIntentRouter {
             return IntentType.IDENTITY
         }
 
+        // Self-referential family/household-belonging statements and
+        // questions -- "Scout is part of the family," "You're part of our
+        // family," "You're one of us." Checked before FAMILY_NAMES below on
+        // purpose: it's subject-anchored (requires "you are"/"scout is"/"are
+        // you"/"is scout" directly against the belonging phrase), so a real
+        // FAMILY_NAMES question like "Scout, who is a part of my family?"
+        // (subject is "who," not Scout itself) never matches here and still
+        // routes to FAMILY_NAMES as before -- see
+        // ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement()'s doc
+        // comment for the real-device finding and full false-positive
+        // reasoning.
+        if (ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement(clean)) {
+            return IntentType.IDENTITY
+        }
+
         // "what are the names in my family" / "who's in my family" -- a summary across
         // wife/son/dog, checked before the individual wife/son/dog checks below since
         // it doesn't name any one relation specifically.
