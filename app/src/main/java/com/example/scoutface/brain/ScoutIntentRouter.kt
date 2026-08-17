@@ -68,7 +68,21 @@ object ScoutIntentRouter {
                 clean.contains("what do you know about my family") ||
                 clean.contains("do you know about my family") ||
                 clean.contains("who do you know in my family")
-            ))
+            )) ||
+            // Real-device finding: "What names do you know in my family?" /
+            // "Who in my family do you know?" / "Tell me the names of my
+            // family" / "Which family members do you know?" all fell through
+            // to UNKNOWN -- caught by ScoutMemoryGate's broad "family" topic
+            // word, but only routed to TinyLlama with a flat fact dump rather
+            // than this deterministic handler, and produced a hallucinated
+            // generic answer ("some popular names for families include...").
+            // Verified against a false-positive set (ordinary "is my family
+            // okay"/"what is my family doing" phrasings) before adding.
+            clean.contains("names do you know in my family") ||
+            clean.contains("who in my family do you know") ||
+            clean.contains("names of my family") ||
+            clean.contains("family members do you know") ||
+            clean.contains("which family members")
         ) {
             return IntentType.FAMILY_NAMES
         }
@@ -236,7 +250,18 @@ clean.contains("go on the internet")
             clean.contains("can you see") ||
             clean.contains("look around") ||
             clean.contains("describe the room") ||
-            clean.contains("describe what you see")
+            clean.contains("describe what you see") ||
+            // Real-device finding: "Do you see anything?" and "Who's/What's
+            // in front of you?" fell through to UNKNOWN -- with no vision
+            // signal in ScoutMemoryGate's vocabulary (by design, see
+            // ScoutVisionGate below), they reached fact-blind, vision-blind
+            // Gemini directly, which produced a false "I don't have a
+            // camera" reply. handleVisionIntent() is fully deterministic and
+            // never denies having a camera, so these must route here.
+            clean.contains("see anything") ||
+            clean.contains("see anyone") ||
+            clean.contains("see anybody") ||
+            clean.contains("in front of you")
         ) {
             return IntentType.VISION
         }

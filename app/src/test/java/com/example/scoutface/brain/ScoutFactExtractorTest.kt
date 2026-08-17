@@ -317,12 +317,38 @@ class ScoutFactExtractorTest {
         assertTrue(!ScoutFactExtractor.containsReminderPromise("I'll remind you what you already told me."))
     }
 
-    // --- applyMemoryIntegrityGuards() -- combines all three checks; each
-    // substitution is independent of whether the input looked teaching-shaped
-    // (unlike the retention-claim guard, which still requires that). ---
+    // --- containsVisionCapabilityDenial() -- global camera/vision denial
+    // only, never a truthful current-state report. ---
+
+    @Test fun `global vision-capability denial phrases are recognized`() {
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I don't have a camera."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I have no visual capability."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I don't have the ability to see."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("As an AI, I don't have eyes or a camera."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I'm just a text-based assistant, so I can't see."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I have no way to see anything."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I can't see."))
+        assertTrue(ScoutFactExtractor.containsVisionCapabilityDenial("I cannot see."))
+    }
+
+    @Test fun `truthful current-state vision reports are never treated as capability denial`() {
+        assertTrue(!ScoutFactExtractor.containsVisionCapabilityDenial("I don't see anything I recognize right now."))
+        assertTrue(!ScoutFactExtractor.containsVisionCapabilityDenial("I'm not confident about what I'm seeing."))
+        assertTrue(!ScoutFactExtractor.containsVisionCapabilityDenial("I can't see clearly at the moment."))
+        assertTrue(!ScoutFactExtractor.containsVisionCapabilityDenial("I don't have a clear view right now."))
+        assertTrue(!ScoutFactExtractor.containsVisionCapabilityDenial("I can't see you very well from this angle."))
+    }
+
+    // --- applyScoutCapabilityIntegrityGuards() -- combines all four checks
+    // (memory-capability, reminder-promise, vision-capability, and the
+    // existing teaching-shaped retention-claim guard); each of the first
+    // three substitutions is independent of whether the input looked
+    // teaching-shaped (unlike the retention-claim guard, which still
+    // requires that). Renamed from applyMemoryIntegrityGuards() now that it
+    // also covers vision. ---
 
     @Test fun `a global capability denial reply is replaced regardless of the question shape`() {
-        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
             "what have you learned today",
             "I do not have the capability to learn or learn from others."
         )
@@ -330,7 +356,7 @@ class ScoutFactExtractorTest {
     }
 
     @Test fun `a reminder scheduling promise reply is replaced regardless of the question shape`() {
-        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
             "remind me about january 27th",
             "Sure, I'll remind you on January 27th!"
         )
@@ -338,7 +364,7 @@ class ScoutFactExtractorTest {
     }
 
     @Test fun `a specific-fact-absence reply is left untouched by the combined guard`() {
-        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
             "do you remember my dog's name",
             "I don't have a memory of that yet."
         )
@@ -346,7 +372,7 @@ class ScoutFactExtractorTest {
     }
 
     @Test fun `ordinary recollection language is left untouched by the combined guard`() {
-        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
             "can you remind me what diana likes",
             "I can remind you of the facts I have about Diana."
         )
@@ -354,10 +380,26 @@ class ScoutFactExtractorTest {
     }
 
     @Test fun `the combined guard still applies the existing teaching-shaped retention-claim check`() {
-        val out = ScoutFactExtractor.applyMemoryIntegrityGuards(
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
             "this is my friend janice",
             "That's nice! I'll remember Janice."
         )
         assertEquals(ScoutFactExtractor.UNRECOGNIZED_TEACHING_CLARIFICATION, out)
+    }
+
+    @Test fun `a global vision-capability denial reply is replaced regardless of the question shape`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "what do you see",
+            "Good morning! I don't have a camera to see my surroundings."
+        )
+        assertEquals(ScoutFactExtractor.VISION_CAPABILITY_CLARIFICATION, out)
+    }
+
+    @Test fun `a truthful current-state vision reply is left untouched by the combined guard`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "what do you see",
+            "I don't see anything I recognize right now."
+        )
+        assertEquals("I don't see anything I recognize right now.", out)
     }
 }

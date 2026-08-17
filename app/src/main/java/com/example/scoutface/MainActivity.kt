@@ -117,6 +117,7 @@ import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
 import com.example.scoutface.brain.ScoutBeepMuteGuard
+import com.example.scoutface.brain.ScoutVisionGate
 import com.example.scoutface.brain.ScoutVoiceSelector
 import com.example.scoutface.brain.VoiceCandidate
 
@@ -4259,6 +4260,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        // Same structural guarantee as the memory gate above, for a distinct
+        // capability: a camera/vision-shaped question that ScoutIntentRouter's
+        // VISION patterns didn't literally match must still never reach
+        // fact-blind, vision-blind Gemini -- real-device finding: Gemini's
+        // system prompt carries no scene/face data and no confirmation Scout
+        // even has a camera, so it falsely claimed "I don't have a camera to
+        // see my surroundings." handleVisionIntent() is fully deterministic
+        // and never denies having a camera, only that current data is stale
+        // or unclear -- see ScoutVisionGate's doc comment for why this is its
+        // own gate rather than folded into ScoutMemoryGate.
+        if (ScoutVisionGate.isPossibleVisionQuery(qNorm.lowercase().trim())) {
+            handleVisionIntent()
+            return
+        }
+
         // Busy-Brain PR 1: never start a second generation while one is
         // already pending. A read-only check -- the actual isPending flip
         // happens below, only once a real generation actually starts (see
@@ -4293,14 +4309,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             },
             onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
             onFailed   = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, false); tryTinyLlamaOrFallback(qNorm) },
-            // Memory-integrity backstop -- Gemini is fact-blind and has no write
-            // path of its own, so a free-text reply could claim durable retention
-            // ("I'll remember that!") for a teaching-shaped question, globally deny
-            // having any memory at all ("I don't have the capability to learn"),
-            // or promise a reminder Scout has no way to schedule ("I'll remind you
-            // tomorrow"). applyMemoryIntegrityGuards() catches all three -- see its
-            // doc comment in ScoutFactExtractor.
-            deliverResult = { answer -> deliverAiResult(ScoutFactExtractor.applyMemoryIntegrityGuards(qNorm, answer)) },
+            // Capability-integrity backstop -- Gemini is fact-blind (and
+            // vision-blind: its system prompt carries no scene/face data) and
+            // has no write path of its own, so a free-text reply could claim
+            // durable retention ("I'll remember that!") for a teaching-shaped
+            // question, globally deny having any memory at all ("I don't have
+            // the capability to learn"), promise a reminder Scout has no way
+            // to schedule ("I'll remind you tomorrow"), or falsely deny
+            // having a camera ("I don't have a camera to see my
+            // surroundings"). applyScoutCapabilityIntegrityGuards() catches
+            // all four -- see its doc comment in ScoutFactExtractor.
+            deliverResult = { answer -> deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, answer)) },
             shouldDiscardResult = { busyBrainState.isDiscarded() },
             onDiscarded = {
                 busyBrainState.discardReason?.let { diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.GEMINI) }
@@ -4542,10 +4561,10 @@ Respond only with Scout's next reply.
                 if (!reply.isNullOrBlank()) {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
                     pendingBrainSource = "TinyLlama (offline)"
-                    // Memory-integrity backstop -- same reasoning as the Gemini
-                    // deliverResult above, applied after the existing
+                    // Capability-integrity backstop -- same reasoning as the
+                    // Gemini deliverResult above, applied after the existing
                     // identity-leak cleanup rather than instead of it.
-                    deliverAiResult(ScoutFactExtractor.applyMemoryIntegrityGuards(qNorm, cleanOfflineReply(reply.trim())))
+                    deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, cleanOfflineReply(reply.trim())))
                 } else {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
                     deliverAiResult("I'm not sure about that one.")
