@@ -337,6 +337,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // already being said.
     private var pendingAiAnswer: String? = null
 
+    // TTS lifecycle diagnostics (instrumentation only -- see DiagLog's
+    // TtsDispatchSource/logTts*() doc comments). ttsDispatchCounter is a
+    // small per-utterance counter, also passed to tts.speak() as the
+    // Android utteranceId (replacing the previous hardcoded constant
+    // "scout", which every utterance shared and which onStart()/onDone()/
+    // onError() never actually read) -- confirmed via a repo-wide search
+    // that no code compares an Android TTS utteranceId against "scout" or
+    // any other literal, so this is inert for existing behavior; it only
+    // makes onStart()/onDone()/onError() able to report which dispatch they
+    // belong to. lastTtsDispatchId/lastTtsDispatchSource are read from those
+    // three callbacks as a fallback when the engine's own echoed
+    // utteranceId can't be parsed, matching the same single-utterance-in-
+    // flight assumption isSpeaking/speakingStartedMs already rely on.
+    private var ttsDispatchCounter = 0
+    private var lastTtsDispatchId = 0
+    private var lastTtsDispatchSource = DiagLog.TtsDispatchSource.NORMAL
+
     // Busy-Brain PR 2 status-feedback strings. Spoken via
     // respond(isStatusOnly = true) -- see that parameter's doc comment for
     // exactly what "status-only" excludes.
@@ -3763,6 +3780,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 override fun onStart(utteranceId: String?) {
 
+                    // TTS lifecycle diagnostics (instrumentation only). Prefers the
+                    // engine's own echoed utteranceId (ground truth for which
+                    // dispatch this callback belongs to); falls back to the last
+                    // dispatch this Activity itself issued if it's missing/
+                    // unparseable, matching the existing single-utterance-in-
+                    // flight assumption isSpeaking/speakingStartedMs already rely on.
+                    diagLog.logTtsStarted(utteranceId?.toIntOrNull() ?: lastTtsDispatchId, lastTtsDispatchSource)
+
                     wantListening = false
 
                     isSpeaking = true
@@ -3783,6 +3808,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val ttsDurationMs = if (speakingStartedMs > 0L)
                         System.currentTimeMillis() - speakingStartedMs else 0L
                     diagLog.logResponseDone(ttsDurationMs)
+                    // TTS lifecycle diagnostics (instrumentation only) -- see onStart()'s
+                    // comment for why utteranceId is preferred over the last-dispatch fallback.
+                    diagLog.logTtsCompleted(utteranceId?.toIntOrNull() ?: lastTtsDispatchId, lastTtsDispatchSource, ttsDurationMs)
                     speakingStartedMs = 0L
 
                     faceView.setSpeaking(false)
@@ -3828,7 +3856,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val queuedAiAnswer = pendingAiAnswer
                     if (queuedAiAnswer != null) {
                         pendingAiAnswer = null
-                        respond(ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true))
+                        respond(
+                            ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true),
+                            ttsSource = DiagLog.TtsDispatchSource.DRAINED_PENDING_ANSWER
+                        )
                     } else {
                         scheduleListenRestart(immediate = true)
                     }
@@ -3836,6 +3867,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 override fun onError(utteranceId: String?) {
+
+                    // TTS lifecycle diagnostics (instrumentation only) -- see onStart()'s
+                    // comment for why utteranceId is preferred over the last-dispatch fallback.
+                    diagLog.logTtsFailed(utteranceId?.toIntOrNull() ?: lastTtsDispatchId, lastTtsDispatchSource)
 
                     isSpeaking = false
                     speakingStartedMs = 0L
@@ -3866,7 +3901,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val queuedAiAnswer = pendingAiAnswer
                     if (queuedAiAnswer != null) {
                         pendingAiAnswer = null
-                        respond(ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true))
+                        respond(
+                            ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true),
+                            ttsSource = DiagLog.TtsDispatchSource.DRAINED_PENDING_ANSWER
+                        )
                     } else {
                         scheduleListenRestart(immediate = true)
                     }
@@ -3975,13 +4013,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    private fun speak(text: String, flush: Boolean) {
+    private fun speak(text: String, flush: Boolean, ttsSource: DiagLog.TtsDispatchSource = DiagLog.TtsDispatchSource.NORMAL) {
 
         wantListening = false
 
         // Captured before isThinking is cleared below — the delay `when` needs to know
         // whether Scout *was* thinking, not his state after this function already reset it.
         val wasThinking = isThinking
+
+        // TTS lifecycle diagnostics (instrumentation only) -- see the field
+        // doc comment above and DiagLog.TtsDispatchSource/logTts*(). Stamped
+        // now so onStart()/onDone()/onError() below can report it even if
+        // they can't parse the engine's own echoed utteranceId.
+        val dispatchId = ++ttsDispatchCounter
+        lastTtsDispatchId = dispatchId
+        lastTtsDispatchSource = ttsSource
+        diagLog.logTtsRequested(dispatchId, ttsSource)
 
         isThinking = false
         thinkingStartedMs = 0L
@@ -4030,9 +4077,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 null,
 
-                "scout"
+                dispatchId.toString()
 
             )
+
+            diagLog.logTtsSpeakCall(dispatchId, ttsSource, ok = ttsResult != TextToSpeech.ERROR)
 
             if (ttsResult == TextToSpeech.ERROR) {
                 // TTS rejected the utterance — no callback will ever fire, so
@@ -4080,7 +4129,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // call -- they're excluded only from convoDb (so they never leak into
     // TinyLlama's own conversation-history context) and from the "repeat
     // that" cache (so a status line can never become what gets repeated).
-    private fun respond(out: String, isPresenceInitiated: Boolean = false, isStatusOnly: Boolean = false) {
+    private fun respond(
+        out: String,
+        isPresenceInitiated: Boolean = false,
+        isStatusOnly: Boolean = false,
+        ttsSource: DiagLog.TtsDispatchSource = DiagLog.TtsDispatchSource.NORMAL
+    ) {
 
         lastScoutResponseMs = System.currentTimeMillis()
 
@@ -4103,7 +4157,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             conversationState.onScoutTurn(lastScoutResponseMs)
         }
 
-        speak(out, true)
+        speak(out, true, ttsSource)
 
         if (!isStatusOnly) {
             convoDb.logTurn("scout", out)

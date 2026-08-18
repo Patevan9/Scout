@@ -46,6 +46,21 @@ class DiagLog(private val db: DiagnosticDb) {
     /** Which subsystem produced Scout's response. */
     enum class BrainSource { TINYLLAMA, GEMINI, DIRECT, NONE }
 
+    /**
+     * Which path dispatched a given TTS utterance -- NORMAL for an ordinary
+     * respond()/speak() call, DRAINED_PENDING_ANSWER for the Busy-Brain PR 2
+     * bridging path (a Gemini/TinyLlama answer held in pendingAiAnswer while
+     * Scout was busy, spoken from inside a *different* utterance's own
+     * onDone()/onError() callback -- see MainActivity.deliverAiResult() and
+     * the TTS UtteranceProgressListener's drain check). Real-device finding
+     * under investigation: exactly this drained path can display a reply
+     * (captions) and never actually speak it, leaving isSpeaking stuck until
+     * the speaking watchdog force-clears it -- see the logTts*() methods
+     * below, added to distinguish that specific chain diagnostically before
+     * any behavior change.
+     */
+    enum class TtsDispatchSource { NORMAL, DRAINED_PENDING_ANSWER }
+
     /** Lifecycle events for the TinyLlama engine. */
     enum class LlamaEvent {
         LOAD_STARTED, LOAD_DONE, LOAD_FAILED,
@@ -451,6 +466,57 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logResponseDone(durationMs: Long) = safe("RESPONSE") {
         "event=done ms=${durationMs.coerceAtLeast(0L)}"
+    }
+
+    // ── TTS lifecycle diagnostics (instrumentation only -- no behavior change) ──
+    // Added to distinguish a normal speak() dispatch from the Busy-Brain PR 2
+    // "drained pendingAiAnswer" bridging path (see TtsDispatchSource above),
+    // and to tell "TTS requested" apart from "TTS engine actually started/
+    // completed it" -- the exact gap a suspected real-device TTS lifecycle
+    // lockup falls into. dispatchId is a small per-utterance counter (not the
+    // Android SpeechRecognizer/TTS utteranceId text -- see MainActivity's own
+    // counter) so a requested/speak_call/started/done/error sequence can be
+    // correlated across the whole chain, including back-to-back or re-entrant
+    // dispatches, without relying on Android's utteranceId ever being unique
+    // (previously a single hardcoded constant for every utterance). No speech
+    // text, no response text -- only the numeric id and controlled source.
+
+    /** Recorded when speak() is invoked, before any delay or actual TTS engine call. */
+    fun logTtsRequested(dispatchId: Int, source: TtsDispatchSource) = safe("TTS") {
+        "event=requested id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()}"
+    }
+
+    /**
+     * Recorded immediately after tts.speak() returns, before any engine
+     * callback has necessarily fired. ok=false means TextToSpeech.ERROR was
+     * returned synchronously (the existing manual-reset branch in speak()
+     * already handles that case; this only records that it happened).
+     * ok=true means the engine accepted the request -- NOT that it will ever
+     * actually speak it, which is exactly the gap logTtsStarted()/
+     * logTtsCompleted()/logTtsFailed() below exist to close.
+     */
+    fun logTtsSpeakCall(dispatchId: Int, source: TtsDispatchSource, ok: Boolean) = safe("TTS") {
+        "event=speak_call id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()} ok=${flag(ok)}"
+    }
+
+    /** Recorded from the TTS engine's onStart() callback. */
+    fun logTtsStarted(dispatchId: Int, source: TtsDispatchSource) = safe("TTS") {
+        "event=started id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()}"
+    }
+
+    /**
+     * Recorded from the TTS engine's onDone() callback. Separate from the
+     * existing logResponseDone() above (which is unchanged) -- this one
+     * carries the dispatch id/source needed to correlate with
+     * logTtsRequested()/logTtsSpeakCall() for the same utterance.
+     */
+    fun logTtsCompleted(dispatchId: Int, source: TtsDispatchSource, durationMs: Long) = safe("TTS") {
+        "event=done id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()} ms=${durationMs.coerceAtLeast(0L)}"
+    }
+
+    /** Recorded from the TTS engine's onError() callback. */
+    fun logTtsFailed(dispatchId: Int, source: TtsDispatchSource) = safe("TTS") {
+        "event=error id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()}"
     }
 
     /**
