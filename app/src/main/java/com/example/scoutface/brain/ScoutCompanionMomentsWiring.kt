@@ -8,8 +8,9 @@ package com.example.scoutface.brain
  * camera signal until it's actually consumed, recognizing a stale background
  * result, tracking the continuous-presence streak that defines a "session" for
  * curiosity's own bookkeeping, phrasing a Memory fact honestly for whichever
- * entity it actually belongs to, and deciding which fact keys are even
- * eligible to be offered as a Memory candidate in the first place.
+ * entity it actually belongs to, deciding which fact keys are even eligible
+ * to be offered as a Memory candidate in the first place, and giving a
+ * stabilizing return greeting first opportunity over a Companion Moment.
  */
 
 /**
@@ -28,6 +29,29 @@ object ScoutArrivalLatch {
         val age = nowMs - pendingSinceMs
         return age in 0..maxAgeMs
     }
+}
+
+/**
+ * Real-device finding: maybeMakeReturnGreeting() and maybeMakeCompanionMoment()
+ * are both called on the same frame once a face reappears, but only the return
+ * greeting is gated behind a stabilization window (RETURN_STABILIZATION_MS) --
+ * Companion Moments has no such wait, so its background evaluation can
+ * complete and speak before the return greeting is even attempted. Once it
+ * does, it stamps the same shared proactive-remark clock the return greeting's
+ * own cooldown reads (ScoutPresenceDecider.onExternalProactiveRemark() /
+ * canMakeReturnGreeting()), which can suppress "welcome back" for a further
+ * 20 minutes -- not just delay it, but replace it outright for that visit.
+ *
+ * This gate closes that window: while a genuine return is still stabilizing,
+ * Companion Moments must not produce or speak a candidate, so the return
+ * greeting always gets first opportunity once stabilization completes. Scoped
+ * to exactly this one condition -- does not touch Companion Moment scoring,
+ * cooldowns, PR #43's Memory-eligibility filters, or the return greeting's own
+ * wording/thresholds, all of which stay exactly as they were.
+ */
+object ScoutReturnGreetingGate {
+    fun isStabilizing(genuineAbsenceMarked: Boolean, returnStabilizingSinceMs: Long): Boolean =
+        genuineAbsenceMarked && returnStabilizingSinceMs != 0L
 }
 
 /**
