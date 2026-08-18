@@ -203,4 +203,15 @@ object Phrases {
         "Take care.",
         "Bye for now."
     )
+
+    // For CourtesyIntent.ACKNOWLEDGE -- bare conversational closers ("okay,"
+    // "alright," "sounds good," "you're welcome," "got it") that previously
+    // had no deterministic handling and fell through to Gemini/TinyLlama
+    // like a real open-ended question. Deliberately short and low-key --
+    // these are meant to close out a turn quietly, not start a new one.
+    val COURTESY_ACKNOWLEDGE = listOf(
+        "Okay!",
+        "Sounds good.",
+        "Got it."
+    )
 }

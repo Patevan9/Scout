@@ -135,4 +135,123 @@ class ScoutCourtesyMatcherTest {
     @Test fun `match does not itself fold case -- relies on already-normalized input`() {
         assertNull(ScoutCourtesyMatcher.match("Hi", scoutName))
     }
+
+    // --- ACKNOWLEDGE: bare conversational closers, real-device finding (Galaxy A32) ---
+    // Previously had no deterministic handling anywhere and fell through to
+    // Gemini/TinyLlama like a real open-ended question.
+
+    @Test fun `bare okay matches ACKNOWLEDGE`() {
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("okay", scoutName))
+    }
+
+    @Test fun `bare ok matches ACKNOWLEDGE`() {
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("ok", scoutName))
+    }
+
+    @Test fun `bare alright matches ACKNOWLEDGE`() {
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("alright", scoutName))
+    }
+
+    @Test fun `bare got it matches ACKNOWLEDGE`() {
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("got it", scoutName))
+    }
+
+    @Test fun `bare sounds good matches ACKNOWLEDGE`() {
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("sounds good", scoutName))
+    }
+
+    @Test fun `youre welcome (normalized to you are welcome) matches ACKNOWLEDGE`() {
+        // TextNormalizer.normalizeUtterance("You're welcome") -> "you are welcome"
+        // -- exercised here via the real normalizer, not a hand-typed remainder.
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("You're welcome"), scoutName)
+        )
+    }
+
+    // --- Lead-in tolerance: at most one filler lead-in stripped from the start ---
+
+    @Test fun `okay comma thank you resolves to THANKS`() {
+        assertEquals(
+            CourtesyIntent.THANKS,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("okay, thank you"), scoutName)
+        )
+    }
+
+    @Test fun `got it comma thanks resolves to THANKS`() {
+        assertEquals(
+            CourtesyIntent.THANKS,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("got it, thanks"), scoutName)
+        )
+    }
+
+    @Test fun `alright comma thanks resolves to THANKS`() {
+        assertEquals(
+            CourtesyIntent.THANKS,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("alright, thanks"), scoutName)
+        )
+    }
+
+    @Test fun `okay comma good night resolves to GOOD_NIGHT`() {
+        assertEquals(
+            CourtesyIntent.GOOD_NIGHT,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("okay, good night"), scoutName)
+        )
+    }
+
+    @Test fun `alright comma goodbye resolves to GOODBYE -- falls out of the generic design for free`() {
+        assertEquals(
+            CourtesyIntent.GOODBYE,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("alright, goodbye"), scoutName)
+        )
+    }
+
+    @Test fun `ok comma thank you plus name resolves to THANKS`() {
+        assertEquals(
+            CourtesyIntent.THANKS,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("ok, thank you Scout"), scoutName)
+        )
+    }
+
+    // --- Adversarial: lead-in stripping must never swallow a real sentence ---
+
+    @Test fun `I thanked Diana yesterday is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("I thanked Diana yesterday."), scoutName))
+    }
+
+    @Test fun `what does sounds good mean is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("What does 'sounds good' mean?"), scoutName))
+    }
+
+    @Test fun `okay what is the weather is not matched -- real question survives lead-in stripping`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, what is the weather?"), scoutName))
+    }
+
+    @Test fun `youre welcome to stay for dinner is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("You're welcome to stay for dinner."), scoutName))
+    }
+
+    @Test fun `alright lets begin is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Alright, let's begin."), scoutName))
+    }
+
+    @Test fun `okay thank you but what about tomorrow is not matched -- real trailing question survives`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, thank you, but what about tomorrow?"), scoutName))
+    }
+
+    @Test fun `a bare lead-in word alone with nothing after it is handled by direct ACKNOWLEDGE matching, not stripped to a blank remainder`() {
+        // "okay" alone matches ACKNOWLEDGE directly (step 1) -- it never reaches the
+        // lead-in-stripping loop at all, but confirm the outcome is correct either way.
+        assertEquals(CourtesyIntent.ACKNOWLEDGE, ScoutCourtesyMatcher.match("okay", scoutName))
+    }
+
+    @Test fun `got itchy is not matched -- word-boundary guard against a lead-in matching inside a longer word`() {
+        assertNull(ScoutCourtesyMatcher.match("got itchy", scoutName))
+    }
 }

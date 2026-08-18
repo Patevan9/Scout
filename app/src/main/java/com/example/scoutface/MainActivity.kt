@@ -5282,7 +5282,7 @@ Respond only with Scout's next reply.
             CourtesyIntent.GREET, CourtesyIntent.GOOD_MORNING -> {
                 if (conversationState.openFromUserTurn(now)) diagLog.logConversationStarted(startedByScout = false)
             }
-            CourtesyIntent.THANKS -> conversationState.extend(now)
+            CourtesyIntent.THANKS, CourtesyIntent.ACKNOWLEDGE -> conversationState.extend(now)
             CourtesyIntent.GOOD_NIGHT, CourtesyIntent.GOODBYE -> { /* closed below, after respond() */ }
         }
 
@@ -5292,6 +5292,7 @@ Respond only with Scout's next reply.
             CourtesyIntent.THANKS -> Phrases.COURTESY_THANKS
             CourtesyIntent.GOOD_NIGHT -> Phrases.COURTESY_GOOD_NIGHT
             CourtesyIntent.GOODBYE -> Phrases.COURTESY_GOODBYE
+            CourtesyIntent.ACKNOWLEDGE -> Phrases.COURTESY_ACKNOWLEDGE
         }
 
         respond(Phrases.pick("courtesy_${courtesy.name.lowercase()}", pool))
