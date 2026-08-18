@@ -154,4 +154,44 @@ class TeachExtractorTest {
     @Test fun `a question extracts nothing`() {
         assertNull(TeachExtractor.extract("What is my dog's name?"))
     }
+
+    // --- Real-device finding (Fold 7): "you see" vision-capability
+    // questions must not be mistaught as a name. "Do/Can you see colors?"
+    // contains "you see colors" as a contiguous substring, the same shape
+    // as the genuine introduction "you see Patrick" -- only the leading
+    // question auxiliary distinguishes them. Deliberately scoped to "you
+    // see" only; "this is"/"i am"/"that is" don't have this collision (a
+    // genuine question inverts those to "is this"/"am i"/"is that", so they
+    // never match their own statement-order pattern) and are left
+    // unchanged. No denylist of "colors"/"color" specifically -- the guard
+    // is on the question shape, not the word. ---
+
+    @Test fun `do you see colors is a capability question, not a name`() {
+        assertNull(TeachExtractor.extract("Do you see colors?"))
+    }
+
+    @Test fun `can you see colors is a capability question, not a name`() {
+        assertNull(TeachExtractor.extract("Can you see colors?"))
+    }
+
+    @Test fun `can you see color is a capability question, not a name`() {
+        assertNull(TeachExtractor.extract("Can you see color?"))
+    }
+
+    @Test fun `do you see color is a capability question, not a name`() {
+        assertNull(TeachExtractor.extract("Do you see color?"))
+    }
+
+    @Test fun `a wake-word-prefixed question is still caught, not just the sentence-initial case`() {
+        // "scout" as the first word would defeat a whole-utterance
+        // first-word question check -- confirms the guard is anchored
+        // locally to "you see", not to the start of the sentence.
+        assertNull(TeachExtractor.extract("Scout, can you see colors?"))
+    }
+
+    @Test fun `you see Patrick is still a genuine introduction and still teaches the name`() {
+        // The one case this fix must never break: a bare statement
+        // introducing someone in view, with no question auxiliary at all.
+        assertEquals(FactKey.NAME to "Patrick", TeachExtractor.extract("You see Patrick."))
+    }
 }
