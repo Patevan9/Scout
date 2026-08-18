@@ -37,6 +37,12 @@ object TeachExtractor {
         "so", "too", "kinda", "sorta"
     )
 
+    // Guard for the "you see X" pattern below -- see its own comment for why
+    // this is scoped to "you see" only, not the other broad NAME patterns.
+    private val YOU_SEE_QUESTION_LEAD = Regex(
+        """\b(?:do|does|did|can|could|will|would|are|is)\s+you\s+see\b"""
+    )
+
     fun extract(input: String): Pair<String, String>? {
         val s = input.lowercase().trim()
             .replace("that's", "that is")
@@ -67,9 +73,26 @@ object TeachExtractor {
             val word = it.groupValues[1]
             if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
         }
-        Regex("""\byou see ([a-z]+)\b""").find(s)?.let {
-            val word = it.groupValues[1]
-            if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+        // Real-device finding (Fold 7): "Do/Can you see colors?" is a
+        // capability question about Scout's vision, not a statement
+        // introducing someone the camera sees -- but it still contains "you
+        // see X" as a contiguous, in-order substring, so the pattern above
+        // matched it and mistaught "Colors"/"Color" as a person's name. This
+        // is deliberately NOT fixed with a denylist of specific words --
+        // "do/can/does/... you see WORD" is unsafe for ANY WORD, since
+        // English question word order keeps "you see" intact here in a way
+        // it doesn't for "this is"/"i am"/"that is" (those invert to "is
+        // this"/"am i"/"is that" in a genuine question, so they never
+        // collide with their own statement-order pattern the way this one
+        // does -- confirmed before deciding to scope this fix to "you see"
+        // only). Checked as a local match right next to this specific
+        // pattern -- not a whole-utterance first-word check -- so a leading
+        // wake-word prefix ("Scout, can you see colors?") can't defeat it.
+        if (!YOU_SEE_QUESTION_LEAD.containsMatchIn(s)) {
+            Regex("""\byou see ([a-z]+)\b""").find(s)?.let {
+                val word = it.groupValues[1]
+                if (word !in NON_NAME_WORDS) return FactKey.NAME to cleanName(word)
+            }
         }
 
         // "his name is X" / "her name is X" — pointing at someone
