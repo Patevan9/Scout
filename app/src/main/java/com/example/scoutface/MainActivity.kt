@@ -102,6 +102,7 @@ import com.example.scoutface.brain.ScoutCompanionMomentsEngine
 import com.example.scoutface.brain.ScoutCourtesyMatcher
 import com.example.scoutface.brain.ScoutMemoryPhraser
 import com.example.scoutface.brain.ScoutPresenceStreakTracker
+import com.example.scoutface.brain.ScoutReturnGreetingGate
 import com.example.scoutface.brain.ScoutStaleResultGuard
 import com.example.scoutface.brain.StaleFact
 
@@ -6079,6 +6080,11 @@ Respond only with Scout's next reply.
             isThinking -> "thinking"
             !bootFinishedSpeaking -> "still starting up"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
+            // Real-device finding: a genuine return-from-absence stabilizing
+            // right now must get the return greeting spoken first -- see
+            // ScoutReturnGreetingGate's doc comment for the full race.
+            ScoutReturnGreetingGate.isStabilizing(genuineAbsenceMarked, returnStabilizingSinceMs) ->
+                "return greeting stabilizing"
             else -> null
         }
         if (blockReason != null) {
@@ -6173,6 +6179,12 @@ Respond only with Scout's next reply.
             // moment instead of trusting the stale latch.
             candidate.category == MomentCategory.ENVIRONMENT && lastFaceCount < 2 ->
                 "environment candidate no longer matches live face count ($lastFaceCount)"
+            // Same re-check as the initial guard above, for the same reason as
+            // the ENVIRONMENT live-face-count re-check just above it: state can
+            // change during the background evaluation hop between the initial
+            // guard and this point actually speaking.
+            ScoutReturnGreetingGate.isStabilizing(genuineAbsenceMarked, returnStabilizingSinceMs) ->
+                "return greeting stabilizing"
             else -> null
         }
         if (blockReason != null) {

@@ -33,6 +33,44 @@ class ScoutCompanionMomentsWiringTest {
         assertFalse(ScoutArrivalLatch.consume(pendingSinceMs = 1_000L, nowMs = 6_001L, maxAgeMs = 5_000L))
     }
 
+    // ---- ScoutReturnGreetingGate ----
+    // Real-device finding: Companion Moments could win the race to speak
+    // before a stabilizing return greeting, then suppress it outright via the
+    // shared proactive-remark cooldown. This gate blocks Companion Moments for
+    // exactly the stabilization window, no more, no less.
+
+    @Test fun `not stabilizing when no absence was ever marked`() {
+        assertFalse(ScoutReturnGreetingGate.isStabilizing(
+            genuineAbsenceMarked = false, returnStabilizingSinceMs = 0L))
+    }
+
+    @Test fun `not stabilizing when an absence was marked but no return has been detected yet`() {
+        // genuineAbsenceMarked can be true while the person is still away --
+        // returnStabilizingSinceMs only starts once a face reappears.
+        assertFalse(ScoutReturnGreetingGate.isStabilizing(
+            genuineAbsenceMarked = true, returnStabilizingSinceMs = 0L))
+    }
+
+    @Test fun `stabilizing once a genuine return is detected and the stabilization timer has started`() {
+        assertTrue(ScoutReturnGreetingGate.isStabilizing(
+            genuineAbsenceMarked = true, returnStabilizingSinceMs = 12_345L))
+    }
+
+    @Test fun `not stabilizing once the return greeting has fired and reset both fields`() {
+        // Mirrors maybeMakeReturnGreeting()'s own reset of genuineAbsenceMarked
+        // and returnStabilizingSinceMs after it actually speaks.
+        assertFalse(ScoutReturnGreetingGate.isStabilizing(
+            genuineAbsenceMarked = false, returnStabilizingSinceMs = 0L))
+    }
+
+    @Test fun `defensive -- a nonzero timestamp alone without a marked absence is not treated as stabilizing`() {
+        // Shouldn't be reachable in practice (returnStabilizingSinceMs is only
+        // ever set inside the genuineAbsenceMarked branch), but the gate
+        // requires both explicitly rather than inferring one from the other.
+        assertFalse(ScoutReturnGreetingGate.isStabilizing(
+            genuineAbsenceMarked = false, returnStabilizingSinceMs = 12_345L))
+    }
+
     // ---- ScoutStaleResultGuard ----
 
     @Test fun `isStale is false when the generation hasn't changed`() {
