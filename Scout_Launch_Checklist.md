@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: August 15, 2026
-Based on commit: 92c6d57f84ef8f0f651a6a89937532fcaa954d42
-Status: Current. PRs #37–39 reviewed — none change any launch-blocker status (see "Must Fix" section below, unchanged). #37 and #39 are reliability/trust fixes, noted below under "Memory & family recognition." #38 (Calendar Follow-up) is new feature work with no launch-readiness relevance and is intentionally not tracked here — see `Scout_Master_Summary.md` and `Scout_Quick_Start.md` instead. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending.
+Last updated: August 19, 2026
+Based on commit: 4b1c979d5ab6f4d28f27bcbc2527e1cd007efdec
+Status: Current. PRs #41–52 reviewed (merged), PR #53 open — none change any launch-blocker status (see "Must Fix" section below, unchanged). All are reliability/trust/routing fixes and real-device polish, noted below under "Memory & family recognition" and "Core presence & interaction" where relevant — see `Scout_Master_Summary.md`'s August 16–19 entry and `Scout_Quick_Start.md` for full detail, not duplicated here. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending, unchanged by this pass.
 
-**Version 26**
+**Version 27**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -27,6 +27,9 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - Scout no longer uses Patrick's name in ordinary conversation with Diana or Elijah when he has no way to know who's actually speaking (PR #32 + one-time cleanup PR #33, Aug 9–10) — he can still use it for genuinely relevant questions ("what's my name," "who is Patrick").
 - Microphone start/stop chime muted on both sides of the recognizer cycle, not just the start side (PR #34, Aug 10) — real-device finding on the Fold 7, made more noticeable by Busy-Brain's more frequent mic cycling.
 - TTS default voice consistency (PR #35, Aug 11) — Scout requests Google TTS explicitly and applies a specific, human-verified offline voice instead of inheriting whatever a device's default TTS engine happens to be, addressing an unwanted female voice observed on a Samsung Galaxy S24 (confirmed via Android Settings only — default engine Samsung TTS, "Voice 1"). **Merged** — commit `ee00d9bf27b21530e12c4bc0f9fb8e7da725bb7a`. **Not yet installed or tested on Diana's S24 specifically — real-device validation there is still pending, not yet confirmed fixed on that device.**
+- The thinking-face expression now reflects the actual generation wait, not just the moment before mic availability was intentionally reopened (PR #48, Aug 17) — face was previously showing no thinking cue at all for most of a real Gemini/TinyLlama wait.
+- Companion Moments and the return greeting no longer race — a stabilizing "welcome back" now always gets first opportunity over an unrelated Companion Moment, which could otherwise suppress it outright for up to 20 minutes (PR #50, Aug 18).
+- Correlated TTS lifecycle diagnostics added (PR #52, Aug 19) for a real-device report of a reply displaying but never speaking — instrumentation only, no speech text logged, no behavior change.
 
 **Memory & family recognition**
 - Flexible fact memory — teaching and recall for any fact, via real entity+property extraction with multi-alias support (not brittle sentence-template matching).
@@ -35,6 +38,11 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - Presence layer — idle-silence acknowledgment and a real proactive "welcome back" greeting, both gated by genuine sustained camera presence rather than a flag that was almost always true.
 - Natural family-summary questions ("who is a part of my family," "tell me about my family") now route to Scout's real, deterministic family list instead of occasionally reaching TinyLlama, which had fabricated fictional family members (PR #37, Aug 12).
 - Scout can no longer claim to have learned or saved something that was never actually written to memory — closes a real gap where an unrecognized teaching attempt could reach a fact-blind Gemini or an ungrounded TinyLlama, either of which could say "I'll remember that" with nothing stored (PR #39, Aug 15).
+- Two more integrity backstops (PR #41, Aug 17) — deterministic answers for self-capability questions ("Can you learn?"), plus output guards against a global capability denial or a false reminder-scheduling promise Scout has no way to keep.
+- A real vision-capability guard (PR #45, Aug 17) — Scout can no longer falsely deny having a camera in a generative reply; widened deterministic routing for both family-summary and vision questions closes the specific gaps that let a fact-blind/vision-blind model answer instead of Scout's own real subsystems.
+- A self-referential family-belonging question no longer risks Scout's own name being misread as an unrelated third party by a generative reply (PR #46, Aug 17).
+- A teaching-extraction write-path bug is fixed at the source — "my son is Elijah" no longer silently mislabels itself as a ranked preference (`favorite_son`) instead of a name (PR #47, Aug 17); a companion Companion-Moments-side safety filter for the same key shape shipped two days earlier (PR #43, Aug 17).
+- A vision-capability question ("Do/Can you see colors?") no longer gets mistaught as a person's name (PR #51, Aug 18).
 
 **Stability & privacy**
 - A32 confirmed stable through multiple root-caused crash classes, most recently a camera/ML Kit/SpeechRecognizer startup collision (July 28) — fixed via staggered subsystem startup, not a guess.
@@ -136,7 +144,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 15, 2026 | Version 26 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 19, 2026 | Version 27 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 
