@@ -130,6 +130,26 @@ class DiagLog(private val db: DiagnosticDb) {
     enum class BusyBrainDiscardReason { CONVERSATION_CLOSED, TIMEOUT }
 
     /**
+     * Why a queued pendingAiAnswer (MainActivity, Busy-Brain PR 2's holding
+     * slot for an answer that resolved while Scout was mid-utterance) was
+     * discarded without ever being spoken. Deliberately its own type rather
+     * than reusing BusyBrainDiscardReason above -- that type is paired with
+     * a BrainSource for a currently in-flight generation, which
+     * pendingAiAnswer (an already-resolved answer, generation already
+     * complete) doesn't track, and it models a different lifecycle object.
+     *   EXPIRED             -- ScoutPendingAnswerGate.decide() returned
+     *                          EXPIRED: too much time passed since it queued.
+     *   SUPERSEDED          -- a genuinely new generative request began
+     *                          (busyBrainState.tryBegin() succeeded) before
+     *                          this older answer was ever delivered.
+     *   CONVERSATION_CLOSED -- an explicit close (goodbye/stop listening/
+     *                          good night) discarded it, mirroring
+     *                          BusyBrainDiscardReason.CONVERSATION_CLOSED's
+     *                          own reason for the still-in-flight case.
+     */
+    enum class PendingAnswerDiscardReason { EXPIRED, SUPERSEDED, CONVERSATION_CLOSED }
+
+    /**
      * Mirrors every value in IntentType (defined in MainActivity.kt) as a
      * controlled diagnostic token. Callers map IntentType → DiagIntent at the
      * callsite; the compiler enforces that no arbitrary string can be passed.
@@ -354,6 +374,15 @@ class DiagLog(private val db: DiagnosticDb) {
      */
     fun logBusyBrainDiscarded(reason: BusyBrainDiscardReason, source: BrainSource) = safe("BUSY_BRAIN") {
         "event=discarded reason=${reason.name.lowercase()} source=${source.name.lowercase()}"
+    }
+
+    /**
+     * Recorded when a queued pendingAiAnswer is discarded without ever being
+     * spoken -- see PendingAnswerDiscardReason above. Never includes the
+     * discarded answer's text.
+     */
+    fun logPendingAnswerDiscarded(reason: PendingAnswerDiscardReason) = safe("PENDING_ANSWER") {
+        "event=discarded reason=${reason.name.lowercase()}"
     }
 
     /**
