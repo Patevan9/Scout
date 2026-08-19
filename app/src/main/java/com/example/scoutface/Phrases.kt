@@ -224,4 +224,18 @@ object Phrases {
         "Thanks! It's good to be back.",
         "Thanks! I'm glad to be back."
     )
+
+    // For CourtesyIntent.CONFIRM -- the user validating that Scout's own
+    // prior answer was right ("You are right." / "Correct." / "Exactly.").
+    // Previously had no deterministic handling and fell through to
+    // Gemini/TinyLlama like a real open-ended question, triggering a
+    // Busy-Brain filler for a plain conversational validation. Deliberately
+    // does NOT restate or re-affirm the claim itself ("Yes, I was right." /
+    // "I am correct.") -- that reads as Scout congratulating himself. These
+    // just acknowledge the user's confirmation and move on.
+    val COURTESY_CONFIRM = listOf(
+        "Good to know.",
+        "Noted.",
+        "Glad we're on the same page."
+    )
 }

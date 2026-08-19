@@ -319,4 +319,129 @@ class ScoutCourtesyMatcherTest {
         assertNull(ScoutCourtesyMatcher.match(
             TextNormalizer.normalizeUtterance("Was that a warm welcome back home?"), scoutName))
     }
+
+    // --- CONFIRM: real-device finding (Fold 7) -- a short conversational
+    // validation ("You are right." / "Correct." / "Exactly.") said after
+    // Scout's own answer had no deterministic handling anywhere (not here,
+    // not in ScoutIntentRouter), so it reached Gemini/TinyLlama like a real
+    // open question and triggered a Busy-Brain filler in reply to being told
+    // Scout was right. Exact-match only, same discipline as every other
+    // entry -- deliberately no bare "right" (see the class doc comment). ---
+
+    @Test fun `you are right matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("you are right", scoutName))
+    }
+
+    @Test fun `youre right (normalized to you are right) matches CONFIRM`() {
+        // TextNormalizer.normalizeUtterance("You're right.") -> "you are right"
+        // -- exercised via the real normalizer, not a hand-typed remainder.
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("You're right."), scoutName)
+        )
+    }
+
+    @Test fun `that is right matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("that is right", scoutName))
+    }
+
+    @Test fun `thats right (TextNormalizer does not expand that's) matches CONFIRM`() {
+        // TextNormalizer has no "that's" -> "that is" rule (unlike "you're"),
+        // so "That's right." normalizes to the literal "that's right" -- this
+        // is its own table entry, not covered by "that is right" above.
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("That's right."), scoutName)
+        )
+    }
+
+    @Test fun `you are correct matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("you are correct", scoutName))
+    }
+
+    @Test fun `youre correct (normalized to you are correct) matches CONFIRM`() {
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("You're correct."), scoutName)
+        )
+    }
+
+    @Test fun `that is correct matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("that is correct", scoutName))
+    }
+
+    @Test fun `thats correct (TextNormalizer does not expand that's) matches CONFIRM`() {
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("That's correct."), scoutName)
+        )
+    }
+
+    @Test fun `bare correct matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("correct", scoutName))
+    }
+
+    @Test fun `bare exactly matches CONFIRM`() {
+        assertEquals(CourtesyIntent.CONFIRM, ScoutCourtesyMatcher.match("exactly", scoutName))
+    }
+
+    @Test fun `okay comma you are right resolves to CONFIRM -- falls out of the generic lead-in design for free`() {
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("Okay, you are right."), scoutName)
+        )
+    }
+
+    // --- Adversarial: must not become a broad contains("right")/contains("correct")/
+    // contains("exactly") substring match, and real questions/commands/statements
+    // that merely contain these words must keep routing normally ---
+
+    @Test fun `bare right alone is not matched -- deliberately excluded, too ambiguous`() {
+        assertNull(ScoutCourtesyMatcher.match("right", scoutName))
+    }
+
+    @Test fun `are you sure thats correct is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Are you sure that's correct?"), scoutName))
+    }
+
+    @Test fun `what is the correct answer is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("What is the correct answer?"), scoutName))
+    }
+
+    @Test fun `turn right is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Turn right."), scoutName))
+    }
+
+    @Test fun `is that right is not matched -- inverted question order protects it, same as this is X versus is this X`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Is that right?"), scoutName))
+    }
+
+    @Test fun `okay comma what is the weather tomorrow is not matched -- real question survives lead-in stripping`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, what is the weather tomorrow?"), scoutName))
+    }
+
+    @Test fun `correct my spelling is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Correct my spelling."), scoutName))
+    }
+
+    @Test fun `you were right about that is not matched -- trailing content survives`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("You were right about that."), scoutName))
+    }
+
+    @Test fun `that is exactly what i meant is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("That is exactly what I meant."), scoutName))
+    }
+
+    @Test fun `am i right is not matched -- another inverted question form`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Am I right?"), scoutName))
+    }
 }
