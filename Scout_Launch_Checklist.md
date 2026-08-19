@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
 Last updated: August 19, 2026
-Based on commit: 4b1c979d5ab6f4d28f27bcbc2527e1cd007efdec
-Status: Current. PRs #41–52 reviewed (merged), PR #53 open — none change any launch-blocker status (see "Must Fix" section below, unchanged). All are reliability/trust/routing fixes and real-device polish, noted below under "Memory & family recognition" and "Core presence & interaction" where relevant — see `Scout_Master_Summary.md`'s August 16–19 entry and `Scout_Quick_Start.md` for full detail, not duplicated here. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending, unchanged by this pass.
+Based on commit: 0a6101ab0e6dc3b85f51e10218a2e35e1073af41
+Status: Current. PRs #41–53 and #55 reviewed and merged — none change any launch-blocker status (see "Must Fix" section below, unchanged). All are reliability/trust/routing fixes and real-device polish, noted below under "Memory & family recognition" and "Core presence & interaction" where relevant — see `Scout_Master_Summary.md`'s August 16–19 entry and `Scout_Quick_Start.md` for full detail, not duplicated here. Next step for #53/#55 is real-device testing, not more coding. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending, unchanged by this pass.
 
-**Version 27**
+**Version 28**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -30,6 +30,8 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - The thinking-face expression now reflects the actual generation wait, not just the moment before mic availability was intentionally reopened (PR #48, Aug 17) — face was previously showing no thinking cue at all for most of a real Gemini/TinyLlama wait.
 - Companion Moments and the return greeting no longer race — a stabilizing "welcome back" now always gets first opportunity over an unrelated Companion Moment, which could otherwise suppress it outright for up to 20 minutes (PR #50, Aug 18).
 - Correlated TTS lifecycle diagnostics added (PR #52, Aug 19) for a real-device report of a reply displaying but never speaking — instrumentation only, no speech text logged, no behavior change.
+- "Welcome back!" and close variants said to Scout's own boot/return greeting now get a deterministic courtesy reply instead of reaching Gemini/TinyLlama as an open-ended question (PR #53, Aug 19) — exact-match only, not a loose substring route.
+- A stale queued AI answer (Busy-Brain's holding slot for a reply that resolved while Scout was mid-utterance) can no longer drain onto an unrelated later remark — 30-second expiry, a presence-completion guard, and supersede-on-new-question all now protect it (PR #55, Aug 19). **Not yet exercised on a real device — real-device testing is the current next step, not further coding.**
 
 **Memory & family recognition**
 - Flexible fact memory — teaching and recall for any fact, via real entity+property extraction with multi-alias support (not brittle sentence-template matching).
@@ -144,7 +146,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 19, 2026 | Version 27 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 19, 2026 | Version 28 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 
