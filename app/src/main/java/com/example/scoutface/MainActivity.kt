@@ -348,6 +348,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // makes onStart()/onDone()/onError() able to report which dispatch they
     // belong to.
     //
+    // AtomicInteger, not a plain Int: speak() is not guaranteed to be
+    // entered only from the main thread -- the pendingAiAnswer drain inside
+    // onDone()/onError() calls respond()/speak() synchronously from
+    // whichever thread the TTS engine delivered that callback on (see
+    // ttsDispatchSources' own doc comment below on why that's not
+    // guaranteed to be the main thread), while every other call site enters
+    // speak() from the main thread. A plain "++ttsDispatchCounter" is a
+    // non-atomic read-modify-write; two speak() calls racing from different
+    // threads could read the same value and mint a duplicate dispatch id,
+    // silently breaking the one guarantee this instrumentation exists to
+    // provide. incrementAndGet() is atomic, so every dispatch id stays
+    // unique even under back-to-back/cross-thread delivery.
+    //
     // ttsDispatchSources maps each dispatch's own id to the source it was
     // requested with, so a callback correlates the source to the SAME
     // dispatch its utteranceId resolved to -- not to whichever dispatch
@@ -380,7 +393,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // its logging calls. This is self-contained to the new diagnostics (this
     // map has no other reader/writer), so it doesn't touch any existing
     // production logic or timing.
-    private var ttsDispatchCounter = 0
+    private val ttsDispatchCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private var lastTtsDispatchId = 0
     private val ttsDispatchSources = java.util.concurrent.ConcurrentHashMap<Int, DiagLog.TtsDispatchSource>()
 
@@ -4077,7 +4090,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // field) so a later callback can never read a different, newer
         // dispatch's source -- see the field doc comment for why that
         // matters specifically for back-to-back/re-entrant dispatches.
-        val dispatchId = ++ttsDispatchCounter
+        val dispatchId = ttsDispatchCounter.incrementAndGet()
         lastTtsDispatchId = dispatchId
         ttsDispatchSources[dispatchId] = ttsSource
         diagLog.logTtsRequested(dispatchId, ttsSource)
