@@ -214,4 +214,14 @@ object Phrases {
         "Sounds good.",
         "Got it."
     )
+
+    // For CourtesyIntent.WELCOME_BACK -- a reply to the user welcoming SCOUT
+    // back (e.g. after Scout's own boot greeting), not a generic acknowledgment
+    // and not Scout welcoming the user. Previously had no deterministic
+    // handling and fell through to Gemini/TinyLlama like a real open-ended
+    // question.
+    val COURTESY_WELCOME_BACK = listOf(
+        "Thanks! It's good to be back.",
+        "Thanks! I'm glad to be back."
+    )
 }

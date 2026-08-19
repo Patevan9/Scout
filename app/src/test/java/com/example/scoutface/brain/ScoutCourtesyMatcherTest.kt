@@ -254,4 +254,69 @@ class ScoutCourtesyMatcherTest {
     @Test fun `got itchy is not matched -- word-boundary guard against a lead-in matching inside a longer word`() {
         assertNull(ScoutCourtesyMatcher.match("got itchy", scoutName))
     }
+
+    // --- WELCOME_BACK: real-device finding (Fold 7) -- "Welcome back!" said in
+    // reply to Scout's own boot greeting had no deterministic handling anywhere
+    // (not here, not in ScoutIntentRouter), so it reached Gemini/TinyLlama like a
+    // real open question, and the presence-reply window Scout's own boot/return
+    // greeting opens let it through without the wake name at all. ---
+
+    @Test fun `bare welcome back matches WELCOME_BACK`() {
+        assertEquals(CourtesyIntent.WELCOME_BACK, ScoutCourtesyMatcher.match("welcome back", scoutName))
+    }
+
+    @Test fun `welcome back plus name matches WELCOME_BACK`() {
+        assertEquals(CourtesyIntent.WELCOME_BACK, ScoutCourtesyMatcher.match("welcome back scout", scoutName))
+    }
+
+    @Test fun `glad you are back matches WELCOME_BACK`() {
+        // "Glad you're back." normalizes to "glad you are back" via TextNormalizer's
+        // existing "you're" -> "you are" contraction expansion.
+        assertEquals(
+            CourtesyIntent.WELCOME_BACK,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("Glad you're back."), scoutName)
+        )
+    }
+
+    @Test fun `good to have you back matches WELCOME_BACK`() {
+        assertEquals(CourtesyIntent.WELCOME_BACK, ScoutCourtesyMatcher.match("good to have you back", scoutName))
+    }
+
+    @Test fun `nice to have you back matches WELCOME_BACK`() {
+        assertEquals(CourtesyIntent.WELCOME_BACK, ScoutCourtesyMatcher.match("nice to have you back", scoutName))
+    }
+
+    @Test fun `okay comma welcome back resolves to WELCOME_BACK -- falls out of the generic lead-in design for free`() {
+        assertEquals(
+            CourtesyIntent.WELCOME_BACK,
+            ScoutCourtesyMatcher.match(TextNormalizer.normalizeUtterance("Okay, welcome back!"), scoutName)
+        )
+    }
+
+    // --- Adversarial: must not become a "welcome back" substring/contains match ---
+
+    @Test fun `welcome back to the show is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Welcome back to the show."), scoutName))
+    }
+
+    @Test fun `welcome back everyone to the meeting is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Welcome back everyone to the meeting."), scoutName))
+    }
+
+    @Test fun `youre welcome back there whenever youre ready is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("You're welcome back there whenever you're ready."), scoutName))
+    }
+
+    @Test fun `i dont want you to welcome back the neighbors dog is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("I don't want you to welcome back the neighbor's dog."), scoutName))
+    }
+
+    @Test fun `was that a warm welcome back home is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Was that a warm welcome back home?"), scoutName))
+    }
 }

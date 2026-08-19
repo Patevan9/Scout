@@ -1,7 +1,7 @@
 package com.example.scoutface.brain
 
 /** The Courtesy Phase 1 (+ acknowledgment) response categories -- see ScoutCourtesyMatcher. */
-enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, ACKNOWLEDGE }
+enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, ACKNOWLEDGE, WELCOME_BACK }
 
 /**
  * Deterministic, wake-name-free matching for a small, fixed set of everyday
@@ -34,6 +34,16 @@ enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, AC
  * question. On a slow device that's long enough to trigger a Busy-Brain
  * filler phrase ("Let me think about that...") in reply to a "thank you".
  * ACKNOWLEDGE and the lead-in stripping below close that gap.
+ *
+ * Real-device finding (Fold 7): "Welcome back!" said in reply to Scout's own
+ * boot greeting had the identical gap -- no match here, no ScoutIntentRouter
+ * pattern either, so it reached Gemini/TinyLlama like an open question. Worse
+ * than a silent miss: the presence-reply window Scout's own boot/return
+ * greeting opens (see MainActivity's isPresenceInitiated plumbing) lets this
+ * through without the wake name at all, so it's a common phrase to actually
+ * hit this gap on. WELCOME_BACK is its own CourtesyIntent rather than folded
+ * into ACKNOWLEDGE -- it gets its own phrase pool (Phrases.COURTESY_WELCOME_BACK)
+ * addressed specifically to "welcoming Scout back", not a generic acknowledgment.
  *
  * Lead-in stripping: at most ONE recognized filler lead-in ("okay"/"ok"/
  * "alright"/"got it") is stripped from the START of the utterance only
@@ -85,6 +95,13 @@ object ScoutCourtesyMatcher {
         // "you're welcome" arrives here as "you are welcome" -- TextNormalizer
         // already expands the "you're" contraction before this is ever called.
         "okay", "ok", "alright", "got it", "sounds good", "you are welcome" -> CourtesyIntent.ACKNOWLEDGE
+        // "glad you are back" is "glad you're back" post-contraction-expansion,
+        // same as "you are welcome" above. Deliberately exact-match only, not
+        // a "welcome back" substring check -- see the adversarial tests in
+        // ScoutCourtesyMatcherTest for phrases this must NOT swallow (e.g.
+        // "welcome back to the show", "welcome back everyone to the meeting").
+        "welcome back", "welcome back $name",
+        "glad you are back", "good to have you back", "nice to have you back" -> CourtesyIntent.WELCOME_BACK
         else -> null
     }
 
