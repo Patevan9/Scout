@@ -117,6 +117,7 @@ import com.example.scoutface.brain.ScoutBusyBrainState
 import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
+import com.example.scoutface.brain.ScoutPendingAnswerGate
 import com.example.scoutface.brain.ScoutBeepMuteGuard
 import com.example.scoutface.brain.ScoutVisionGate
 import com.example.scoutface.brain.ScoutVoiceSelector
@@ -337,6 +338,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // already being said.
     private var pendingAiAnswer: String? = null
 
+    // pendingAiAnswer lifecycle fix. When the answer above was actually
+    // queued (deliverAiResult() setting both together) -- NOT when
+    // generation began. Read by ScoutPendingAnswerGate.decide() against
+    // PENDING_AI_ANSWER_MAX_AGE_MS. Always cleared together with
+    // pendingAiAnswer via clearPendingAiAnswer() below, at every clear site,
+    // so the two fields can never desync.
+    private var pendingAiAnswerQueuedAtMs: Long = 0L
+
+    // pendingAiAnswer lifecycle fix. The one place pendingAiAnswer is ever
+    // cleared -- delivery, expiry, supersede-by-a-new-generative-request, or
+    // an explicit conversation close all route through this, so the answer
+    // and its queued timestamp can never drift apart (e.g. a stale
+    // timestamp surviving a clear, or vice versa).
+    private fun clearPendingAiAnswer() {
+        pendingAiAnswer = null
+        pendingAiAnswerQueuedAtMs = 0L
+    }
+
     // TTS lifecycle diagnostics (instrumentation only -- see DiagLog's
     // TtsDispatchSource/logTts*() doc comments). ttsDispatchCounter is a
     // small per-utterance counter, also passed to tts.speak() as the
@@ -417,6 +436,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // filler at all. Named separately so it can be tuned from real-device
     // testing without touching the scheduling logic itself.
     private val BUSY_BRAIN_FILLER_DELAY_MS = 2000L
+
+    // pendingAiAnswer lifecycle fix. How long a queued answer stays eligible
+    // to deliver once Scout is free again, measured from when it was
+    // actually queued (deliverAiResult() setting pendingAiAnswerQueuedAtMs),
+    // not from when generation began. Deliberately a standalone constant,
+    // not derived from PRESENCE_REPLY_WINDOW_MS below -- a different concept
+    // (how long Scout's own proactive remark stays wake-word-free
+    // follow-up-able) that happens to share a similar magnitude. See
+    // ScoutPendingAnswerGate.decide().
+    private val PENDING_AI_ANSWER_MAX_AGE_MS = 30_000L
 
     // Reminder fires when speech is heard outside the conversation window while a face is visible.
     // Throttled to once every 2 minutes so it never becomes annoying.
@@ -3879,6 +3908,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     lastScoutResponseMs = System.currentTimeMillis()
 
+                    // pendingAiAnswer lifecycle fix: capture whether THIS
+                    // completing utterance was presence-initiated before the
+                    // block below resets the flag -- must be read here, not
+                    // after the if-block, since lastUtteranceWasPresenceRemark
+                    // is cleared inside it. Passed to
+                    // handlePendingAnswerAfterTts() below; see
+                    // ScoutPendingAnswerGate's doc comment for why this
+                    // matters (a presence-initiated completion must HOLD a
+                    // fresh queued answer rather than draining onto it).
+                    val completionWasPresenceInitiated = lastUtteranceWasPresenceRemark
+
                     if (lastUtteranceWasPresenceRemark) {
                         presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
                         lastUtteranceWasPresenceRemark = false
@@ -3892,23 +3932,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     wantListening = true
 
-                    // Busy-Brain PR 2: deliver a held AI answer now that
-                    // Scout is free, instead of restarting the mic -- this is
+                    // Busy-Brain PR 2 / pendingAiAnswer lifecycle fix: deliver,
+                    // hold, or expire a held AI answer now that Scout is free,
+                    // instead of unconditionally restarting the mic -- this is
                     // the one drain point for pendingAiAnswer (see
-                    // deliverAiResult()). Framed as a natural bridge only
-                    // here, since something else was actually said while it
-                    // waited; deliverAiResult() speaks it immediately with no
-                    // prefix when nothing was in the way.
-                    val queuedAiAnswer = pendingAiAnswer
-                    if (queuedAiAnswer != null) {
-                        pendingAiAnswer = null
-                        respond(
-                            ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true),
-                            ttsSource = DiagLog.TtsDispatchSource.DRAINED_PENDING_ANSWER
-                        )
-                    } else {
-                        scheduleListenRestart(immediate = true)
-                    }
+                    // deliverAiResult() and handlePendingAnswerAfterTts()).
+                    handlePendingAnswerAfterTts(completionWasPresenceInitiated)
 
                 }
 
@@ -3930,6 +3959,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     refreshThinkingFaceState()
 
+                    // pendingAiAnswer lifecycle fix: capture before the reset
+                    // immediately below -- same reasoning as onDone()'s
+                    // matching comment above.
+                    val completionWasPresenceInitiated = lastUtteranceWasPresenceRemark
+
                     // TTS never finished, so no reply window should open for it --
                     // just clear the flag rather than leave it to misattribute later.
                     lastUtteranceWasPresenceRemark = false
@@ -3944,19 +3978,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     wantListening = true
 
-                    // Busy-Brain PR 2: same drain check as onDone() -- a TTS
-                    // failure on the utterance that was in the way must not
-                    // strand a queued AI answer indefinitely.
-                    val queuedAiAnswer = pendingAiAnswer
-                    if (queuedAiAnswer != null) {
-                        pendingAiAnswer = null
-                        respond(
-                            ScoutBusyBrainDelivery.phraseDelivery(queuedAiAnswer, wasQueued = true),
-                            ttsSource = DiagLog.TtsDispatchSource.DRAINED_PENDING_ANSWER
-                        )
-                    } else {
-                        scheduleListenRestart(immediate = true)
-                    }
+                    // Busy-Brain PR 2 / pendingAiAnswer lifecycle fix: same
+                    // shared decision as onDone() -- a TTS failure on the
+                    // utterance that was in the way must not strand a queued
+                    // AI answer indefinitely. See handlePendingAnswerAfterTts().
+                    handlePendingAnswerAfterTts(completionWasPresenceInitiated)
 
                 }
 
@@ -4255,6 +4281,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // pendingAiAnswer lifecycle fix. Called from the same two places as
+    // scheduleBusyBrainFiller() below (both real, once-per-question sites --
+    // Gemini's REQUEST_STARTED, and TinyLlama's dispatch point), each already
+    // gated on busyBrainState.tryBegin() having just returned true. A
+    // genuinely NEW generative request supersedes any older, still-
+    // undelivered pendingAiAnswer -- that older answer belongs to a
+    // DIFFERENT, now-superseded question, so leaving it queued would let it
+    // wrongly drain onto whatever THIS new question's own answer -- or some
+    // unrelated later utterance -- turns out to be.
+    //
+    // Never reached for a courtesy/deterministic reply (neither ever calls
+    // tryBegin() at all, so pendingAiAnswer is untouched by those), and never
+    // reached a second time for a same-question Gemini -> TinyLlama fallback
+    // (tryBegin() is already a no-op there).
+    private fun onGenerativeRequestBegan() {
+        finishThinking()
+        scheduleBusyBrainFiller()
+        if (pendingAiAnswer != null) {
+            clearPendingAiAnswer()
+            diagLog.logPendingAnswerDiscarded(DiagLog.PendingAnswerDiscardReason.SUPERSEDED)
+        }
+    }
+
     // Busy-Brain polish. Called only when busyBrainState.tryBegin() has just
     // returned true for this question -- i.e. once per question, never on a
     // Gemini -> TinyLlama same-question fallback (tryBegin() is a no-op
@@ -4303,9 +4352,66 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         busyBrainState.complete()
         refreshThinkingFaceState()
         if (ScoutBusyBrainDelivery.shouldQueue(isSpeaking, isThinking)) {
+            // pendingAiAnswer lifecycle fix: the 30s expiry window starts
+            // here, when the answer is actually queued -- not when
+            // generation began. See PENDING_AI_ANSWER_MAX_AGE_MS.
             pendingAiAnswer = answer
+            pendingAiAnswerQueuedAtMs = System.currentTimeMillis()
         } else {
             respond(ScoutBusyBrainDelivery.phraseDelivery(answer, wasQueued = false))
+        }
+    }
+
+    // pendingAiAnswer lifecycle fix. The single shared decision point for
+    // both onDone() and onError()'s pending-answer drain check, so the two
+    // TTS callback paths can never drift into different delivery/hold/expiry
+    // rules. wasPresenceInitiated must be the value the caller captured
+    // BEFORE its own lastUtteranceWasPresenceRemark reset -- see both
+    // callbacks' own comments and ScoutPendingAnswerGate's doc comment for
+    // the full priority order (expiry checked before hold).
+    private fun handlePendingAnswerAfterTts(wasPresenceInitiated: Boolean) {
+        val queuedAnswer = pendingAiAnswer
+        if (queuedAnswer == null) {
+            // NONE -- nothing queued; ScoutPendingAnswerGate.decide() would
+            // return NONE regardless of the other inputs, so there's nothing
+            // useful to log or decide here.
+            scheduleListenRestart(immediate = true)
+            return
+        }
+        when (
+            ScoutPendingAnswerGate.decide(
+                hasQueuedAnswer = true,
+                wasPresenceInitiated = wasPresenceInitiated,
+                queuedAtMs = pendingAiAnswerQueuedAtMs,
+                nowMs = System.currentTimeMillis(),
+                maxAgeMs = PENDING_AI_ANSWER_MAX_AGE_MS
+            )
+        ) {
+            ScoutPendingAnswerGate.Decision.DELIVER -> {
+                clearPendingAiAnswer()
+                respond(
+                    ScoutBusyBrainDelivery.phraseDelivery(queuedAnswer, wasQueued = true),
+                    ttsSource = DiagLog.TtsDispatchSource.DRAINED_PENDING_ANSWER
+                )
+            }
+            ScoutPendingAnswerGate.Decision.EXPIRED -> {
+                clearPendingAiAnswer()
+                diagLog.logPendingAnswerDiscarded(DiagLog.PendingAnswerDiscardReason.EXPIRED)
+                scheduleListenRestart(immediate = true)
+            }
+            ScoutPendingAnswerGate.Decision.HOLD -> {
+                // Fresh answer, but this completion was presence-initiated
+                // (boot greeting, idle-silence remark, return greeting,
+                // Companion Moment) -- held for the next non-presence
+                // completion, still subject to expiry from its original
+                // queued time.
+                scheduleListenRestart(immediate = true)
+            }
+            ScoutPendingAnswerGate.Decision.NONE -> {
+                // Structurally unreachable here -- queuedAnswer == null
+                // already returned above. Kept only so the when is exhaustive.
+                scheduleListenRestart(immediate = true)
+            }
         }
     }
 
@@ -4428,9 +4534,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     // scheduleBusyBrainFiller()); finishThinking() is called
                     // directly since nothing is spoken synchronously anymore
                     // to clear isThinking via respond() the way it used to.
+                    // pendingAiAnswer lifecycle fix: also supersedes an older
+                    // undelivered queued answer -- see onGenerativeRequestBegan().
                     if (busyBrainState.tryBegin(System.currentTimeMillis())) {
-                        finishThinking()
-                        scheduleBusyBrainFiller()
+                        onGenerativeRequestBegan()
                     }
                 }
             },
@@ -4652,9 +4759,13 @@ Respond only with Scout's next reply.
             // tryBegin() returns false (a no-op) when reached as Gemini's
             // own same-question fallback, since Gemini's REQUEST_STARTED
             // already did both and the mic is already open.
+            // pendingAiAnswer lifecycle fix: also supersedes an older
+            // undelivered queued answer -- see onGenerativeRequestBegan().
+            // A same-question Gemini->TinyLlama fallback reaches here too,
+            // but tryBegin() is already a no-op for it, so it never
+            // re-supersedes anything the way a genuinely new question would.
             if (busyBrainState.tryBegin(System.currentTimeMillis())) {
-                finishThinking()
-                scheduleBusyBrainFiller()
+                onGenerativeRequestBegan()
             }
 
             // ScoutLlamaController runs this on its own process-wide single-thread
@@ -5489,6 +5600,18 @@ Respond only with Scout's next reply.
         if (busyBrainState.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED)) {
             journalDb.add("Busy-Brain: pending generation discarded (conversation closed).")
             refreshThinkingFaceState()
+        }
+        // pendingAiAnswer lifecycle fix: a real, confirmed gap -- the discard()
+        // call above is a no-op once a generation has already resolved into
+        // pendingAiAnswer (busyBrainState.isPending is already false by then),
+        // so a stale queued answer could previously survive an explicit
+        // "goodbye"/"stop listening"/"good night" and still drain onto some
+        // later, unrelated utterance. Checked independently of the discard()
+        // result above -- both can fire on the same close, and this one
+        // doesn't depend on the other having fired.
+        if (pendingAiAnswer != null) {
+            clearPendingAiAnswer()
+            diagLog.logPendingAnswerDiscarded(DiagLog.PendingAnswerDiscardReason.CONVERSATION_CLOSED)
         }
     }
 
