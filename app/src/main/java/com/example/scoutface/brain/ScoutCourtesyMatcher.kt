@@ -1,7 +1,7 @@
 package com.example.scoutface.brain
 
 /** The Courtesy Phase 1 (+ acknowledgment) response categories -- see ScoutCourtesyMatcher. */
-enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, ACKNOWLEDGE, WELCOME_BACK }
+enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, ACKNOWLEDGE, WELCOME_BACK, CONFIRM }
 
 /**
  * Deterministic, wake-name-free matching for a small, fixed set of everyday
@@ -44,6 +44,27 @@ enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, AC
  * hit this gap on. WELCOME_BACK is its own CourtesyIntent rather than folded
  * into ACKNOWLEDGE -- it gets its own phrase pool (Phrases.COURTESY_WELCOME_BACK)
  * addressed specifically to "welcoming Scout back", not a generic acknowledgment.
+ *
+ * Real-device finding (Fold 7): a short conversational validation ("You are
+ * right." / "Correct." / "Exactly.") said after Scout's own answer had the
+ * same gap -- no match here, no ScoutIntentRouter pattern -- so it reached
+ * Gemini/TinyLlama like an open question and triggered a Busy-Brain filler
+ * ("Let me think about that...") in reply to being told Scout was right.
+ * CONFIRM is its own CourtesyIntent, not folded into ACKNOWLEDGE: the two are
+ * opposite directions (ACKNOWLEDGE is the user closing out something SCOUT
+ * just said; CONFIRM is the user validating that Scout's own answer was
+ * correct), so they warrant separate, differently-worded phrase pools rather
+ * than reusing ACKNOWLEDGE's "Okay!"/"Sounds good." set, which doesn't fit.
+ * Deliberately does NOT include bare "right" -- too overloaded (a literal
+ * turn-right direction is plausible future Builder's Workbench vocabulary)
+ * to safely claim as an acknowledgment on its own; only paired with an
+ * unambiguous subject ("you are right"/"that is right") is it matched.
+ * "that's right"/"that's correct" are matched as their own literal entries
+ * rather than relying on contraction expansion -- TextNormalizer expands
+ * "you're"/"youre" to "you are" (so "you're right" already reaches this
+ * table as "you are right", no separate entry needed) but has no "that's"
+ * rule at all, so "that's right" arrives here as literally "that's right",
+ * distinct from "that is right".
  *
  * Lead-in stripping: at most ONE recognized filler lead-in ("okay"/"ok"/
  * "alright"/"got it") is stripped from the START of the utterance only
@@ -102,6 +123,16 @@ object ScoutCourtesyMatcher {
         // "welcome back to the show", "welcome back everyone to the meeting").
         "welcome back", "welcome back $name",
         "glad you are back", "good to have you back", "nice to have you back" -> CourtesyIntent.WELCOME_BACK
+        // "you're right"/"you're correct" arrive here as "you are right"/
+        // "you are correct" (TextNormalizer's existing "you're"->"you are"
+        // expansion) -- no separate entry needed. "that's right"/"that's
+        // correct" do NOT get expanded by TextNormalizer, so they're listed
+        // here as their own literal strings alongside "that is right"/
+        // "that is correct". Deliberately no bare "right" -- see the class
+        // doc comment for why.
+        "you are right", "that is right", "that's right",
+        "you are correct", "that is correct", "that's correct",
+        "correct", "exactly" -> CourtesyIntent.CONFIRM
         else -> null
     }
 
