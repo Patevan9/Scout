@@ -2849,6 +2849,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 lastKnownFaceName = null
 
+                                // Return-greeting freshness fix: without this, lastFaceEmbedding
+                                // would keep whatever the pre-absence person's embedding was
+                                // indefinitely -- maybeMakeReturnGreeting()'s fresh PeopleDb
+                                // lookup could then read a genuinely stale, pre-absence embedding
+                                // if the async embed for the actual returning face hasn't resolved
+                                // yet by the time the return greeting fires. Clearing it here
+                                // guarantees any non-null value it holds later was captured after
+                                // presence resumed -- never carried over from before an absence.
+                                lastFaceEmbedding = null
+
                                 lastSecondaryFaceName = null
 
                                 presenceDecider.onFaceLost()
