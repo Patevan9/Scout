@@ -118,6 +118,7 @@ import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
 import com.example.scoutface.brain.ScoutPendingAnswerGate
+import com.example.scoutface.brain.ScoutGreetingIdentity
 import com.example.scoutface.brain.ScoutBeepMuteGuard
 import com.example.scoutface.brain.ScoutVisionGate
 import com.example.scoutface.brain.ScoutVoiceSelector
@@ -6286,7 +6287,31 @@ Respond only with Scout's next reply.
 
         logPresenceDebug("Greeting spoken (return)")
         presenceDecider.onReturnGreetingMade()
-        respond(voice.say("PRESENCE_RETURN_GREETING"), isPresenceInitiated = true)
+
+        // Return-greeting personalization: a FRESH PeopleDb lookup from the
+        // CURRENT frame's embedding, right here at speak-time -- deliberately
+        // NOT lastKnownFaceName, which is only cleared to null when no face
+        // is detected at all, not when a face IS detected but fails to match
+        // confidently that specific frame, so it can silently carry a stale
+        // name forward. findBestMatchNameWithScore()'s own base
+        // threshold/margin-vs-second-best-candidate protection is used
+        // unchanged; ScoutGreetingIdentity then applies the stricter
+        // CONFIDENT_EMBED_THRESHOLD a SPOKEN identity claim needs on top of
+        // that. Falls back to the plain generic greeting -- unchanged -- for
+        // every other case: no current embedding, no PeopleDb match, a
+        // margin-rejected match, or a score below the stricter bar.
+        val freshMatch = lastFaceEmbedding?.let { peopleDb.findBestMatchNameWithScore(it) }
+        val speakableName = ScoutGreetingIdentity.resolveSpeakableName(
+            matchedName = freshMatch?.first,
+            matchScore = freshMatch?.second,
+            confidenceThreshold = CONFIDENT_EMBED_THRESHOLD
+        )
+        val greeting = if (speakableName != null) {
+            voice.say("PRESENCE_RETURN_GREETING_NAMED").replace("{name}", speakableName)
+        } else {
+            voice.say("PRESENCE_RETURN_GREETING")
+        }
+        respond(greeting, isPresenceInitiated = true)
 
         // This absence/return cycle is fully resolved -- ready to detect the next one.
         candidateAbsenceLogged = false

@@ -54,6 +54,20 @@ class VoiceBank(private val prefs: SharedPreferences) {
                 "Good to see you again.",
                 "Welcome back. Good to have you around again."
             )
+            // Return-greeting personalization -- spoken only when MainActivity's
+            // fresh PeopleDb lookup for the current frame clears the stricter
+            // CONFIDENT_EMBED_THRESHOLD (see ScoutGreetingIdentity); the plain
+            // PRESENCE_RETURN_GREETING pool above is untouched and stays the
+            // fallback whenever identity isn't confidently known. "{name}" is a
+            // literal placeholder token, not Kotlin string interpolation --
+            // MainActivity substitutes the actual name in with a plain
+            // String.replace() after this returns, the smallest mechanism that
+            // needed no change to say()'s own signature.
+            "PRESENCE_RETURN_GREETING_NAMED" -> listOf(
+                "Hey {name}, good to see you again.",
+                "Welcome back, {name}.",
+                "{name}, it's good to see you again."
+            )
             "COMPANION_ENVIRONMENT" -> listOf(
                 "It's nice hearing everyone together.",
                 "Good to have more company.",
