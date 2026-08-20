@@ -25,7 +25,8 @@ class ScoutBusyBrainFillerTimingTest {
     @Test fun `answer completes before the filler threshold -- no filler needed`() {
         val state = ScoutBusyBrainState()
         state.tryBegin(0L) // generation dispatched at t=0
-        state.complete()   // a fast Gemini answer resolves at, say, t=900ms
+        val id = state.currentGenerationId()
+        state.complete(id) // a fast Gemini answer resolves at, say, t=900ms
 
         // At the scheduled t=2000ms check, MainActivity reads isPending fresh:
         assertFalse(state.isPending) // -- false, so nothing is said.
@@ -59,31 +60,41 @@ class ScoutBusyBrainFillerTimingTest {
     @Test fun `conversation explicitly closed before the filler threshold -- no filler speaks`() {
         val state = ScoutBusyBrainState()
         state.tryBegin(0L)
+        val id = state.currentGenerationId()
         state.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED) // goodbye said at t=800ms
 
         // At the scheduled t=2000ms check:
         assertFalse(state.isPending) // -- false, so nothing is said, even though the
-        assertTrue(state.isDiscarded()) //    underlying generation may still be running.
+        assertTrue(state.isDiscarded(id)) //    underlying generation may still be running.
     }
 
-    @Test fun `a genuine intervening deterministic interaction still allows the earlier-question bridge`() {
-        // Models: AI generation begins: mic reopens, filler not yet due. A
-        // safe deterministic follow-up is asked and Scout is genuinely
-        // speaking its answer when the AI generation resolves.
+    @Test fun `the busy-brain filler is being spoken when the generation resolves -- the earlier-question bridge still applies`() {
+        // Models the legitimate case PR #55 and the generation-ownership
+        // design (PR 2) both require to keep working: the AI generation
+        // begins, the filler threshold is reached and MainActivity speaks
+        // exactly one thinking phrase (BUSY_BRAIN_FILLERS) -- Scout's OWN
+        // status speech, not a reaction to any new user utterance -- and the
+        // generation resolves while that filler is still being spoken.
+        //
+        // No newer substantive user turn was ever accepted here, so
+        // supersedeAnyPendingGeneration() (PR 2) is never called and
+        // isPending stays genuinely true the whole time -- this is exactly
+        // why a deterministic follow-up is NOT modeled in this test: since
+        // PR 2, a deterministic follow-up that Scout actually answers WOULD
+        // discard this generation instead (see ScoutBusyBrainStateTest's
+        // SUPERSEDED_BY_NEW_TURN coverage) -- that is intentional, correct
+        // behavior for PR 2 and is not what this test is about.
         val state = ScoutBusyBrainState()
         state.tryBegin(0L)
+        val id = state.currentGenerationId()
 
-        // The deterministic follow-up is answered entirely outside
-        // busyBrainState -- see ScoutBusyBrainPolicy -- so isPending is
-        // untouched by it.
         assertTrue(state.isPending) // the AI generation is still genuinely in flight
 
-        state.complete() // the AI answer resolves now, while Scout is speaking the follow-up
+        state.complete(id) // the AI answer resolves now, while the filler is being spoken
 
         // deliverAiResult() consults ScoutBusyBrainDelivery (unchanged since
         // PR 2) with the real isSpeaking flag -- true here, since Scout is
-        // genuinely mid-utterance on the unrelated follow-up, not on its own
-        // filler:
+        // genuinely mid-utterance on its own filler, not idle:
         assertTrue(ScoutBusyBrainDelivery.shouldQueue(isSpeaking = true, isThinking = false))
         assertEquals(
             "And about your earlier question — 72 degrees.",

@@ -4374,6 +4374,33 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // Generation-ownership fix (PR 2). The one place a genuinely newer,
+    // substantive user turn invalidates an in-flight Gemini/TinyLlama
+    // generation -- real-device finding: an older generation could finish
+    // AFTER the user already asked and received a newer deterministic answer
+    // (e.g. TIME), and its stale result would still speak/queue into
+    // pendingAiAnswer/drain afterward, because busyBrainState.isPending had
+    // no way to distinguish "belongs to this question" from "belongs to
+    // some earlier, already-answered one."
+    //
+    // Call this ONLY once Scout has decided the utterance currently being
+    // processed is actually going to receive a real, immediate answer/action
+    // -- never for a deferred (BUSY_BRAIN_DEFERRED/BUSY_BRAIN_STILL_THINKING)
+    // reply, never for Busy-Brain filler speech (Scout-initiated, not a
+    // reaction to any new utterance), never for a repeat-request (re-stating
+    // old content is not a new question), and never for courtesy ("okay",
+    // "thanks", ...) -- courtesy is matched and handled entirely inside
+    // onResults(), before handleQuery() is ever called, so it structurally
+    // can never reach this function at all.
+    //
+    // A harmless no-op when nothing is pending -- every call site is safe to
+    // call unconditionally at its own "about to answer for real" point.
+    private fun supersedeAnyPendingGeneration() {
+        if (busyBrainState.isPending) {
+            busyBrainState.discard(BusyBrainDiscardReason.SUPERSEDED_BY_NEW_TURN)
+        }
+    }
+
     // Busy-Brain polish. Called only when busyBrainState.tryBegin() has just
     // returned true for this question -- i.e. once per question, never on a
     // Gemini -> TinyLlama same-question fallback (tryBegin() is a no-op
@@ -4411,6 +4438,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // complete either way -- what differs is whether the answer gets spoken
     // now or held.
     //
+    // generationId (generation-ownership fix, PR 2): the id the caller
+    // captured for its own generation -- passed straight through to
+    // busyBrainState.complete(), which is itself a no-op if this id is no
+    // longer the current generation. Every call site of this function is
+    // already reached only after its own isDiscarded(generationId) check
+    // came back false, so this is normally a same-id confirmation rather
+    // than a new decision -- but keeping complete() id-guarded here too
+    // means deliverAiResult() itself can never clear a newer generation's
+    // isPending/startedAt, even if some future call site were ever added
+    // without its own discard check.
+    //
     // Never uses QUEUE_FLUSH over something already being said: if Scout is
     // mid-utterance (isSpeaking) or mid-dispatch of another accepted request
     // (isThinking), the answer is held in pendingAiAnswer and delivered from
@@ -4418,8 +4456,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // your earlier question--" since something else happened while it
     // waited. If Scout is genuinely idle, it's spoken immediately with no
     // prefix.
-    private fun deliverAiResult(answer: String) {
-        busyBrainState.complete()
+    private fun deliverAiResult(answer: String, generationId: Long) {
+        busyBrainState.complete(generationId)
         refreshThinkingFaceState()
         if (ScoutBusyBrainDelivery.shouldQueue(isSpeaking, isThinking)) {
             // pendingAiAnswer lifecycle fix: the 30s expiry window starts
@@ -4574,6 +4612,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // or unclear -- see ScoutVisionGate's doc comment for why this is its
         // own gate rather than folded into ScoutMemoryGate.
         if (ScoutVisionGate.isPossibleVisionQuery(qNorm.lowercase().trim())) {
+            // Generation-ownership fix (PR 2): handleVisionIntent() always
+            // answers immediately and unconditionally (no internal pending
+            // check of its own) -- safe to supersede right here, before it.
+            supersedeAnyPendingGeneration()
             handleVisionIntent()
             return
         }
@@ -4590,6 +4632,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val convo = convoDb.getLastTurns(limit = 6)
+
+        // Generation-ownership fix (PR 2): captured inside onDecision's
+        // REQUEST_STARTED branch below, read via currentGenerationId() right
+        // after tryBegin() (regardless of its boolean result -- see that
+        // function's doc comment), then referenced by deliverResult/
+        // shouldDiscardResult/onDiscarded further down. Those three closures
+        // fire asynchronously, after Gemini's own network round trip -- this
+        // is what lets each of them check/clear the exact generation THIS
+        // request started, rather than "whatever generation happens to be
+        // current by the time Gemini's response arrives."
+        var geminiGenerationId = 0L
 
         val usedGemini = scoutGeminiManager.tryGemini(
             qNorm, convo,
@@ -4609,6 +4662,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (busyBrainState.tryBegin(System.currentTimeMillis())) {
                         onGenerativeRequestBegan()
                     }
+                    geminiGenerationId = busyBrainState.currentGenerationId()
                 }
             },
             onAnswered = { diagLog.logNetwork(DiagLog.NetworkArea.GEMINI, true); pendingBrainSource = "Gemini (online)" },
@@ -4625,11 +4679,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // third party ("Scout is not mentioned... may have moved or
             // passed away"). applyScoutCapabilityIntegrityGuards() catches
             // all five -- see its doc comment in ScoutFactExtractor.
-            deliverResult = { answer -> deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, answer)) },
-            shouldDiscardResult = { busyBrainState.isDiscarded() },
+            deliverResult = { answer ->
+                deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, answer), geminiGenerationId)
+            },
+            shouldDiscardResult = { busyBrainState.isDiscarded(geminiGenerationId) },
             onDiscarded = {
                 busyBrainState.discardReason?.let { diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.GEMINI) }
-                busyBrainState.complete()
+                busyBrainState.complete(geminiGenerationId)
                 refreshThinkingFaceState()
             }
         )
@@ -4649,6 +4705,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun handlePersonalMemoryQuery(qNorm: String, facts: List<Pair<String, String>>) {
 
         if (facts.isEmpty()) {
+            // Generation-ownership fix (PR 2): an immediate, real (if
+            // "I don't know") answer is about to be given -- supersede
+            // before it, not after.
+            supersedeAnyPendingGeneration()
             respond(voice.say("DONT_KNOW"))
             return
         }
@@ -4663,6 +4723,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         Regex("""\bwho(?:'s|\s+is)\s+([a-z]+)\b""").find(qNorm.lowercase())?.let { m ->
             val name = m.groupValues[1]
             findRelationForName(name)?.let { relation ->
+                // Generation-ownership fix (PR 2): same reasoning as above --
+                // a real, immediate answer is about to be given.
+                supersedeAnyPendingGeneration()
                 respond("${name.replaceFirstChar { it.uppercase() }} is your $relation.")
                 return
             }
@@ -4706,8 +4769,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // isPending may already be true from Gemini's REQUEST_STARTED
                 // -- no TinyLlama generation is being dispatched after all,
                 // so free the gate here. Harmless no-op on a fresh dispatch
-                // (isPending is already false in that case).
-                busyBrainState.complete()
+                // (isPending is already false in that case). Synchronous,
+                // same-call-stack bail-out (not an async completion), so
+                // reading currentGenerationId() fresh here is safe -- nothing
+                // else can have run in between to make it stale.
+                busyBrainState.complete(busyBrainState.currentGenerationId())
                 // speakUnavailableIfNeeded() already spoke (and refreshed the
                 // face) above -- that refresh ran before isPending flipped
                 // false here, so a second refresh is needed or the face could
@@ -4838,6 +4904,17 @@ Respond only with Scout's next reply.
                 onGenerativeRequestBegan()
             }
 
+            // Generation-ownership fix (PR 2): captured immediately after
+            // tryBegin() above, regardless of its boolean result -- on a
+            // fresh dispatch this is the id tryBegin() just minted; on a
+            // same-question Gemini->TinyLlama fallback (tryBegin() a no-op
+            // here) this reads back the SAME id Gemini's own earlier
+            // tryBegin() already established. Captured into this closure so
+            // the completion callback below always checks/clears the exact
+            // generation this dispatch belongs to, never "whatever generation
+            // happens to be current by the time the callback fires."
+            val myBusyBrainGenerationId = busyBrainState.currentGenerationId()
+
             // ScoutLlamaController runs this on its own process-wide single-thread
             // executor and already only invokes this callback (on the main thread) if
             // myGeneration is still current -- covers both "a newer question arrived"
@@ -4846,25 +4923,34 @@ Respond only with Scout's next reply.
             // discard (stale token) is logged internally by ScoutLlamaController
             // itself, not via a callback here -- this callback is Activity-owned
             // (captures diagLog) and could otherwise run after this Activity was
-            // destroyed, purely to log a diagnostic event.
+            // destroyed, purely to log a diagnostic event. ScoutLlamaController's own
+            // token is left completely untouched by PR 2 -- it keeps solving its own,
+            // separate problem (native-call/Activity-recreation safety); Busy-Brain's
+            // generation id is a distinct, additional check.
             ScoutLlamaController.generateAsync(
                 token = myGeneration,
                 prompt = sb.toString(),
                 nPredict = 100
             ) { reply ->
 
-                // Busy-Brain PR 1: the conversation was explicitly closed, or
-                // the stuck-generation watchdog gave up waiting, while this
-                // generation was in flight -- its answer must never be
-                // spoken. Distinct from the token check above: that guards
-                // against a stale Activity instance/superseded question,
-                // this guards against a still-valid, still-expected result
-                // arriving after the user already said goodbye.
-                if (busyBrainState.isDiscarded()) {
+                // Busy-Brain PR 1 / generation-ownership fix (PR 2): the
+                // conversation was explicitly closed, the stuck-generation
+                // watchdog gave up waiting, or a genuinely newer user turn was
+                // accepted and answered while THIS generation was still
+                // pending -- either way, this generation's eventual answer
+                // must never be spoken. isDiscarded() is now id-scoped: true
+                // only if myBusyBrainGenerationId itself was discarded, or a
+                // newer generation has since begun -- never revalidated just
+                // because some other, still-later generation has come and
+                // gone in the meantime. Distinct from the token check above:
+                // that guards against a stale Activity instance/superseded
+                // question at the native-call layer, this guards Busy-Brain's
+                // own delivery decision.
+                if (busyBrainState.isDiscarded(myBusyBrainGenerationId)) {
                     busyBrainState.discardReason?.let {
                         diagLog.logBusyBrainDiscarded(it.toDiagReason(), DiagLog.BrainSource.TINYLLAMA)
                     }
-                    busyBrainState.complete()
+                    busyBrainState.complete(myBusyBrainGenerationId)
                     refreshThinkingFaceState()
                     return@generateAsync
                 }
@@ -4882,10 +4968,13 @@ Respond only with Scout's next reply.
                     // Capability-integrity backstop -- same reasoning as the
                     // Gemini deliverResult above, applied after the existing
                     // identity-leak cleanup rather than instead of it.
-                    deliverAiResult(ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, cleanOfflineReply(reply.trim())))
+                    deliverAiResult(
+                        ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(qNorm, cleanOfflineReply(reply.trim())),
+                        myBusyBrainGenerationId
+                    )
                 } else {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
-                    deliverAiResult("I'm not sure about that one.")
+                    deliverAiResult("I'm not sure about that one.", myBusyBrainGenerationId)
                 }
 
             }
@@ -4902,8 +4991,11 @@ Respond only with Scout's next reply.
             // onFailed fallback with isPending already true) and, when it
             // does speak, goes through deliverAiResult() rather than
             // respond() directly, for the same TTS-collision safety as any
-            // other AI-path outcome.
-            busyBrainState.complete()
+            // other AI-path outcome. Synchronous, same-call-stack bail-out in
+            // all three branches below (not an async completion), so a fresh
+            // currentGenerationId() read is safe in each.
+            val warmingUpGenId1 = busyBrainState.currentGenerationId()
+            busyBrainState.complete(warmingUpGenId1)
             // Explicit refresh, not left to deliverAiResult() below --
             // warmingUpSaidThisSession can make that call conditional
             // (spoken once per session only), so this branch can return
@@ -4912,7 +5004,7 @@ Respond only with Scout's next reply.
 
             if (!warmingUpSaidThisSession) {
                 warmingUpSaidThisSession = true
-                deliverAiResult("My offline brain is still warming up. Give me just a moment.")
+                deliverAiResult("My offline brain is still warming up. Give me just a moment.", warmingUpGenId1)
             }
 
             return
@@ -4924,21 +5016,23 @@ Respond only with Scout's next reply.
 
         if (LlamaEngine.isLoading) {
 
-            busyBrainState.complete()
+            val warmingUpGenId2 = busyBrainState.currentGenerationId()
+            busyBrainState.complete(warmingUpGenId2)
             // Same reasoning as the branch above -- warmingUpSaidThisSession
             // can skip deliverAiResult() entirely.
             refreshThinkingFaceState()
 
             if (!warmingUpSaidThisSession) {
                 warmingUpSaidThisSession = true
-                deliverAiResult("My offline brain is warming up. Ask me again in just a moment.")
+                deliverAiResult("My offline brain is warming up. Ask me again in just a moment.", warmingUpGenId2)
             }
 
             return
 
         }
 
-        busyBrainState.complete()
+        val nothingAvailableGenId = busyBrainState.currentGenerationId()
+        busyBrainState.complete(nothingAvailableGenId)
         refreshThinkingFaceState()
 
         // Nothing available — only report a connectivity problem if online features were
@@ -4951,7 +5045,7 @@ Respond only with Scout's next reply.
             // state, consistent with keeping PR 2's scope narrow.
             scoutGeminiManager.speakUnavailableIfNeeded()
         } else {
-            deliverAiResult("I'm working offline right now, so that one's a bit beyond me.")
+            deliverAiResult("I'm working offline right now, so that one's a bit beyond me.", nothingAvailableGenId)
         }
 
     }
@@ -5322,6 +5416,11 @@ Respond only with Scout's next reply.
             CalendarFollowupTopic.BIRTHDAY -> {
                 truthDb.upsertFact(resolvedEntity, "birthday", displayDate, 1.0f, "calendar_clarification")
                 val possessive = if (resolvedEntity == ENTITY_USER_PRIMARY) "your" else "$displayName's"
+                // Generation-ownership fix (PR 2): about to give a real,
+                // immediate answer to the now-resolved clarification -- any
+                // generation still pending belongs to an earlier, now-
+                // superseded question.
+                supersedeAnyPendingGeneration()
                 respond("Got it. I'll remember $possessive birthday is $displayDate.")
             }
 
@@ -5336,6 +5435,8 @@ Respond only with Scout's next reply.
                     ENTITY_USER_PRIMARY, FactKey.custom("anniversary_with_$resolvedEntity"),
                     displayDate, 1.0f, "calendar_clarification"
                 )
+                // Generation-ownership fix (PR 2): same reasoning as BIRTHDAY above.
+                supersedeAnyPendingGeneration()
                 respond("Got it. I'll remember your anniversary with $displayName is $displayDate.")
             }
 
@@ -5660,6 +5761,7 @@ Respond only with Scout's next reply.
     private fun BusyBrainDiscardReason.toDiagReason(): DiagLog.BusyBrainDiscardReason = when (this) {
         BusyBrainDiscardReason.CONVERSATION_CLOSED -> DiagLog.BusyBrainDiscardReason.CONVERSATION_CLOSED
         BusyBrainDiscardReason.TIMEOUT -> DiagLog.BusyBrainDiscardReason.TIMEOUT
+        BusyBrainDiscardReason.SUPERSEDED_BY_NEW_TURN -> DiagLog.BusyBrainDiscardReason.SUPERSEDED_BY_NEW_TURN
     }
 
     // Busy-Brain PR 1: called right after an explicit close (goodbye/stop
@@ -5836,6 +5938,10 @@ Respond only with Scout's next reply.
             }
             is PendingCalendarFollowup.DoctorCheckIn -> {
                 pendingCalendarFollowup = null
+                // Generation-ownership fix (PR 2): a real, immediate
+                // acknowledgment is about to be spoken -- a generation still
+                // pending belongs to an earlier, now-superseded question.
+                supersedeAnyPendingGeneration()
                 // Full early return -- never reaches handleTeaching(),
                 // ScoutIntentRouter, Gemini, or TinyLlama. The reply's content
                 // is never parsed, extracted, or stored; see Phrases.DOCTOR_CHECKIN_ACK.
@@ -5856,6 +5962,13 @@ Respond only with Scout's next reply.
                 respond(BUSY_BRAIN_DEFERRED, isStatusOnly = true)
                 return
             }
+
+            // Generation-ownership fix (PR 2): reached only once the check
+            // above has already confirmed nothing is pending, so this is
+            // always a harmless no-op today -- kept for consistency/
+            // documentation and so it stays correct if that gate's ordering
+            // ever changes.
+            supersedeAnyPendingGeneration()
 
             respond("Opening settings!")
 
@@ -5918,6 +6031,21 @@ Respond only with Scout's next reply.
             !ScoutBusyBrainPolicy.isSafeWhilePending(intent)) {
             respond(BUSY_BRAIN_DEFERRED, isStatusOnly = true)
             return
+        }
+
+        // Generation-ownership fix (PR 2): reached only once the deferred
+        // gate above has already let this intent through, i.e. it's about to
+        // be answered for real, right now -- never for a deferred/status-only
+        // reply. UNKNOWN is deliberately excluded here, same as the gate
+        // above: it has its own, more granular arbitration inside
+        // handleUnknownIntent()/handlePersonalMemoryQuery(), which supersedes
+        // (or not) at each of its own real-answer points individually, since
+        // reaching handleUnknownIntent() at all does not by itself mean a
+        // real answer is about to be given (BUSY_BRAIN_STILL_THINKING is a
+        // deferral, not an answer). Harmless no-op whenever nothing is
+        // actually pending.
+        if (busyBrainState.isPending && intent != IntentType.UNKNOWN) {
+            supersedeAnyPendingGeneration()
         }
 
         val isDirect = when (intent) {
