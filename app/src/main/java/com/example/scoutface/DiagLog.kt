@@ -126,8 +126,15 @@ class DiagLog(private val db: DiagnosticDb) {
      * brain package) as a controlled diagnostic token, the same way
      * ConversationEndReason is mirrored below -- keeps this class independent
      * of the brain package.
+     *
+     * SUPERSEDED_BY_NEW_TURN (generation-ownership fix, PR 2) -- a genuinely
+     * newer user turn was accepted and answered while this generation was
+     * still pending, via MainActivity's supersedeAnyPendingGeneration().
+     * Distinct from PendingAnswerDiscardReason.SUPERSEDED below, which
+     * covers an already-resolved, queued pendingAiAnswer being superseded by
+     * a brand new generative request -- a different lifecycle object.
      */
-    enum class BusyBrainDiscardReason { CONVERSATION_CLOSED, TIMEOUT }
+    enum class BusyBrainDiscardReason { CONVERSATION_CLOSED, TIMEOUT, SUPERSEDED_BY_NEW_TURN }
 
     /**
      * Why a queued pendingAiAnswer (MainActivity, Busy-Brain PR 2's holding
