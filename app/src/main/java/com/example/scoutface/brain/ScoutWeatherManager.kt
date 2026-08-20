@@ -112,29 +112,26 @@ class ScoutWeatherManager(
             return
         }
 
-        val q = query.trim().lowercase()
+        // Query classification (which period(s), which named day if any) is
+        // delegated to the pure ScoutWeatherQueryClassifier -- see its own
+        // doc comment for the same-day "today" fix. Everything from here
+        // down (caching, location, the NWS calls, period parsing) is
+        // unchanged.
+        val classification = ScoutWeatherQueryClassifier.classify(query)
+        dispatch(classification.type.toDispatchQueryType(), classification.specificDay)
+    }
 
-        val specificDay = listOf(
-            "monday", "tuesday", "wednesday", "thursday",
-            "friday", "saturday", "sunday"
-        ).firstOrNull { q.contains(it) }
-            ?.replaceFirstChar { it.uppercase() }
-
-        val type = when {
-            specificDay != null -> QueryType.SPECIFIC_DAY
-            q.contains("tomorrow") -> QueryType.TOMORROW
-            q.contains("tonight") -> QueryType.TONIGHT
-            q.contains("week") || q.contains("days") ||
-                    q.contains("forecast") -> QueryType.WEEK
-            else -> QueryType.CURRENT
-        }
-
-        val todayName = if (specificDay == null && q.contains("today") &&
-            (q.contains("going to") || q.contains("will") ||
-                    q.contains("later") || q.contains("rest of")))
-            SimpleDateFormat("EEEE", Locale.US).format(java.util.Date()) else null
-
-        dispatch(if (todayName != null) QueryType.SPECIFIC_DAY else type, todayName ?: specificDay)
+    // The classifier's own QueryType enum is a duplicate-but-independent
+    // copy of this class's private QueryType -- deliberately: the
+    // classifier is Android-import-free and unit-testable on its own, so it
+    // can't share a nested-private enum with an Android-dependent class.
+    // This one-to-one mapping is the only place the two ever need to meet.
+    private fun ScoutWeatherQueryClassifier.QueryType.toDispatchQueryType(): QueryType = when (this) {
+        ScoutWeatherQueryClassifier.QueryType.CURRENT -> QueryType.CURRENT
+        ScoutWeatherQueryClassifier.QueryType.TONIGHT -> QueryType.TONIGHT
+        ScoutWeatherQueryClassifier.QueryType.TOMORROW -> QueryType.TOMORROW
+        ScoutWeatherQueryClassifier.QueryType.SPECIFIC_DAY -> QueryType.SPECIFIC_DAY
+        ScoutWeatherQueryClassifier.QueryType.WEEK -> QueryType.WEEK
     }
 
     // =======================
