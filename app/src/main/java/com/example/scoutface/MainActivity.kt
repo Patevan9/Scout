@@ -119,6 +119,7 @@ import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
 import com.example.scoutface.brain.ScoutPendingAnswerGate
 import com.example.scoutface.brain.ScoutGreetingIdentity
+import com.example.scoutface.brain.ScoutFaceSampleQuality
 import com.example.scoutface.brain.ScoutBeepMuteGuard
 import com.example.scoutface.brain.ScoutVisionGate
 import com.example.scoutface.brain.ScoutVoiceSelector
@@ -645,6 +646,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Minimum score to add an embedding to a person's stored profile. Higher than the
     // recognition threshold (0.65) so borderline matches don't pollute other people's profiles.
     private val CONFIDENT_EMBED_THRESHOLD = 0.72f
+
+    // Face-Sample Quality Gate v1 (ScoutFaceSampleQuality) -- gates ONLY whether an
+    // automatically-captured embedding is allowed to be STORED as a future recognition
+    // sample; it never gates recognition/matching itself, which always runs first and
+    // is unaffected by this. Deliberately looser than the direct-address thresholds
+    // below (LISTENING_REMINDER_MIN_FACE_HEIGHT_FRACTION / LISTENING_REMINDER_MAX_YAW_DEGREES),
+    // which answer a stricter, different question ("is this person actively addressing
+    // Scout right now") -- a face usable as a future recognition sample doesn't need to
+    // clear that much higher bar. Applies only to the automatic background write paths
+    // (confident multi-embedding enrichment, the legacy single-hash fallback, and the
+    // truly-unknown-face store, for both the primary and secondary face) -- never to
+    // pending-introduction resolution or explicit "my name is X"/family-registration
+    // enrollment, which stay exactly as they were.
+    private val MIN_FACE_HEIGHT_FRACTION_FOR_STORAGE = 0.10f
+    private val MAX_ABS_YAW_DEGREES_FOR_STORAGE = 45f
 
     private val embedRunning = AtomicBoolean(false)
 
@@ -2554,6 +2570,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                     val capturedBox = largest.boundingBox
 
+                                    // Face-Sample Quality Gate v1 -- yaw is already computed by ML
+                                    // Kit as part of base pose estimation for every detected face
+                                    // (no landmark mode needed); this is only capturing the SAME
+                                    // face's own value into the embed worker alongside its box, not
+                                    // a new detector feature.
+                                    val capturedYaw = largest.headEulerAngleY
+
                                     val capturedRotation = rotation
 
                                     val capW = bitmapW
@@ -2563,6 +2586,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     val capturedHash = hashes.firstOrNull()
 
                                     val capturedSecondBox = secondFace?.boundingBox
+
+                                    val capturedSecondYaw = secondFace?.headEulerAngleY
 
                                     val uprW = if (capturedRotation == 90 || capturedRotation == 270) capH else capW
 
@@ -2646,35 +2671,55 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                     lastFaceEmbedding = embedding
 
                                                     // findBestMatchName (multi-embedding table) first for best accuracy,
-                                                    // then fall back to the single-embedding hash table.
+                                                    // then fall back to the single-embedding hash table. Recognition/
+                                                    // matching always runs here, unconditionally, before the storage
+                                                    // quality gate below is even computed -- the gate can only skip a
+                                                    // storeEmbedding()/addNamedEmbedding() call, it never affects
+                                                    // whether THIS frame's face gets identified.
                                                     val multiMatch = peopleDb.findBestMatchNameWithScore(embedding)
                                                     val resolvedNameFromMulti = multiMatch?.first
                                                     val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
                                                     val resolvedName = resolvedNameFromMulti
                                                         ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
 
+                                                    // Face-Sample Quality Gate v1 (ScoutFaceSampleQuality) -- only
+                                                    // decides whether THIS crop is good enough to bank as a future
+                                                    // recognition sample; gates the automatic writes below (A/B/D),
+                                                    // never the pending-introduction path just above/below it or
+                                                    // explicit enrollment elsewhere, which stay ungated in v1.
+                                                    val primaryFaceHeightFraction = capturedBox.height().toFloat() / uprH
+                                                    val primaryQualityOk = ScoutFaceSampleQuality.isGoodForAutomaticStorage(
+                                                        primaryFaceHeightFraction,
+                                                        capturedYaw,
+                                                        MIN_FACE_HEIGHT_FRACTION_FOR_STORAGE,
+                                                        MAX_ABS_YAW_DEGREES_FOR_STORAGE
+                                                    )
+
                                                     if (!resolvedName.isNullOrBlank()) {
                                                         // Only add to profile when confidently matched — prevents cross-person pollution
                                                         // when a borderline match fires near the recognition threshold.
                                                         lastKnownFaceName = resolvedName
-                                                        if ((multiMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
+                                                        if ((multiMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD && primaryQualityOk) {
                                                             peopleDb.addNamedEmbedding(resolvedName, embedding)
                                                         }
-                                                        if (nameMatchHash != null) peopleDb.storeEmbedding(nameMatchHash, embedding)
+                                                        if (nameMatchHash != null && primaryQualityOk) peopleDb.storeEmbedding(nameMatchHash, embedding)
                                                         pendingFaceIntroName = null
                                                     } else {
                                                         // Unknown face — check for a pending introduction.
                                                         val pendingName = pendingFaceIntroName
                                                         if (pendingName != null && capturedHash != null) {
-                                                            // Someone was introduced while another person was
-                                                            // the primary face. This unknown face is probably them.
+                                                            // Someone was introduced while another person was the
+                                                            // primary face. This unknown face is probably them --
+                                                            // pending-introduction resolution is deliberately NOT
+                                                            // quality-gated in v1 (a rare, user-initiated moment, not
+                                                            // a continuously-repeating automatic write).
                                                             peopleDb.touchSeen(capturedHash)
                                                             peopleDb.setName(capturedHash, pendingName)
                                                             peopleDb.storeEmbedding(capturedHash, embedding)
                                                             peopleDb.addNamedEmbedding(pendingName, embedding)
                                                             lastKnownFaceName = pendingName
                                                             pendingFaceIntroName = null
-                                                        } else if (capturedHash != null) {
+                                                        } else if (capturedHash != null && primaryQualityOk) {
                                                             // Truly unknown — store embedding for greeting flow.
                                                             peopleDb.storeEmbedding(capturedHash, embedding)
                                                         }
@@ -2724,13 +2769,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                                 val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
                                                                 if (h2 != null) secName = peopleDb.getName(h2)
                                                             }
+                                                            // Face-Sample Quality Gate v1 -- secondary face's own
+                                                            // measurements, same policy as the primary face. The ?: 0f
+                                                            // fallback is never actually reached here: capturedSecondYaw
+                                                            // is captured from the same secondFace as capturedSecondBox,
+                                                            // and this block only runs when capturedSecondBox is non-null.
+                                                            val secondaryFaceHeightFraction = capturedSecondBox.height().toFloat() / uprH
+                                                            val secondaryQualityOk = ScoutFaceSampleQuality.isGoodForAutomaticStorage(
+                                                                secondaryFaceHeightFraction,
+                                                                capturedSecondYaw ?: 0f,
+                                                                MIN_FACE_HEIGHT_FRACTION_FOR_STORAGE,
+                                                                MAX_ABS_YAW_DEGREES_FOR_STORAGE
+                                                            )
                                                             if (secName == null && pendingFaceIntroName != null) {
                                                                 // Introduction was given while primary face was someone else —
                                                                 // this unknown secondary face is who was being introduced.
+                                                                // Deliberately NOT quality-gated in v1, same as the primary
+                                                                // pending-introduction path above.
                                                                 secName = pendingFaceIntroName
                                                                 peopleDb.addNamedEmbedding(secName!!, emb2)
                                                                 pendingFaceIntroName = null
-                                                            } else if (secName != null && (secMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD) {
+                                                            } else if (secName != null && (secMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD && secondaryQualityOk) {
                                                                 peopleDb.addNamedEmbedding(secName, emb2)
                                                             }
                                                             lastSecondaryFaceName = secName
