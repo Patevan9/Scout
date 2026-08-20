@@ -25,7 +25,8 @@ class ScoutBusyBrainFillerTimingTest {
     @Test fun `answer completes before the filler threshold -- no filler needed`() {
         val state = ScoutBusyBrainState()
         state.tryBegin(0L) // generation dispatched at t=0
-        state.complete()   // a fast Gemini answer resolves at, say, t=900ms
+        val id = state.currentGenerationId()
+        state.complete(id) // a fast Gemini answer resolves at, say, t=900ms
 
         // At the scheduled t=2000ms check, MainActivity reads isPending fresh:
         assertFalse(state.isPending) // -- false, so nothing is said.
@@ -59,11 +60,12 @@ class ScoutBusyBrainFillerTimingTest {
     @Test fun `conversation explicitly closed before the filler threshold -- no filler speaks`() {
         val state = ScoutBusyBrainState()
         state.tryBegin(0L)
+        val id = state.currentGenerationId()
         state.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED) // goodbye said at t=800ms
 
         // At the scheduled t=2000ms check:
         assertFalse(state.isPending) // -- false, so nothing is said, even though the
-        assertTrue(state.isDiscarded()) //    underlying generation may still be running.
+        assertTrue(state.isDiscarded(id)) //    underlying generation may still be running.
     }
 
     @Test fun `a genuine intervening deterministic interaction still allows the earlier-question bridge`() {
@@ -72,13 +74,14 @@ class ScoutBusyBrainFillerTimingTest {
         // speaking its answer when the AI generation resolves.
         val state = ScoutBusyBrainState()
         state.tryBegin(0L)
+        val id = state.currentGenerationId()
 
         // The deterministic follow-up is answered entirely outside
         // busyBrainState -- see ScoutBusyBrainPolicy -- so isPending is
         // untouched by it.
         assertTrue(state.isPending) // the AI generation is still genuinely in flight
 
-        state.complete() // the AI answer resolves now, while Scout is speaking the follow-up
+        state.complete(id) // the AI answer resolves now, while Scout is speaking the follow-up
 
         // deliverAiResult() consults ScoutBusyBrainDelivery (unchanged since
         // PR 2) with the real isSpeaking flag -- true here, since Scout is
