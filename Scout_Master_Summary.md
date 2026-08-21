@@ -1,13 +1,42 @@
 # Project Scout — Master Project Summary
 
-Last updated: August 19, 2026
-Based on commit: 0a6101ab0e6dc3b85f51e10218a2e35e1073af41
-Status: Current. This pass catches up PRs #41–53 and #55 (all merged) — memory-integrity backstops, a gaze-drift amplitude tune, two Companion Moments refinements, widened family/vision routing, a self-identity guard, a TeachExtractor question-vs-statement fix, the thinking-face lifecycle fix, the courtesy acknowledgment extension, the Companion-Moment-vs-return-greeting priority fix, correlated TTS lifecycle diagnostics, deterministic `CourtesyIntent.WELCOME_BACK` courtesy routing (PR #53), and the `pendingAiAnswer` lifecycle fix — 30s expiry, a presence-completion guard, supersede-on-new-request, paired clear (PR #55). **Both PR #53 and PR #55 are merged — not proposed, not approved-but-unimplemented, not awaiting a PR.** **The next development step is real-device testing, not further coding** — see "Current development phase" below. PR #38's calendar-follow-up flow and PR #35's TTS fix (Diana's S24) both remain separately pending real-device validation, unchanged by this pass.
+Last updated: August 20, 2026
+Based on commit: 822a3095174e28c77f7b001ee12ad68c3e174858
+Status: Current. This pass adds PRs #60–62 (all merged) — the weather TODAY-routing
+fix (PR #60), id-scoped stale-generation invalidation for the Busy-Brain
+generation-ownership race (PR #61), and the bundled Local Language Pack v1 (PR
+#62). All three independently re-verified post-merge (byte-identical to the
+externally-reviewed head, exact file scope, exactly one merge commit each) and
+independently reviewed by ChatGPT against the actual GitHub diff before merge.
+**Note:** this session's visibility starts at verified main
+c584fe91743858ce529e0870141fbdf880938922 — it cannot confirm or account for
+PRs #56–59 if they exist; reconcile against GitHub directly before treating this
+as a complete history.
 
-**Version 63**
+**Version 64**
 
 Upload this document at the start of every new Claude or ChatGPT conversation about Scout.
 This is the single source of truth.
+
+---
+
+## August 20, 2026 — PRs #60–62 Merged: Weather TODAY-Routing Fix, Generation-Ownership Invalidation, Local Language Pack v1
+
+✓ **Context.** A long session in three parts: (1) two confirmed real-device issues investigated first, designed second, implemented third and separately — a weather query misrouting "today" to a broken weekday lookup, and a stale-generation/TTS race; (2) a from-scratch investigation into speech/language understanding (STT candidate usage, short-response normalization, git-history audit of a previously-deleted download-based dictionary/idiom/WordNet/slang system) that led to a new, deliberately small, fully-offline Local Language Pack design; (3) that design implemented as PR #62. Every PR went through the same gated investigate → design → design-revision → implement → merge → independently-verify cycle, with ChatGPT independently reviewing each actual GitHub diff before Patrick authorized merging.
+
+### Weather TODAY-routing fix (PR #60)
+
+✓ **PR #60 merged** (branch `claude/weather-today-routing-fix`, merge commit `fc14c3d4a4b124fc9ab34975e23051d54a9b91b6`) — root cause: NWS labels same-day forecast periods "Today"/"Tonight", never the literal weekday name, so a "today"-phrased query (especially with future-tense wording) was misrouted into a weekday-name lookup that could never match, producing "I can only see about a week ahead...Thursday from here." New pure `ScoutWeatherQueryClassifier` (Android-free, `brain/`) extracts the query-type classification previously inlined in `ScoutWeatherManager.fetchWeather()`, correctly routing same-day phrasing to `CURRENT` while genuine named weekdays still route to `SPECIFIC_DAY`. 12 tests. Caching, location, NWS networking, offline behavior, and non-weather code untouched.
+
+### Busy-Brain generation-ownership invalidation (PR #61)
+
+✓ **PR #61 merged** (branch `claude/generation-ownership-invalidation`, merge commit `df688a4f64e94e90577feb4d97026db3df488596`) — root cause: `ScoutBusyBrainState`'s `isPending`/`discardReason` was the *only* validity signal, shared globally across whichever generation happened to be pending — a stale generation A discarded because a newer deterministic turn B superseded it could become wrongly "valid" again the instant a still-later generation C began, because `tryBegin()` unconditionally reset `discardReason = null` for the whole class. Fixed with a RAM-only, monotonically increasing `currentGenerationId` owned by `ScoutBusyBrainState`; every async completion (Gemini and TinyLlama both, `ScoutLlamaController`'s own separate token left untouched) now captures and checks its own id rather than "whatever is current now." New `supersedeAnyPendingGeneration()` helper wired at exactly six approved call sites (calendar-clarification answers, doctor-checkin acknowledgment, settings, the main deterministic-intent gate, vision, personal-memory-query answers) with an explicit non-supersede list (courtesy, filler, deferred/still-thinking, repeat-request). 20 tests including an A→B→C→late-A race regression. One CI-failure fix-forward (a pre-existing test file using the old API) and one ChatGPT-requested stale-test-description correction, both resolved before merge.
+
+### Local Language Pack v1 (PR #62)
+
+✓ **PR #62 merged** (branch `claude/language-pack-v1`, merge commit `425e92165035dfcc9035c49e05338de9a2599e77`) — preceded by a full investigation (current speech-recognition candidate handling — confirmed Scout reads only `RESULTS_RECOGNITION.firstOrNull()`, no confidence scores, no multi-candidate use anywhere) and a git-history audit that found and confirmed dead a previously-deleted runtime-download system (`ScoutDatasetStore`/`OfflineLexicon`, removed commit `89cd6b3`, never actually called by anything even before removal) that once fetched a dictionary/idioms/WordNet/sentiment/slang from third-party URLs. New design deliberately avoids repeating that mistake: `app/src/main/assets/datasets/language_pack.json` is bundled in the APK, zero runtime download. New pure `ScoutLanguagePack` (`brain/`, zero `android.*`/`org.json`/`Context` imports) receives an already-decoded plain Kotlin structure from `MainActivity`'s Android-side loader, owns validation (a surface variant duplicated across — or within — categories is rejected from the lookup entirely, never resolved by first/last-wins), flattening, and exact `categoryFor(normalized)` lookup — v1 is exact-match only, no fuzzy tolerance. Translates 29 curated variants across 5 categories (GREETING/ACKNOWLEDGE/CONFIRM/THANKS/GOODBYE) into existing `CourtesyIntent` values via `handleCourtesy()` — never a new decision engine, never touches TruthDb/HabitLayer/memory, never reaches Gemini/TinyLlama. Consulted in `onResults()` only after `ScoutCourtesyMatcher` already misses; a miss falls through unchanged. YES/NO deliberately excluded from v1 entirely (Scout currently has no generic pending-yes/no-question mechanism to safely gate an approval/decline action on). 12 tests. Loader fails safely to an empty pack on any read/parse error — Scout always boots.
+
+*The idioms.json audit and the language-pack architecture investigation (STT candidate safety, exact-vs-fuzzy staging, why the old dictionary/idioms/WordNet/sentiment/slang bundle wasn't reusable) are recorded in full in this session's own transcript, not reproduced here — see the PR #62 discussion/design history if revisiting this area.*
 
 ---
 
