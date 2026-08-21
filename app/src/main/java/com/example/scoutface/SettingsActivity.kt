@@ -232,7 +232,23 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("MEMORY"))
         body.addView(cardGroup(
-            navRow("Memory Export", "", "Save Scout's memory to a file") { toast("Use the voice command 'export brain' for now — UI export coming soon!") },
+            navRow("Memory Export", "", "Save Scout's memory to a file") {
+                try {
+                    TruthDb(this).use { truthDb ->
+                        PeopleDb(this).use { peopleDb ->
+                            val exportManager = ScoutExportManager(this, truthDb, peopleDb)
+                            val path = exportManager.exportBrainToJson()
+                            if (path != null && exportManager.shareJsonFileSafely(path)) {
+                                toast("Memory export ready. A share menu should open.")
+                            } else {
+                                toast("Sorry, couldn't export memory.")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    toast("Error: ${e.message}")
+                }
+            },
             navRow("Import Memory", "", "Load memory from a file to restore or transfer") { toast("Memory Import coming in a future update!") },
             navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
         ))
