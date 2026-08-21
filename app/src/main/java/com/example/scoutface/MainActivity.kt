@@ -4231,10 +4231,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         refreshThinkingFaceState()
 
+        // TTS caption UI-thread safety. UtteranceProgressListener callbacks (see
+        // tts.setOnUtteranceProgressListener() above) are not guaranteed to run on
+        // the main thread -- confirmed on the Galaxy A32 real device. speak() is
+        // itself called from both main-thread paths (onResults()/handleQuery()) and
+        // from those TTS callback threads (e.g. chained/queued speech), so a bare
+        // TextView mutation here risked CalledFromWrongThreadException on the
+        // callback-thread path. Wrapped in runOnUiThread{} -- the same marshaling
+        // pattern already used elsewhere in this file (runOnMain = { action ->
+        // runOnUiThread { action() } }, passed into ScoutWeatherManager and another
+        // manager at construction; ScoutFaceView.setOnUiThread is the same idea,
+        // self-contained to that class) -- reused directly rather than adding a
+        // third variant. runOnUiThread executes immediately/synchronously when
+        // already on the main thread (the overwhelming majority of calls), so
+        // ordering/timing is unchanged there; it only defers by one Looper-queue hop
+        // in the one case that matters. Nothing else in speak() changes.
         if (captionsEnabled) {
-            handler.removeCallbacks(captionHideRunnable)
-            captionsText.text = text
-            captionsText.visibility = View.VISIBLE
+            runOnUiThread {
+                handler.removeCallbacks(captionHideRunnable)
+                captionsText.text = text
+                captionsText.visibility = View.VISIBLE
+            }
         }
 
         stopListeningSafe()
