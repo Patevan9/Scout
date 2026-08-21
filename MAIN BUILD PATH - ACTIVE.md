@@ -1,6 +1,9 @@
-Last updated: July 29, 2026
-Based on commit: 5867c54ba29de4e86ddbd3eadf7ac21cdef2d86f
-Status: Current
+Last updated: August 20, 2026
+Based on commit: 52bbc1c95a02db6699d4fb8a3936a3641809a5f2
+Status: Partially current — the PR #1 item below was verified stale (PR #1 merged
+July 30, 2026, commit `b5b5388`) and corrected August 20, 2026. Everything else in
+this document was last verified July 29, 2026 and was NOT independently re-checked
+in this pass — confirm before relying on it.
 
 # Scout — Main Build Path (Active)
 
@@ -10,15 +13,13 @@ What's actually being worked on right now. Completed work is removed from this d
 
 ## Current Priorities
 
-1. **On-device regression pass before merging PR #1.** PR #1 (`claude/test-coverage-analysis-hsp9lt` → `main`, https://github.com/Patevan9/Scout/pull/1) carries the entire accumulated diff since `main` was last synced — 255 commits, 93 files, +10,835/−2,729 lines. Every individual commit has a confirmed-green CI build, but CI only compiles the app; it does not run it. Given the size of this diff (face recognition, presence layer, memory/entity system, security hardening, startup-gate rework, TinyLlama lifecycle rework all included), a real on-device pass on both test devices is the responsible next step before treating this as the new `main`.
-2. **Restore presence-layer thresholds to production values.** Both presence moments currently ship with deliberately-lowered thresholds left over from A32 smoke-testing (see In Progress below) — they need to be confirmed working at those values on-device, then restored to their intended production numbers.
-3. **Fold 7 dedicated stability testing.** All recent testing (A32 crash root-causing, presence-layer smoke tests, startup-gate testing) has been on the Galaxy A32. The Fold 7 is Scout's primary target device but hasn't had its own dedicated validation session recently.
+1. **Restore presence-layer thresholds to production values.** Both presence moments currently ship with deliberately-lowered thresholds left over from A32 smoke-testing (see In Progress below) — they need to be confirmed working at those values on-device, then restored to their intended production numbers.
+2. **Fold 7 dedicated stability testing.** All recent testing (A32 crash root-causing, presence-layer smoke tests, startup-gate testing) has been on the Galaxy A32. The Fold 7 is Scout's primary target device but hasn't had its own dedicated validation session recently.
 
 ---
 
 ## Current Blockers
 
-- **PR #1 not yet merged** — blocked on the on-device regression pass above, by deliberate choice (not a technical blocker; CI is green and the PR is cleanly mergeable).
 - **Play Asset Delivery (PAD) wiring** — `ModelDownloadActivity` currently delivers the ~669MB TinyLlama model via Android's `DownloadManager` from a GitHub Release asset URL, which works end-to-end (this replaced an earlier unfilled-placeholder state). Wiring Play Asset Delivery as an alternative/replacement delivery mechanism for a real Play Store release is still unstarted — not urgent since the current mechanism is functional, but worth deciding on before a real store submission.
 - **Play Store listing** — description, screenshots, content rating, and the privacy-policy link for the store listing itself are not yet prepared (separate from the in-app privacy policy dialog, which is done).
 - **Open Source Credits screen** — `THIRD_PARTY_NOTICES.md` exists in the repo (MobileFaceNet's MIT license documented) but there's no in-app screen surfacing it yet; needed before a store launch.
@@ -58,10 +59,9 @@ Deliberately not being worked on right now, either by explicit hold or because t
 
 In rough priority order:
 
-1. Run the on-device regression pass (A32 + Fold 7) needed to responsibly merge PR #1.
-2. Confirm presence-layer behavior at current smoke-test thresholds on-device, then restore both to production values and remove/gate the temporary debug logging.
-3. Dedicated Fold 7 stability session, independent of the PR-merge regression pass.
-4. Low-risk, high-value cleanup pass: delete confirmed dead code (`ScoutDatabase.kt`, `PersonEntity.kt`, `VisionLabelFilter.kt`) and the now-unused Gradle dependencies (`androidx.room:*`, `com.squareup.okhttp3:okhttp`) — verified unused, no behavior risk. See `MainActivity Cleanup.md` §3.
-5. Decide the fate of the disconnected Settings robot-rename control (fix the wiring, or remove the control) — currently misleading to a user who tries it.
-6. Plan the `startCamera()` decomposition as its own dedicated session once the above is settled.
-7. Prepare Play Store listing assets (description, screenshots, content rating) and the in-app Open Source Credits screen ahead of any real store submission.
+1. Confirm presence-layer behavior at current smoke-test thresholds on-device, then restore both to production values and remove/gate the temporary debug logging.
+2. Dedicated Fold 7 stability session.
+3. Low-risk, high-value cleanup pass: delete confirmed dead code (`ScoutDatabase.kt`, `PersonEntity.kt`, `VisionLabelFilter.kt`) and the now-unused Gradle dependencies (`androidx.room:*`, `com.squareup.okhttp3:okhttp`) — verified unused, no behavior risk. See `MainActivity Cleanup.md` §3.
+4. Decide the fate of the disconnected Settings robot-rename control (fix the wiring, or remove the control) — currently misleading to a user who tries it.
+5. Plan the `startCamera()` decomposition as its own dedicated session once the above is settled.
+6. Prepare Play Store listing assets (description, screenshots, content rating) and the in-app Open Source Credits screen ahead of any real store submission.
