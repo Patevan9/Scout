@@ -124,6 +124,7 @@ import com.example.scoutface.brain.ScoutBeepMuteGuard
 import com.example.scoutface.brain.ScoutVisionGate
 import com.example.scoutface.brain.ScoutVoiceSelector
 import com.example.scoutface.brain.VoiceCandidate
+import com.example.scoutface.brain.ScoutLanguagePack
 
 import com.google.mlkit.vision.common.InputImage
 
@@ -140,6 +141,7 @@ import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 
 import java.io.File
+import org.json.JSONObject
 
 import java.text.SimpleDateFormat
 
@@ -909,6 +911,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var diagLog: DiagLog
 
     private lateinit var habitLayer: HabitLayer
+
+    // Scout Local Language Pack (v1) -- see ScoutLanguagePack's own doc comment
+    // for the full architecture. Loaded once here from the bundled
+    // language_pack.json asset (loadLanguagePackSource() does the Android-side
+    // JSON decode); ScoutLanguagePack itself is pure and never touches Android.
+    private lateinit var languagePack: ScoutLanguagePack
 
     private lateinit var voice: VoiceBank
 
@@ -1885,6 +1893,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         voice = VoiceBank(prefs)
 
         exportManager = ScoutExportManager(this, truthDb, peopleDb)
+
+        languagePack = ScoutLanguagePack(loadLanguagePackSource())
 
         ensureScoutIdentityDefaults()
 
@@ -3279,6 +3289,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     handleCourtesy(courtesy)
                     scheduleListenRestart()
                     return
+                }
+
+                // Scout Local Language Pack (v1) -- a small, bundled-only vocabulary
+                // extension for the SAME deterministic courtesy behavior above, never
+                // a new decision engine. Checked only after ScoutCourtesyMatcher has
+                // already missed -- see ScoutLanguagePack's own doc comment for the
+                // full architecture (pure lookup, Android-free, exact match only).
+                //
+                // Deliberately placed BEFORE the one-word allowlist below, not after
+                // -- an exact language-pack hit ("yo", "sup") is accepted even though
+                // it isn't in allowedOneWord. This is intentional, not an accidental
+                // bypass: by the time this runs, ScoutCourtesyMatcher has already
+                // missed, the ENTIRE normalized utterance must exactly equal one of
+                // the small number of deliberately curated variants bundled in
+                // language_pack.json, and v1 has no fuzzy matching -- so nothing else
+                // can slip through this path.
+                languagePack.categoryFor(normalized)?.let { category ->
+                    courtesyIntentForLanguagePackCategory(category)?.let { courtesy ->
+                        convoDb.logTurn("user", normalized)
+                        handleCourtesy(courtesy)
+                        scheduleListenRestart()
+                        return
+                    }
                 }
 
                 val allowedOneWord = setOf(
@@ -5669,6 +5702,55 @@ Respond only with Scout's next reply.
 
         respond(out)
 
+    }
+
+    // Scout Local Language Pack (v1) -- Android-side half of the pure/Android
+    // split ScoutLanguagePack requires (see its own doc comment): reads the
+    // bundled asset and decodes its JSON wire format with org.json here, then
+    // hands ScoutLanguagePack only the resulting plain, Android-free
+    // List<Pair<String, List<String>>> -- ScoutLanguagePack itself never touches
+    // org.json or Android at all. Fails safely: any read/parse problem is logged
+    // and an empty list is returned rather than crashing boot or speaking a new
+    // error -- Scout must always boot, and an empty pack just means
+    // categoryFor() always returns null, i.e. today's behavior, unchanged.
+    private fun loadLanguagePackSource(): List<Pair<String, List<String>>> {
+        return try {
+            val text = assets.open("datasets/language_pack.json").bufferedReader().use { it.readText() }
+            val categories = JSONObject(text).getJSONObject("categories")
+            val result = ArrayList<Pair<String, List<String>>>()
+            val keys = categories.keys()
+            while (keys.hasNext()) {
+                val categoryName = keys.next()
+                val variantsJson = categories.getJSONObject(categoryName).getJSONArray("variants")
+                val variants = ArrayList<String>(variantsJson.length())
+                for (i in 0 until variantsJson.length()) {
+                    variants.add(variantsJson.getString(i))
+                }
+                result.add(categoryName to variants)
+            }
+            result
+        } catch (e: Exception) {
+            Log.e("ScoutLanguagePack", "loadLanguagePackSource failed", e)
+            journalDb.add("loadLanguagePackSource failed: ${e.javaClass.simpleName}: ${e.message}")
+            emptyList()
+        }
+    }
+
+    // The only place a ScoutLanguagePack category name is translated into
+    // existing behavior -- exactly the five approved v1 categories, each mapped
+    // to the CourtesyIntent that already has real, deterministic handling in
+    // handleCourtesy() below. Deliberately a closed `when` with an else -> null:
+    // any other category name the data might someday contain (there are none in
+    // v1) resolves to no action at all rather than guessing, and this is the
+    // ONLY code that would need to change to wire in a future category -- see
+    // ScoutLanguagePack's own doc comment for why YES/NO are excluded here.
+    private fun courtesyIntentForLanguagePackCategory(category: String): CourtesyIntent? = when (category) {
+        "GREETING" -> CourtesyIntent.GREET
+        "ACKNOWLEDGE" -> CourtesyIntent.ACKNOWLEDGE
+        "CONFIRM" -> CourtesyIntent.CONFIRM
+        "THANKS" -> CourtesyIntent.THANKS
+        "GOODBYE" -> CourtesyIntent.GOODBYE
+        else -> null
     }
 
     // Answers a Courtesy Phase 1 match (see ScoutCourtesyMatcher) directly via

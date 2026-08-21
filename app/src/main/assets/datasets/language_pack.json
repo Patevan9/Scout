@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "categories": {
+    "GREETING": {
+      "variants": ["what is up", "wassup", "sup", "howdy", "greetings", "hiya", "yo"]
+    },
+    "ACKNOWLEDGE": {
+      "variants": ["gotcha", "no worries", "fair enough", "sounds great", "makes sense", "roger that", "noted", "understood"]
+    },
+    "CONFIRM": {
+      "variants": ["you got it", "spot on", "you nailed it", "precisely", "right on the money"]
+    },
+    "THANKS": {
+      "variants": ["thanks a lot", "thanks so much", "much appreciated", "appreciate it", "many thanks"]
+    },
+    "GOODBYE": {
+      "variants": ["catch you later", "take care", "see ya", "have a good one"]
+    }
+  }
+}
