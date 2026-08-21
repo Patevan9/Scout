@@ -1,10 +1,10 @@
 # Project Scout — Play Store Launch Checklist
 
-Last updated: August 19, 2026
-Based on commit: 0a6101ab0e6dc3b85f51e10218a2e35e1073af41
-Status: Current. PRs #41–53 and #55 reviewed and merged — none change any launch-blocker status (see "Must Fix" section below, unchanged). All are reliability/trust/routing fixes and real-device polish, noted below under "Memory & family recognition" and "Core presence & interaction" where relevant — see `Scout_Master_Summary.md`'s August 16–19 entry and `Scout_Quick_Start.md` for full detail, not duplicated here. Next step for #53/#55 is real-device testing, not more coding. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending, unchanged by this pass.
+Last updated: August 21, 2026
+Based on commit: 759cf4e9c1e9081cab52caf25b37cb50a5d37396
+Status: Current. PRs #60–62 reviewed and merged — none change any launch-blocker status (see "Must Fix" section below, unchanged); all are reliability/routing/capability fixes, noted below under "Core presence & interaction." PR #63 (a real A32 stability finding — a TTS-caption `TextView` mutation risked `CalledFromWrongThreadException` off the main thread) is fixed and CI green but **not yet merged** — item 1 below should not be treated as covering it until it lands on `main`. **Note:** this pass cannot confirm or account for PRs #56–59 if they exist; reconcile against GitHub directly before treating this as a complete history. PR #35 (TTS default voice) is merged; real-device validation on Diana's Galaxy S24 specifically is still pending, unchanged by this pass.
 
-**Version 28**
+**Version 29**
 
 Scout does not need to be perfect to ship. He needs to be reliable, honest, and feel like a companion.
 This document tracks ONLY what determines whether Scout can safely and honestly ship to the Play Store — not general feature ideas. Full itemized history with dates and commits lives in `Scout_Master_Summary.md`; post-launch feature plans live there too (see the pointers below instead of a second copy of that list here).
@@ -32,6 +32,9 @@ Condensed ship-readiness summary. Full itemized history with dates and commit ha
 - Correlated TTS lifecycle diagnostics added (PR #52, Aug 19) for a real-device report of a reply displaying but never speaking — instrumentation only, no speech text logged, no behavior change.
 - "Welcome back!" and close variants said to Scout's own boot/return greeting now get a deterministic courtesy reply instead of reaching Gemini/TinyLlama as an open-ended question (PR #53, Aug 19) — exact-match only, not a loose substring route.
 - A stale queued AI answer (Busy-Brain's holding slot for a reply that resolved while Scout was mid-utterance) can no longer drain onto an unrelated later remark — 30-second expiry, a presence-completion guard, and supersede-on-new-question all now protect it (PR #55, Aug 19). **Not yet exercised on a real device — real-device testing is the current next step, not further coding.**
+- Weather "today" queries no longer misroute to a broken weekday-name lookup (PR #60, Aug 20) — NWS labels same-day forecast periods "Today"/"Tonight," never a literal weekday name, so a same-day, future-tense-phrased question ("What's the weather going to be today?") could previously produce "I can only see about a week ahead...Thursday from here." New pure `ScoutWeatherQueryClassifier` fixes the routing; caching, location, and NWS networking untouched.
+- A stale/superseded AI generation can no longer become wrongly "valid" again and speak over a later question (PR #61, Aug 20) — `ScoutBusyBrainState` now owns a RAM-only, monotonically increasing generation id instead of one shared discard flag, closing a real A→B→C→late-A race. Both Gemini and TinyLlama generation paths thread their own captured id; `ScoutLlamaController`'s own separate token is unchanged.
+- Scout now understands a small, bundled set of additional courtesy phrases — "wassup," "gotcha," "you got it," and more, 29 variants across 5 categories (PR #62, Aug 20) — a fully offline, exact-match-only local language pack (`app/src/main/assets/datasets/language_pack.json`), deliberately not a revival of the earlier deleted download-based dictionary/slang system. Translates only into existing courtesy behavior, never a new decision engine.
 
 **Memory & family recognition**
 - Flexible fact memory — teaching and recall for any fact, via real entity+property extraction with multi-alias support (not brittle sentence-template matching).
@@ -65,7 +68,7 @@ These are the real blockers. Scout cannot ship without these.
 
 ### 1. A32 stability — ✓ DONE, confirmed stable
 
-TinyLlama re-enabled with a safe delayed-load strategy; on-demand load also wired as a Gemini fallback. Model delivery to a real device now works end-to-end through an in-app download flow. Multiple crash classes root-caused and fixed, most recently a startup-timing collision between camera, ML Kit, and the speech recognizer (July 28).
+TinyLlama re-enabled with a safe delayed-load strategy; on-demand load also wired as a Gemini fallback. Model delivery to a real device now works end-to-end through an in-app download flow. Multiple crash classes root-caused and fixed, most recently a startup-timing collision between camera, ML Kit, and the speech recognizer (July 28). **One more crash-risk class found and fixed August 20** — TTS caption text updates could run on a TextToSpeech callback thread instead of the main thread, risking `CalledFromWrongThreadException` (PR #63, `speak()`'s caption block wrapped in `runOnUiThread{}`). CI green, but **PR open, not yet merged** — this item should not be treated as covering it until it lands on `main`.
 
 ### 2. Startup diagnostics — ✓ DONE
 
@@ -146,7 +149,7 @@ Scout already has a face, a voice, two brains (Gemini + TinyLlama), memory, weat
 
 ---
 
-*Project Scout Launch Checklist | Last updated: August 19, 2026 | Version 28 | For Patrick, Diana, Elijah, and Scout*
+*Project Scout Launch Checklist | Last updated: August 21, 2026 | Version 29 | For Patrick, Diana, Elijah, and Scout*
 
 ---
 
