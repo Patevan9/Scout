@@ -10,8 +10,8 @@ object VisionUtils {
     fun keepVisionLabel(label: String): Boolean {
         val bad = setOf(
             "beard", "facial hair", "moustache", "mustache", "jaw", "forehead", "chin",
-            "eyebrow", "eyelash", "nose", "lip", "neck", "sleeve", "jacket", "coat",
-            "shirt", "hat", "cap", "glasses", "goggles", "smile"
+            "eyebrow", "eyelash", "nose", "lip", "neck", "sleeve",
+            "goggles", "smile"
         )
         return label.isNotBlank() && !bad.contains(label)
     }
