@@ -16,7 +16,7 @@ import org.junit.Test
  * (ScoutBusyBrainDelivery, unchanged since PR 2) that governs the "And about
  * your earlier question--" bridge. Each test below models one of the five
  * scenarios from the delayed-filler design, using millisecond comments
- * modeled after MainActivity's actual BUSY_BRAIN_FILLER_DELAY_MS (2000ms) so
+ * modeled after MainActivity's actual BUSY_BRAIN_FILLER_DELAY_MS (5000ms) so
  * the sequencing described matches the real timeline, even though the
  * constant itself isn't reachable from this pure-brain-package test.
  */
@@ -28,14 +28,14 @@ class ScoutBusyBrainFillerTimingTest {
         val id = state.currentGenerationId()
         state.complete(id) // a fast Gemini answer resolves at, say, t=900ms
 
-        // At the scheduled t=2000ms check, MainActivity reads isPending fresh:
+        // At the scheduled t=5000ms check, MainActivity reads isPending fresh:
         assertFalse(state.isPending) // -- false, so nothing is said.
     }
 
     @Test fun `generation still pending at the filler threshold -- exactly one filler is due`() {
         val state = ScoutBusyBrainState()
         state.tryBegin(0L)
-        // No complete()/discard() by t=2000ms -- generation genuinely still running.
+        // No complete()/discard() by t=5000ms -- generation genuinely still running.
 
         assertTrue(state.isPending) // -- MainActivity speaks exactly one randomly-picked filler here.
 
@@ -63,7 +63,7 @@ class ScoutBusyBrainFillerTimingTest {
         val id = state.currentGenerationId()
         state.discard(BusyBrainDiscardReason.CONVERSATION_CLOSED) // goodbye said at t=800ms
 
-        // At the scheduled t=2000ms check:
+        // At the scheduled t=5000ms check:
         assertFalse(state.isPending) // -- false, so nothing is said, even though the
         assertTrue(state.isDiscarded(id)) //    underlying generation may still be running.
     }

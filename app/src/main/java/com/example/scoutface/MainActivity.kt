@@ -439,7 +439,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // not assumed. A fast answer (typical for Gemini) never triggers any
     // filler at all. Named separately so it can be tuned from real-device
     // testing without touching the scheduling logic itself.
-    private val BUSY_BRAIN_FILLER_DELAY_MS = 2000L
+    private val BUSY_BRAIN_FILLER_DELAY_MS = 5000L
 
     // pendingAiAnswer lifecycle fix. How long a queued answer stays eligible
     // to deliver once Scout is free again, measured from when it was
@@ -4468,7 +4468,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Also re-checks ScoutBusyBrainDelivery.shouldQueue() (the same busy
     // check deliverAiResult() uses) before actually speaking -- without
     // this, the filler could itself QUEUE_FLUSH over a deterministic answer
-    // Scout happens to be speaking right at the 2-second mark (e.g. the user
+    // Scout happens to be speaking right at the 5-second mark (e.g. the user
     // asked a safe follow-up while the generation was pending, and that
     // follow-up's own reply is still playing). If Scout is busy at the
     // check, the filler is simply skipped for this question rather than
