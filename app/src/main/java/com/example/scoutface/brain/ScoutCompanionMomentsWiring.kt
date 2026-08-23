@@ -55,6 +55,28 @@ object ScoutReturnGreetingGate {
 }
 
 /**
+ * Real-device finding (both a Galaxy A32 and a Galaxy Fold 7, different
+ * memory content on each): the instant Scout's boot/greeting TTS finishes,
+ * every other Companion Moment gate is already satisfied -- bootFinishedSpeaking
+ * flips true, isSpeaking clears, the 30-second poll throttle starts at 0L so it
+ * never blocks a first check, and the shared 45-minute proactive cooldown reads
+ * as "never fired" (Long.MAX_VALUE) on a fresh session -- so the very next
+ * camera-analysis frame can immediately follow Scout's own greeting with an
+ * unrelated spontaneous "I remember..." Companion Moment. This gate adds a
+ * short, dedicated quiet period measured only from the boot greeting finishing,
+ * scoped to exactly this one condition -- does not touch Companion Moment
+ * scoring, category cooldowns, the daily budget, Memory-eligibility filtering,
+ * the shared proactive cooldown, or presence idle-silence/return-greeting
+ * timing, all of which stay exactly as they were. bootFinishedSpeakingAtMs == 0L
+ * (not yet booted) is deliberately never "quiet" here -- that state stays owned
+ * entirely by the existing, separate bootFinishedSpeaking check.
+ */
+object ScoutPostBootQuietGate {
+    fun isQuiet(bootFinishedSpeakingAtMs: Long, nowMs: Long, quietMs: Long): Boolean =
+        bootFinishedSpeakingAtMs != 0L && nowMs - bootFinishedSpeakingAtMs < quietMs
+}
+
+/**
  * Recognizes a background result computed under a since-superseded generation
  * (e.g. the Activity was destroyed, or a new one took over, while the result
  * was still in flight) -- mirrors the generation/owner-token pattern already

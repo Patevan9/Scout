@@ -485,6 +485,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var bootFinishedSpeaking = false
 
+    // Wall-clock time bootFinishedSpeaking flipped true -- i.e. the moment the
+    // initial boot/greeting TTS actually finished. 0L until then. Exists solely
+    // to feed ScoutPostBootQuietGate below; nothing else reads this. Real-device
+    // finding (both A32 and Fold 7): the very next camera-analysis frame after
+    // the boot greeting finishes already clears every other Companion Moment
+    // gate (bootFinishedSpeaking, isSpeaking, the 30s poll throttle which starts
+    // at 0L, and the shared 45-minute proactive cooldown, which reads as
+    // Long.MAX_VALUE on a fresh ScoutPresenceDecider instance -- see its own
+    // msSinceLastPresenceRemark() doc comment) -- so Scout could, and on both
+    // devices did, immediately follow his own greeting with an unrelated
+    // spontaneous "I remember..." Companion Moment. This timestamp is used only
+    // to gate maybeMakeCompanionMoment() for a short quiet period after boot;
+    // it does not touch presence idle-silence/return-greeting timing, the
+    // shared proactive cooldown, or any user-initiated path.
+    private var bootFinishedSpeakingAtMs = 0L
+
     // True after Scout has already told the user his offline brain is loading. We only
     // say "warming up" once per session — the user doesn't need a reminder every question.
     private var warmingUpSaidThisSession = false
@@ -4007,7 +4023,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
 
-                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
+                    if (!bootFinishedSpeaking) {
+                        bootFinishedSpeaking = true
+                        bootFinishedSpeakingAtMs = now
+                    }
 
                     lastScoutResponseMs = System.currentTimeMillis()
 
@@ -4077,7 +4096,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
 
-                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
+                    if (!bootFinishedSpeaking) {
+                        bootFinishedSpeaking = true
+                        bootFinishedSpeakingAtMs = now
+                    }
 
                     wantListening = true
 
@@ -6506,6 +6528,13 @@ Respond only with Scout's next reply.
     private val PRESENCE_CHECK_INTERVAL_MS = 30L * 1_000L
     private var lastPresenceCheckMs = 0L
 
+    /** Companion Moments only (see ScoutPostBootQuietGate's doc comment for the
+     *  full real-device finding): how long after the boot/greeting TTS finishes
+     *  before maybeMakeCompanionMoment() may speak at all. Does not delay the
+     *  boot greeting itself, user-initiated conversation, or any other proactive-
+     *  speech system (presence idle-silence, return greetings). */
+    private val POST_BOOT_COMPANION_QUIET_MS = 5L * 60L * 1_000L
+
     /** Live, gap-tolerant continuous-presence duration. Zero if no face has been
      *  seen within the last PRESENCE_GAP_GRACE_MS, even between frames. */
     private fun currentTolerantPresenceMs(): Long {
@@ -6649,6 +6678,12 @@ Respond only with Scout's next reply.
             isCapturingSpeech -> "capturing speech"
             isThinking -> "thinking"
             !bootFinishedSpeaking -> "still starting up"
+            // Real-device finding (see ScoutPostBootQuietGate's doc comment):
+            // Companion Moments only -- the boot greeting, user-initiated
+            // conversation, and every other proactive-speech system are
+            // untouched by this.
+            ScoutPostBootQuietGate.isQuiet(bootFinishedSpeakingAtMs, now, POST_BOOT_COMPANION_QUIET_MS) ->
+                "post-boot quiet period"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
             // Real-device finding: a genuine return-from-absence stabilizing
             // right now must get the return greeting spoken first -- see
@@ -6737,6 +6772,12 @@ Respond only with Scout's next reply.
             isCapturingSpeech -> "capturing speech"
             isThinking -> "thinking"
             !bootFinishedSpeaking -> "still starting up"
+            // Same re-check as the initial guard in maybeMakeCompanionMoment(),
+            // for the same reason as the other re-checks below: state can
+            // change during the background evaluation hop. See
+            // ScoutPostBootQuietGate's doc comment for the full finding.
+            ScoutPostBootQuietGate.isQuiet(bootFinishedSpeakingAtMs, System.currentTimeMillis(), POST_BOOT_COMPANION_QUIET_MS) ->
+                "post-boot quiet period"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
             // Real-device finding: secondFaceJustAppeared is a latched signal
             // (see SECOND_FACE_ARRIVAL_MAX_PENDING_MS -- up to 5 minutes old by
