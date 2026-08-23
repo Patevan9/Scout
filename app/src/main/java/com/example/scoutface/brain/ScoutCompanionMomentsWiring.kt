@@ -55,6 +55,45 @@ object ScoutReturnGreetingGate {
 }
 
 /**
+ * Real-device finding (both a Galaxy A32 and a Galaxy Fold 7, different
+ * memory content on each): the instant Scout's face-triggered startup
+ * greeting finishes, every other Companion Moment gate is already satisfied
+ * -- isSpeaking clears, the 30-second poll throttle starts at 0L so it never
+ * blocks a first check, and the shared 45-minute proactive cooldown reads as
+ * "never fired" (Long.MAX_VALUE) on a fresh session -- so the very next
+ * camera-analysis frame can immediately follow Scout's own greeting with an
+ * unrelated spontaneous "I remember..." Companion Moment. This gate adds a
+ * short, dedicated quiet period measured only from that startup greeting
+ * finishing, scoped to exactly this one condition -- does not touch
+ * Companion Moment scoring, category cooldowns, the daily budget,
+ * Memory-eligibility filtering, the shared proactive cooldown, or presence
+ * idle-silence/return-greeting timing, all of which stay exactly as they
+ * were.
+ *
+ * startupGreetingFinishedAtMs == 0L (greeting not yet spoken) IS treated as
+ * quiet here -- second real-device-review finding: MainActivity's
+ * !bootFinishedSpeaking check, evaluated immediately before this one at each
+ * call site, does NOT reliably cover this state. bootFinishedSpeaking flips
+ * on whichever TTS utterance happens to finish first -- often an earlier
+ * boot-status announcement, not the startup greeting itself (see
+ * MainActivity.startupGreetingFinishedAtMs's own doc comment) -- so
+ * bootFinishedSpeaking can already be true while startupGreetingFinishedAtMs
+ * is still 0L, the exact window between that earlier utterance finishing and
+ * the face-triggered greeting itself finishing. Without treating 0L as quiet,
+ * every gate at both call sites is open during that window and a Companion
+ * Moment could speak before the greeting the quiet period is meant to follow
+ * has even happened. Not a lockout risk: this function is only ever consulted
+ * from inside the face-detected branch of the camera analyzer, so if no face
+ * is ever seen (or the greeting is delayed by continuous conversational
+ * engagement) it's simply never reached, or reached but staying correctly
+ * dormant, not stuck.
+ */
+object ScoutPostBootQuietGate {
+    fun isQuiet(startupGreetingFinishedAtMs: Long, nowMs: Long, quietMs: Long): Boolean =
+        startupGreetingFinishedAtMs == 0L || nowMs - startupGreetingFinishedAtMs < quietMs
+}
+
+/**
  * Recognizes a background result computed under a since-superseded generation
  * (e.g. the Activity was destroyed, or a new one took over, while the result
  * was still in flight) -- mirrors the generation/owner-token pattern already

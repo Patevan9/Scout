@@ -58,8 +58,18 @@ class DiagLog(private val db: DiagnosticDb) {
      * the speaking watchdog force-clears it -- see the logTts*() methods
      * below, added to distinguish that specific chain diagnostically before
      * any behavior change.
+     *
+     * STARTUP_GREETING tags the one face-triggered "Hello. I am Scout." / "I
+     * see <name>." respond() call -- unlike the other values, this one is also
+     * read for real (not just diagnostic) behavior: MainActivity's TTS
+     * onDone()/onError() callbacks check for it to stamp
+     * startupGreetingFinishedAtMs, the anchor for the Companion Moments
+     * post-boot quiet period. See that field's doc comment for why the quiet
+     * period must key off this specific utterance rather than whichever one
+     * happens to finish first (e.g. ScoutBootStatus's own boot-status
+     * announcement, which normally finishes earlier).
      */
-    enum class TtsDispatchSource { NORMAL, DRAINED_PENDING_ANSWER }
+    enum class TtsDispatchSource { NORMAL, DRAINED_PENDING_ANSWER, STARTUP_GREETING }
 
     /** Lifecycle events for the TinyLlama engine. */
     enum class LlamaEvent {

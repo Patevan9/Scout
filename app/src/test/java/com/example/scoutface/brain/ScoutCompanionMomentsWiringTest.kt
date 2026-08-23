@@ -71,6 +71,59 @@ class ScoutCompanionMomentsWiringTest {
             genuineAbsenceMarked = false, returnStabilizingSinceMs = 12_345L))
     }
 
+    // ---- ScoutPostBootQuietGate ----
+    // Real-device finding (Galaxy A32 and Galaxy Fold 7, different memory
+    // content on each): the instant the face-triggered startup greeting
+    // finishes, every other Companion Moment gate is already satisfied, so the
+    // very next camera-analysis frame could immediately follow Scout's own
+    // greeting with an unrelated spontaneous "I remember..." Companion Moment.
+    // This gate adds a short quiet period measured only from that startup
+    // greeting finishing -- specifically, not from whichever TTS utterance
+    // happens to finish first (see MainActivity.startupGreetingFinishedAtMs's
+    // doc comment for why an earlier boot-status announcement must not anchor
+    // this timer).
+    //
+    // Second real-device-review finding: MainActivity's own !bootFinishedSpeaking
+    // check does NOT reliably cover the not-yet-greeted state either, since
+    // bootFinishedSpeaking can already be true (flipped by that earlier
+    // boot-status announcement) while the startup greeting itself hasn't
+    // finished yet -- so this gate must treat startupGreetingFinishedAtMs == 0L
+    // as quiet in its own right, not defer that case to the caller.
+
+    @Test fun `quiet (blocked) before the startup greeting has ever finished`() {
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 0L, nowMs = 10_000L, quietMs = 300_000L))
+    }
+
+    @Test fun `still quiet (blocked) ungreeted no matter how much wall-clock time has passed`() {
+        // Exactly the gap a real boot can produce: bootFinishedSpeaking flips
+        // true (and startListening() becomes possible) from an earlier
+        // boot-status announcement long before the camera-based greeting ever
+        // fires -- this must never be mistaken for "quiet period elapsed."
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 0L, nowMs = 1_000_000_000L, quietMs = 300_000L))
+    }
+
+    @Test fun `quiet immediately after the startup greeting finishes`() {
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 1_000L, nowMs = 1_050L, quietMs = 300_000L))
+    }
+
+    @Test fun `still quiet just before the quiet period elapses`() {
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 1_000L, nowMs = 1_000L + 300_000L - 1L, quietMs = 300_000L))
+    }
+
+    @Test fun `eligible again exactly at the quiet-period boundary`() {
+        assertFalse(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 1_000L, nowMs = 1_000L + 300_000L, quietMs = 300_000L))
+    }
+
+    @Test fun `eligible well after the quiet period has elapsed`() {
+        assertFalse(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 1_000L, nowMs = 1_000L + 600_000L, quietMs = 300_000L))
+    }
+
     // ---- ScoutStaleResultGuard ----
 
     @Test fun `isStale is false when the generation hasn't changed`() {
