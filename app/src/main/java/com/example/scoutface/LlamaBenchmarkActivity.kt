@@ -155,11 +155,18 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
         }
         root.addView(runButton)
 
-        val scroll = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            ).apply { topMargin = dp(16) }
-        }
+        // Real-device finding (Galaxy A32, worsened by this Activity's existing
+        // landscape lock -- see AndroidManifest, untouched here): previously only
+        // this TextView scrolled, inside a ScrollView constrained to whatever
+        // vertical space was left over after the header/button above it (height=0dp
+        // + weight=1). On a short landscape viewport that leftover space was tiny,
+        // forcing Patrick to scroll a cramped nested box to read/record all 24
+        // (now 28) results. Fixed by making the whole page one scrollable unit
+        // instead (see the outer ScrollView below) -- resultsView is now a plain,
+        // ordinary wrap_content child of root, exactly like the views above it, and
+        // grows to fit all its text same as before. Update logic in
+        // startBenchmark() (resultsView.text = lines.joinToString("\n")) is
+        // completely unchanged; only the surrounding container structure moved.
         resultsView = TextView(this).apply {
             textSize = 12f
             setTextColor(txt)
@@ -167,10 +174,24 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
             setLineSpacing(0f, 1.3f)
             text = "Not run yet."
         }
-        scroll.addView(resultsView)
-        root.addView(scroll)
+        root.addView(resultsView, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(16) })
 
-        setContentView(root)
+        // Whole-page scroll: root (title through results) is now the single child
+        // of one outer ScrollView, replacing the old inner-results-only ScrollView
+        // above. fillViewport keeps the pre-run "Not run yet." state visually
+        // filling the screen instead of collapsing to a small clump in the corner
+        // -- cosmetic only, doesn't change what's scrollable or how. No auto-scroll
+        // is added here -- there wasn't any before this change either (every
+        // update simply reassigns resultsView.text; nothing has ever called
+        // scrollTo()/fullScroll() in this file), and that's staying out of scope.
+        val outerScroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(root)
+        }
+
+        setContentView(outerScroll)
     }
 
     private fun fixedPromptCountLabel(): Int = threadCombos.size * fixedPrompts.size
