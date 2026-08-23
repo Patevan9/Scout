@@ -82,14 +82,26 @@ class ScoutCompanionMomentsWiringTest {
     // happens to finish first (see MainActivity.startupGreetingFinishedAtMs's
     // doc comment for why an earlier boot-status announcement must not anchor
     // this timer).
+    //
+    // Second real-device-review finding: MainActivity's own !bootFinishedSpeaking
+    // check does NOT reliably cover the not-yet-greeted state either, since
+    // bootFinishedSpeaking can already be true (flipped by that earlier
+    // boot-status announcement) while the startup greeting itself hasn't
+    // finished yet -- so this gate must treat startupGreetingFinishedAtMs == 0L
+    // as quiet in its own right, not defer that case to the caller.
 
-    @Test fun `not quiet when the startup greeting hasn't finished yet`() {
-        // startupGreetingFinishedAtMs == 0L is the not-yet-greeted state --
-        // that stays owned entirely by the existing, separate
-        // bootFinishedSpeaking check, so this gate must never independently
-        // report it as quiet.
-        assertFalse(ScoutPostBootQuietGate.isQuiet(
+    @Test fun `quiet (blocked) before the startup greeting has ever finished`() {
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
             startupGreetingFinishedAtMs = 0L, nowMs = 10_000L, quietMs = 300_000L))
+    }
+
+    @Test fun `still quiet (blocked) ungreeted no matter how much wall-clock time has passed`() {
+        // Exactly the gap a real boot can produce: bootFinishedSpeaking flips
+        // true (and startListening() becomes possible) from an earlier
+        // boot-status announcement long before the camera-based greeting ever
+        // fires -- this must never be mistaken for "quiet period elapsed."
+        assertTrue(ScoutPostBootQuietGate.isQuiet(
+            startupGreetingFinishedAtMs = 0L, nowMs = 1_000_000_000L, quietMs = 300_000L))
     }
 
     @Test fun `quiet immediately after the startup greeting finishes`() {

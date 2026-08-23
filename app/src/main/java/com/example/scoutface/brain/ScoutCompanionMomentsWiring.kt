@@ -70,18 +70,27 @@ object ScoutReturnGreetingGate {
  * idle-silence/return-greeting timing, all of which stay exactly as they
  * were.
  *
- * startupGreetingFinishedAtMs == 0L (greeting not yet spoken) is deliberately
- * never "quiet" here. This is intentionally NOT keyed off MainActivity's
- * generic bootFinishedSpeaking latch (which flips on whichever TTS utterance
- * happens to finish first -- often an earlier boot-status announcement, not
- * the startup greeting itself, on a real boot) -- see
- * MainActivity.startupGreetingFinishedAtMs's own doc comment for the full
- * real-device reasoning. That distinct not-yet-booted state stays owned
- * entirely by the existing, separate bootFinishedSpeaking check.
+ * startupGreetingFinishedAtMs == 0L (greeting not yet spoken) IS treated as
+ * quiet here -- second real-device-review finding: MainActivity's
+ * !bootFinishedSpeaking check, evaluated immediately before this one at each
+ * call site, does NOT reliably cover this state. bootFinishedSpeaking flips
+ * on whichever TTS utterance happens to finish first -- often an earlier
+ * boot-status announcement, not the startup greeting itself (see
+ * MainActivity.startupGreetingFinishedAtMs's own doc comment) -- so
+ * bootFinishedSpeaking can already be true while startupGreetingFinishedAtMs
+ * is still 0L, the exact window between that earlier utterance finishing and
+ * the face-triggered greeting itself finishing. Without treating 0L as quiet,
+ * every gate at both call sites is open during that window and a Companion
+ * Moment could speak before the greeting the quiet period is meant to follow
+ * has even happened. Not a lockout risk: this function is only ever consulted
+ * from inside the face-detected branch of the camera analyzer, so if no face
+ * is ever seen (or the greeting is delayed by continuous conversational
+ * engagement) it's simply never reached, or reached but staying correctly
+ * dormant, not stuck.
  */
 object ScoutPostBootQuietGate {
     fun isQuiet(startupGreetingFinishedAtMs: Long, nowMs: Long, quietMs: Long): Boolean =
-        startupGreetingFinishedAtMs != 0L && nowMs - startupGreetingFinishedAtMs < quietMs
+        startupGreetingFinishedAtMs == 0L || nowMs - startupGreetingFinishedAtMs < quietMs
 }
 
 /**
