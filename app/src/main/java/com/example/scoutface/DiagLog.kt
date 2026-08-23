@@ -34,6 +34,62 @@ class DiagLog(private val db: DiagnosticDb) {
          */
         fun formatSelfEchoDiscard(charCount: Int, gapAfterResponseMs: Long): String =
             "chars=${charCount.coerceAtLeast(0)} gap=${gapAfterResponseMs.coerceAtLeast(0L)}ms"
+
+        /** Converts a Boolean to a short log token. Moved here (from a private
+         *  instance method) so formatLlamaBenchmark() below can use it too --
+         *  purely a location change, same "yes"/"no" tokens as before. */
+        private fun flag(b: Boolean) = if (b) "yes" else "no"
+
+        /**
+         * Pure detail-string formatter for logLlamaBenchmark() below, split out
+         * for the same reason as formatSelfEchoDiscard() above -- unit-testable
+         * without a database/Context.
+         *
+         * isProductionDefault (TinyLlama benchmark instrumentation review):
+         * distinguishes the PRODUCTION_DEFAULT benchmark configuration (which
+         * requests n_threads=2 and leaves n_threads_batch entirely at whatever
+         * llama_context_default_params() fills in, exactly matching real
+         * nativeGenerate() behavior) from every explicit thread-count
+         * configuration (2/2, 2/4, 3/3, 4/4, 5/5, 6/6), which always overrides
+         * n_threads_batch to a specific value. Without this flag, a
+         * PRODUCTION_DEFAULT run and an explicit run could report identical
+         * nThreads/nThreadsBatch numbers (if llama.cpp's actual default happens
+         * to match one of the explicit values) with no way to tell them apart
+         * in the log -- this field is the disambiguator, independent of
+         * whatever the granted numbers turn out to be.
+         */
+        fun formatLlamaBenchmark(
+            promptId: BenchPromptId,
+            nThreads: Int,
+            nThreadsBatch: Int,
+            nCtx: Int,
+            ctxReused: Boolean,
+            isProductionDefault: Boolean,
+            nPromptTokens: Int,
+            prefillMs: Long,
+            prefillTokensPerSec: Float,
+            ttftMs: Long,
+            nGeneratedTokens: Int,
+            genMs: Long,
+            genTokensPerSec: Float,
+            totalMs: Long,
+            runIndex: Int
+        ): String =
+            "run=${runIndex.coerceAtLeast(0)} " +
+            "prompt=${promptId.name.lowercase()} " +
+            "threads=${nThreads.coerceAtLeast(0)} " +
+            "threads_batch=${nThreadsBatch.coerceAtLeast(0)} " +
+            "ctx=${nCtx.coerceAtLeast(0)} " +
+            "ctx_reused=${flag(ctxReused)} " +
+            "production_default=${flag(isProductionDefault)} " +
+            "prompt_tokens=${nPromptTokens.coerceAtLeast(0)} " +
+            "prefill_ms=${prefillMs.coerceAtLeast(0L)} " +
+            "prefill_tps=${"%.1f".format(prefillTokensPerSec.coerceAtLeast(0f))} " +
+            "ttft_ms=${ttftMs.coerceAtLeast(0L)} " +
+            "gen_tokens=${nGeneratedTokens.coerceAtLeast(0)} " +
+            "gen_ms=${genMs.coerceAtLeast(0L)} " +
+            "gen_tps=${"%.1f".format(genTokensPerSec.coerceAtLeast(0f))} " +
+            "total_ms=${totalMs.coerceAtLeast(0L)}"
     }
 
     // ── Controlled input types ────────────────────────────────────────────────
@@ -437,6 +493,13 @@ class DiagLog(private val db: DiagnosticDb) {
      * nCtx              — context size actually granted.
      * ctxReused         — whether the KV-cache context was reused rather than
      *                      recreated. Always false today; reuse isn't implemented.
+     * isProductionDefault — true only for the PRODUCTION_DEFAULT configuration
+     *                      (n_threads=2, n_threads_batch left at whatever
+     *                      llama.cpp defaults to -- exactly nativeGenerate()'s
+     *                      real behavior), false for every explicit thread-count
+     *                      configuration. See formatLlamaBenchmark()'s doc
+     *                      comment for why this can't be inferred from
+     *                      nThreads/nThreadsBatch alone.
      * nPromptTokens     — prompt token count for this run.
      * prefillMs         — prompt-processing (prefill) duration.
      * prefillTokensPerSec — nPromptTokens / prefillMs, precomputed by the caller.
@@ -460,6 +523,7 @@ class DiagLog(private val db: DiagnosticDb) {
         nThreadsBatch: Int,
         nCtx: Int,
         ctxReused: Boolean,
+        isProductionDefault: Boolean,
         nPromptTokens: Int,
         prefillMs: Long,
         prefillTokensPerSec: Float,
@@ -470,20 +534,11 @@ class DiagLog(private val db: DiagnosticDb) {
         totalMs: Long,
         runIndex: Int
     ) = safe("LLAMA_BENCH") {
-        "run=${runIndex.coerceAtLeast(0)} " +
-        "prompt=${promptId.name.lowercase()} " +
-        "threads=${nThreads.coerceAtLeast(0)} " +
-        "threads_batch=${nThreadsBatch.coerceAtLeast(0)} " +
-        "ctx=${nCtx.coerceAtLeast(0)} " +
-        "ctx_reused=${flag(ctxReused)} " +
-        "prompt_tokens=${nPromptTokens.coerceAtLeast(0)} " +
-        "prefill_ms=${prefillMs.coerceAtLeast(0L)} " +
-        "prefill_tps=${"%.1f".format(prefillTokensPerSec.coerceAtLeast(0f))} " +
-        "ttft_ms=${ttftMs.coerceAtLeast(0L)} " +
-        "gen_tokens=${nGeneratedTokens.coerceAtLeast(0)} " +
-        "gen_ms=${genMs.coerceAtLeast(0L)} " +
-        "gen_tps=${"%.1f".format(genTokensPerSec.coerceAtLeast(0f))} " +
-        "total_ms=${totalMs.coerceAtLeast(0L)}"
+        formatLlamaBenchmark(
+            promptId, nThreads, nThreadsBatch, nCtx, ctxReused, isProductionDefault,
+            nPromptTokens, prefillMs, prefillTokensPerSec, ttftMs,
+            nGeneratedTokens, genMs, genTokensPerSec, totalMs, runIndex
+        )
     }
 
     /**
@@ -596,9 +651,6 @@ class DiagLog(private val db: DiagnosticDb) {
             db.add(tag, detail())
         } catch (_: Exception) {}
     }
-
-    /** Converts a Boolean to a short log token. */
-    private fun flag(b: Boolean) = if (b) "yes" else "no"
 
     /**
      * Keeps alphanumeric characters, underscores, hyphens, and dots only.

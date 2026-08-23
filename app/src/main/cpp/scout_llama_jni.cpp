@@ -257,11 +257,25 @@ static GenResult runGeneration(
     // wall-clock measurement only if the library reports nothing (e.g. if
     // no_perf ends up true from whatever llama_context_default_params() set --
     // we don't override that field; see scout_llama_api.h for why).
+    //
+    // Bug fix (benchmark instrumentation review): the previous condition also
+    // accepted pd.t_p_eval_ms/pd.t_eval_ms whenever the corresponding *token
+    // count* (n_p_eval/n_eval) was nonzero, on the assumption that "llama.cpp
+    // counted tokens" implied "llama.cpp's timing for them is valid." Those are
+    // two independent counters -- if llama.cpp's perf-timing accumulation is
+    // disabled/broken for this context (e.g. no_perf), the token counts can
+    // still increment while the *_ms fields stay legitimately 0.0, and the old
+    // OR condition would then pick that untrustworthy 0.0 instead of falling
+    // through to the working chrono measurement right next to it -- exactly
+    // the "prefill=0ms .../0ms 0.0 tok/s" real-device symptom this fixes.
+    // Trust only the timing field's own value now: a millisecond reading is
+    // either genuinely present (>0.0) or it isn't, independent of what the
+    // token counters say.
     llama_perf_context_data pd = llama_perf_context(sm->ctx);
-    r.prefill_ms = (pd.t_p_eval_ms > 0.0 || pd.n_p_eval > 0)
+    r.prefill_ms = (pd.t_p_eval_ms > 0.0)
         ? pd.t_p_eval_ms
         : std::chrono::duration<double, std::milli>(t_prefill_end - t_call_start).count();
-    r.gen_ms = (pd.t_eval_ms > 0.0 || pd.n_eval > 0)
+    r.gen_ms = (pd.t_eval_ms > 0.0)
         ? pd.t_eval_ms
         : std::chrono::duration<double, std::milli>(t_gen_end - t_prefill_end).count();
 

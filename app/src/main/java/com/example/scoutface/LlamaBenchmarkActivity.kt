@@ -55,15 +55,46 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var running = false
 
-    private data class ThreadCombo(val nThreads: Int, val nThreadsBatch: Int)
+    /**
+     * label — what's shown on screen and used to distinguish this combo in
+     * the results line; never fed into DiagLog (see isProductionDefault).
+     * nThreadsBatch — passed straight through to
+     * LlamaEngine.generateBenchmark()'s nThreadsBatch, which
+     * nativeGenerateBenchmark() treats as an override: > 0 sets
+     * cparams.n_threads_batch explicitly, <= 0 leaves it at whatever
+     * llama_context_default_params() fills in. Every explicit combo below
+     * uses an override > 0; PRODUCTION_DEFAULT (added below) deliberately
+     * passes 0 for this exact reason.
+     * isProductionDefault — true only for the PRODUCTION_DEFAULT entry; see
+     * DiagLog.formatLlamaBenchmark()'s doc comment for why this flag exists
+     * independent of the granted thread numbers.
+     */
+    private data class ThreadCombo(
+        val label: String,
+        val nThreads: Int,
+        val nThreadsBatch: Int,
+        val isProductionDefault: Boolean = false
+    )
 
     private val threadCombos = listOf(
-        ThreadCombo(2, 2),
-        ThreadCombo(2, 4),
-        ThreadCombo(3, 3),
-        ThreadCombo(4, 4),
-        ThreadCombo(5, 5),
-        ThreadCombo(6, 6)
+        ThreadCombo("2/2", 2, 2),
+        ThreadCombo("2/4", 2, 4),
+        ThreadCombo("3/3", 3, 3),
+        ThreadCombo("4/4", 4, 4),
+        ThreadCombo("5/5", 5, 5),
+        ThreadCombo("6/6", 6, 6),
+        // TinyLlama benchmark instrumentation review: the six combos above all
+        // explicitly override n_threads_batch, so none of them was actually
+        // equivalent to real production behavior -- nativeGenerate() always
+        // passes nThreadsBatchOverride=0 (see scout_llama_jni.cpp), leaving
+        // n_threads_batch at whatever llama.cpp itself defaults to. This combo
+        // reproduces that exactly: n_threads=2 (matching production), and
+        // nThreadsBatch=0 so runGeneration() takes the "leave it alone" branch
+        // instead of overriding it. The benchmark still reads back and reports
+        // the actual n_threads/n_threads_batch/n_ctx llama.cpp granted, same
+        // as every other combo -- this entry only changes what's requested,
+        // not how results are measured or reported.
+        ThreadCombo("PRODUCTION_DEFAULT", nThreads = 2, nThreadsBatch = 0, isProductionDefault = true)
     )
 
     private data class BenchPrompt(val id: DiagLog.BenchPromptId, val label: String, val text: String)
@@ -200,7 +231,8 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                 )
 
                 val line = if (result == null) {
-                    "[run=$runIndex/${plan.size}] ${prompt.label} threads=${combo.nThreads}/${combo.nThreadsBatch}: FAILED"
+                    "[run=$runIndex/${plan.size}] ${prompt.label} config=${combo.label} " +
+                        "requested=${combo.nThreads}/${combo.nThreadsBatch}: FAILED"
                 } else {
                     diagLog.logLlamaBenchmark(
                         promptId = prompt.id,
@@ -208,6 +240,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                         nThreadsBatch = result.nThreadsBatch,
                         nCtx = result.nCtx,
                         ctxReused = result.ctxReused,
+                        isProductionDefault = combo.isProductionDefault,
                         nPromptTokens = result.nPromptTokens,
                         prefillMs = result.prefillMs,
                         prefillTokensPerSec = result.prefillTokensPerSec,
@@ -218,7 +251,13 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                         totalMs = result.totalMs,
                         runIndex = runIndex
                     )
-                    "[run=$runIndex/${plan.size}] ${prompt.label} threads=${result.nThreads}/${result.nThreadsBatch} ctx=${result.nCtx}: " +
+                    // config=${combo.label} is what was requested (e.g. "PRODUCTION_DEFAULT"
+                    // or "2/2"); granted=${result.nThreads}/${result.nThreadsBatch} is what
+                    // llama.cpp actually reported back -- kept as two separate fields since
+                    // PRODUCTION_DEFAULT's granted numbers could coincidentally match an
+                    // explicit combo's, and the two must stay distinguishable regardless.
+                    "[run=$runIndex/${plan.size}] ${prompt.label} config=${combo.label} " +
+                        "granted=${result.nThreads}/${result.nThreadsBatch} ctx=${result.nCtx}: " +
                         "prompt=${result.nPromptTokens}tok prefill=${result.prefillMs}ms(${"%.1f".format(result.prefillTokensPerSec)}tok/s) " +
                         "ttft=${result.ttftMs}ms gen=${result.nGeneratedTokens}tok/${result.genMs}ms(${"%.1f".format(result.genTokensPerSec)}tok/s) " +
                         "total=${result.totalMs}ms"
