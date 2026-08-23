@@ -101,6 +101,7 @@ import com.example.scoutface.brain.ScoutCompanionMemoryEligibility
 import com.example.scoutface.brain.ScoutCompanionMomentsEngine
 import com.example.scoutface.brain.ScoutCourtesyMatcher
 import com.example.scoutface.brain.ScoutMemoryPhraser
+import com.example.scoutface.brain.ScoutPostBootQuietGate
 import com.example.scoutface.brain.ScoutPresenceStreakTracker
 import com.example.scoutface.brain.ScoutReturnGreetingGate
 import com.example.scoutface.brain.ScoutStaleResultGuard
