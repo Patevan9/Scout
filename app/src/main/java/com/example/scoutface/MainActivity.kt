@@ -486,21 +486,41 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var bootFinishedSpeaking = false
 
-    // Wall-clock time bootFinishedSpeaking flipped true -- i.e. the moment the
-    // initial boot/greeting TTS actually finished. 0L until then. Exists solely
-    // to feed ScoutPostBootQuietGate below; nothing else reads this. Real-device
-    // finding (both A32 and Fold 7): the very next camera-analysis frame after
-    // the boot greeting finishes already clears every other Companion Moment
-    // gate (bootFinishedSpeaking, isSpeaking, the 30s poll throttle which starts
-    // at 0L, and the shared 45-minute proactive cooldown, which reads as
-    // Long.MAX_VALUE on a fresh ScoutPresenceDecider instance -- see its own
-    // msSinceLastPresenceRemark() doc comment) -- so Scout could, and on both
-    // devices did, immediately follow his own greeting with an unrelated
-    // spontaneous "I remember..." Companion Moment. This timestamp is used only
-    // to gate maybeMakeCompanionMoment() for a short quiet period after boot;
-    // it does not touch presence idle-silence/return-greeting timing, the
-    // shared proactive cooldown, or any user-initiated path.
-    private var bootFinishedSpeakingAtMs = 0L
+    // Wall-clock time the face-triggered startup greeting ("Hello. I am Scout."
+    // / "I see <name>.", the respond() call tagged
+    // DiagLog.TtsDispatchSource.STARTUP_GREETING below) actually finished
+    // speaking. 0L until then. Exists solely to feed ScoutPostBootQuietGate
+    // below; nothing else reads this.
+    //
+    // Deliberately NOT the same event as bootFinishedSpeaking above, even
+    // though both are set from the same onDone()/onError() callback --
+    // bootFinishedSpeaking is a pre-existing, unrelated "has Scout's TTS
+    // become usable yet" latch for startListening(), set by whichever
+    // utterance happens to finish first. On real boots that is often
+    // ScoutBootStatus's own boot-status announcement (onInit()/startSystems(),
+    // explicitly documented there as "a genuine spoken greeting" in its own
+    // right) or, more rarely, a model-download-ready message -- both of which
+    // can and normally do finish well before the camera has even started, let
+    // alone before a face has been seen. Anchoring the Companion Moment quiet
+    // period to that generic first-utterance timestamp would let the 5-minute
+    // window start ticking before the greeting the quiet period is actually
+    // meant to follow ever happens, weakening the guarantee. This field is
+    // stamped only when the dispatch source confirms the completing utterance
+    // really was the face-triggered greeting itself.
+    //
+    // Real-device finding (both A32 and Fold 7) that motivated the quiet
+    // period in the first place: the very next camera-analysis frame after
+    // this greeting finishes already clears every other Companion Moment gate
+    // (isSpeaking, the 30s poll throttle which starts at 0L, and the shared
+    // 45-minute proactive cooldown, which reads as Long.MAX_VALUE on a fresh
+    // ScoutPresenceDecider instance -- see its own msSinceLastPresenceRemark()
+    // doc comment) -- so Scout could, and on both devices did, immediately
+    // follow his own greeting with an unrelated spontaneous "I remember..."
+    // Companion Moment. This timestamp is used only to gate
+    // maybeMakeCompanionMoment() for a short quiet period after boot; it does
+    // not touch presence idle-silence/return-greeting timing, the shared
+    // proactive cooldown, or any user-initiated path.
+    private var startupGreetingFinishedAtMs = 0L
 
     // True after Scout has already told the user his offline brain is loading. We only
     // say "warming up" once per session — the user doesn't need a reminder every question.
@@ -2925,7 +2945,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
                                     val greeting = if (greetName != null) "I see $greetName." else "Hello. I am $myName."
 
-                                    respond(greeting)
+                                    // Tagged so onDone()/onError() can recognize this exact
+                                    // utterance's completion and stamp
+                                    // startupGreetingFinishedAtMs -- see that field's doc
+                                    // comment for why this must be this utterance specifically,
+                                    // not just whichever one happens to finish first.
+                                    respond(greeting, ttsSource = DiagLog.TtsDispatchSource.STARTUP_GREETING)
 
                                 }
 
@@ -4024,9 +4049,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
 
-                    if (!bootFinishedSpeaking) {
-                        bootFinishedSpeaking = true
-                        bootFinishedSpeakingAtMs = now
+                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
+
+                    // Companion Moments quiet-period anchor -- deliberately NOT the
+                    // same event as bootFinishedSpeaking just above (that flag is the
+                    // pre-existing, unrelated "has Scout's TTS become usable yet" gate
+                    // for startListening(), and is set by whichever utterance happens
+                    // to finish first -- a boot-status announcement or a download-ready
+                    // message can both legitimately finish before the camera has even
+                    // started, let alone before a face has been seen). This checks the
+                    // TTS dispatch source instead, so the timestamp is stamped only when
+                    // THIS specific completing utterance was the face-triggered startup
+                    // greeting itself -- see ScoutPostBootQuietGate's doc comment.
+                    if (doneDispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
+                        startupGreetingFinishedAtMs == 0L) {
+                        startupGreetingFinishedAtMs = now
                     }
 
                     lastScoutResponseMs = System.currentTimeMillis()
@@ -4097,9 +4134,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                     ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
 
-                    if (!bootFinishedSpeaking) {
-                        bootFinishedSpeaking = true
-                        bootFinishedSpeakingAtMs = now
+                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
+
+                    // Same reasoning as onDone()'s matching block -- see
+                    // ScoutPostBootQuietGate's doc comment. Treated the same as
+                    // onDone() so a TTS error on the greeting itself can't leave
+                    // startupGreetingFinishedAtMs permanently unset.
+                    if (erroredDispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
+                        startupGreetingFinishedAtMs == 0L) {
+                        startupGreetingFinishedAtMs = now
                     }
 
                     wantListening = true
@@ -6529,11 +6572,14 @@ Respond only with Scout's next reply.
     private val PRESENCE_CHECK_INTERVAL_MS = 30L * 1_000L
     private var lastPresenceCheckMs = 0L
 
-    /** Companion Moments only (see ScoutPostBootQuietGate's doc comment for the
-     *  full real-device finding): how long after the boot/greeting TTS finishes
+    /** Companion Moments only (see ScoutPostBootQuietGate's and
+     *  startupGreetingFinishedAtMs's doc comments for the full real-device
+     *  finding): how long after the face-triggered startup greeting finishes
      *  before maybeMakeCompanionMoment() may speak at all. Does not delay the
-     *  boot greeting itself, user-initiated conversation, or any other proactive-
-     *  speech system (presence idle-silence, return greetings). */
+     *  startup greeting itself (or any other Scout utterance, including an
+     *  earlier boot-status announcement), user-initiated conversation, or any
+     *  other proactive-speech system (presence idle-silence, return
+     *  greetings). */
     private val POST_BOOT_COMPANION_QUIET_MS = 5L * 60L * 1_000L
 
     /** Live, gap-tolerant continuous-presence duration. Zero if no face has been
@@ -6683,7 +6729,7 @@ Respond only with Scout's next reply.
             // Companion Moments only -- the boot greeting, user-initiated
             // conversation, and every other proactive-speech system are
             // untouched by this.
-            ScoutPostBootQuietGate.isQuiet(bootFinishedSpeakingAtMs, now, POST_BOOT_COMPANION_QUIET_MS) ->
+            ScoutPostBootQuietGate.isQuiet(startupGreetingFinishedAtMs, now, POST_BOOT_COMPANION_QUIET_MS) ->
                 "post-boot quiet period"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
             // Real-device finding: a genuine return-from-absence stabilizing
@@ -6777,7 +6823,7 @@ Respond only with Scout's next reply.
             // for the same reason as the other re-checks below: state can
             // change during the background evaluation hop. See
             // ScoutPostBootQuietGate's doc comment for the full finding.
-            ScoutPostBootQuietGate.isQuiet(bootFinishedSpeakingAtMs, System.currentTimeMillis(), POST_BOOT_COMPANION_QUIET_MS) ->
+            ScoutPostBootQuietGate.isQuiet(startupGreetingFinishedAtMs, System.currentTimeMillis(), POST_BOOT_COMPANION_QUIET_MS) ->
                 "post-boot quiet period"
             !isForeground || currentMode != Mode.PRESENCE -> "wrong app mode"
             // Real-device finding: secondFaceJustAppeared is a latched signal
