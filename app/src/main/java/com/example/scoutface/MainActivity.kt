@@ -119,6 +119,8 @@ import com.example.scoutface.brain.BusyBrainDiscardReason
 import com.example.scoutface.brain.ScoutBusyBrainPolicy
 import com.example.scoutface.brain.ScoutBusyBrainDelivery
 import com.example.scoutface.brain.ScoutPendingAnswerGate
+import com.example.scoutface.brain.ScoutSpeechCompletionPolicy
+import com.example.scoutface.brain.ScoutSpeechDispatchGuard
 import com.example.scoutface.brain.ScoutGreetingIdentity
 import com.example.scoutface.brain.ScoutFaceSampleQuality
 import com.example.scoutface.brain.ScoutBeepMuteGuard
@@ -420,6 +422,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val ttsDispatchCounter = java.util.concurrent.atomic.AtomicInteger(0)
     private var lastTtsDispatchId = 0
     private val ttsDispatchSources = java.util.concurrent.ConcurrentHashMap<Int, DiagLog.TtsDispatchSource>()
+
+    // Tap-to-interrupt v1. speak()'s "natural pause" (see the `delay` local
+    // there) posts tts.speak() itself via handler.postDelayed() -- isSpeaking
+    // is already true by the time that Runnable is scheduled, but nothing has
+    // reached the TTS engine yet, so tts.stop() has nothing to interrupt in
+    // that window. These two fields are that Runnable's own cancellable
+    // reference and the dispatch id it belongs to, both set together right
+    // before scheduling it and both cleared together the moment it actually
+    // runs (or is cancelled by a tap) -- see interruptCurrentSpeech() and
+    // ScoutSpeechDispatchGuard. 0/null mean "no dispatch is currently
+    // waiting out its pre-dispatch delay," used by interruptCurrentSpeech()
+    // to tell that window apart from "already reached TextToSpeech."
+    private var pendingSpeechDispatchId: Int = 0
+    private var pendingSpeechDispatchRunnable: Runnable? = null
 
     // Busy-Brain PR 2 status-feedback strings. Spoken via
     // respond(isStatusOnly = true) -- see that parameter's doc comment for
@@ -1440,6 +1456,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 return false
+
+            }
+
+            // Tap-to-interrupt v1. Reuses this same GestureDetector rather than
+            // adding a second listener/view -- onSingleTapUp() and onFling()
+            // are mutually exclusive outcomes of the same touch sequence (a
+            // tap without fling distance/velocity never reaches onFling(), and
+            // vice versa), so this cannot interfere with the Settings swipe
+            // above. Returning false when Scout has no active/pending speech
+            // dispatch leaves the event exactly as unhandled as it already was
+            // (falls through to super.onTouchEvent() below, a no-op) -- an
+            // ordinary tap while Scout is silent does nothing new.
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+
+                if (!isSpeaking) return false
+
+                interruptCurrentSpeech()
+
+                return true
 
             }
 
@@ -4019,140 +4054,36 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 override fun onDone(utteranceId: String?) {
-
-                    isSpeaking = false
-                    val ttsDurationMs = if (speakingStartedMs > 0L)
-                        System.currentTimeMillis() - speakingStartedMs else 0L
-                    diagLog.logResponseDone(ttsDurationMs)
-                    // TTS lifecycle diagnostics (instrumentation only) -- see
-                    // resolveTtsDispatch()'s doc comment. Terminal: this dispatch's
-                    // entry is removed from ttsDispatchSources -- nothing else will
-                    // ever fire for it, so it would otherwise never be cleaned up.
                     val (doneDispatchId, doneDispatchSource) = resolveTtsDispatch(utteranceId)
-                    diagLog.logTtsCompleted(doneDispatchId, doneDispatchSource, ttsDurationMs)
-                    ttsDispatchSources.remove(doneDispatchId)
-                    speakingStartedMs = 0L
-
-                    faceView.setSpeaking(false)
-
-                    isThinking = false
-
-                    refreshThinkingFaceState()
-
-                    if (captionsEnabled) {
-                        handler.postDelayed(captionHideRunnable, 2500L)
-                    }
-
-                    val now = System.currentTimeMillis()
-
-                    lastSpeechDoneMs = now
-
-                    ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
-
-                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
-
-                    // Companion Moments quiet-period anchor -- deliberately NOT the
-                    // same event as bootFinishedSpeaking just above (that flag is the
-                    // pre-existing, unrelated "has Scout's TTS become usable yet" gate
-                    // for startListening(), and is set by whichever utterance happens
-                    // to finish first -- a boot-status announcement or a download-ready
-                    // message can both legitimately finish before the camera has even
-                    // started, let alone before a face has been seen). This checks the
-                    // TTS dispatch source instead, so the timestamp is stamped only when
-                    // THIS specific completing utterance was the face-triggered startup
-                    // greeting itself -- see ScoutPostBootQuietGate's doc comment.
-                    if (doneDispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
-                        startupGreetingFinishedAtMs == 0L) {
-                        startupGreetingFinishedAtMs = now
-                    }
-
-                    lastScoutResponseMs = System.currentTimeMillis()
-
-                    // pendingAiAnswer lifecycle fix: capture whether THIS
-                    // completing utterance was presence-initiated before the
-                    // block below resets the flag -- must be read here, not
-                    // after the if-block, since lastUtteranceWasPresenceRemark
-                    // is cleared inside it. Passed to
-                    // handlePendingAnswerAfterTts() below; see
-                    // ScoutPendingAnswerGate's doc comment for why this
-                    // matters (a presence-initiated completion must HOLD a
-                    // fresh queued answer rather than draining onto it).
-                    val completionWasPresenceInitiated = lastUtteranceWasPresenceRemark
-
-                    if (lastUtteranceWasPresenceRemark) {
-                        presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
-                        lastUtteranceWasPresenceRemark = false
-                        // TEMPORARY SMOKE-TEST LOGGING -- remove or disable once A32
-                        // testing confirms the behavior.
-                        Log.d("ScoutPresenceDebug", "Forty-second reply window opened")
-                        handler.postDelayed({
-                            Log.d("ScoutPresenceDebug", "Forty-second reply window expired")
-                        }, PRESENCE_REPLY_WINDOW_MS)
-                    }
-
-                    wantListening = true
-
-                    // Busy-Brain PR 2 / pendingAiAnswer lifecycle fix: deliver,
-                    // hold, or expire a held AI answer now that Scout is free,
-                    // instead of unconditionally restarting the mic -- this is
-                    // the one drain point for pendingAiAnswer (see
-                    // deliverAiResult() and handlePendingAnswerAfterTts()).
-                    handlePendingAnswerAfterTts(completionWasPresenceInitiated)
-
+                    finishSpeechDispatch(doneDispatchId, doneDispatchSource, ScoutSpeechCompletionPolicy.Kind.NATURAL)
                 }
 
                 override fun onError(utteranceId: String?) {
-
-                    // TTS lifecycle diagnostics (instrumentation only) -- see
-                    // resolveTtsDispatch()'s doc comment. Terminal, same as
-                    // onDone(): this dispatch's entry is removed here too.
                     val (erroredDispatchId, erroredDispatchSource) = resolveTtsDispatch(utteranceId)
-                    diagLog.logTtsFailed(erroredDispatchId, erroredDispatchSource)
-                    ttsDispatchSources.remove(erroredDispatchId)
+                    finishSpeechDispatch(erroredDispatchId, erroredDispatchSource, ScoutSpeechCompletionPolicy.Kind.ENGINE_ERROR)
+                }
 
-                    isSpeaking = false
-                    speakingStartedMs = 0L
-
-                    faceView.setSpeaking(false)
-
-                    isThinking = false
-
-                    refreshThinkingFaceState()
-
-                    // pendingAiAnswer lifecycle fix: capture before the reset
-                    // immediately below -- same reasoning as onDone()'s
-                    // matching comment above.
-                    val completionWasPresenceInitiated = lastUtteranceWasPresenceRemark
-
-                    // TTS never finished, so no reply window should open for it --
-                    // just clear the flag rather than leave it to misattribute later.
-                    lastUtteranceWasPresenceRemark = false
-
-                    val now = System.currentTimeMillis()
-
-                    lastSpeechDoneMs = now
-
-                    ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
-
-                    if (!bootFinishedSpeaking) bootFinishedSpeaking = true
-
-                    // Same reasoning as onDone()'s matching block -- see
-                    // ScoutPostBootQuietGate's doc comment. Treated the same as
-                    // onDone() so a TTS error on the greeting itself can't leave
-                    // startupGreetingFinishedAtMs permanently unset.
-                    if (erroredDispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
-                        startupGreetingFinishedAtMs == 0L) {
-                        startupGreetingFinishedAtMs = now
-                    }
-
-                    wantListening = true
-
-                    // Busy-Brain PR 2 / pendingAiAnswer lifecycle fix: same
-                    // shared decision as onDone() -- a TTS failure on the
-                    // utterance that was in the way must not strand a queued
-                    // AI answer indefinitely. See handlePendingAnswerAfterTts().
-                    handlePendingAnswerAfterTts(completionWasPresenceInitiated)
-
+                // Tap-to-interrupt v1. Explicit override -- deliberately NOT
+                // relying on UtteranceProgressListener's default onStop()
+                // implementation (which delegates to onDone()). Routing an
+                // interruption through onDone()'s own NATURAL cleanup would let
+                // handlePendingAnswerAfterTts() immediately drain and speak a
+                // queued pendingAiAnswer right after the tap -- exactly the "old
+                // queued answer immediately starts speaking" failure mode
+                // tap-to-interrupt exists to avoid. See
+                // ScoutSpeechCompletionPolicy.drainsPendingAnswer().
+                //
+                // tts.stop() (interruptCurrentSpeech() below) is currently the
+                // only caller anywhere in this file, so any onStop() arrival
+                // here is, by construction, a user-initiated interruption --
+                // `interrupted` is read from the platform for logging/clarity
+                // only, never as the sole signal (finishSpeechDispatch()'s own
+                // ttsDispatchSources-based double-callback guard is what
+                // actually protects against an unexpected repeat callback from
+                // some engine).
+                override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                    val (stoppedDispatchId, stoppedDispatchSource) = resolveTtsDispatch(utteranceId)
+                    finishSpeechDispatch(stoppedDispatchId, stoppedDispatchSource, ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED)
                 }
 
             })
@@ -4271,6 +4202,152 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return id to source
     }
 
+    // Tap-to-interrupt v1 / shared terminal cleanup. The one place a TTS
+    // dispatch's lifecycle actually ends -- natural completion (onDone), an
+    // engine error (onError), or a user-initiated interruption (the explicit
+    // onStop() override, or cancelling the pre-dispatch delay before
+    // tts.speak() ever ran). Extracted so all three apply the exact same
+    // isSpeaking/face/captions/cooldown-timer/STARTUP_GREETING/wantListening
+    // bookkeeping and can never drift against each other; ScoutSpeechCompletionPolicy's
+    // `kind` parameter captures the only ways they're allowed to legitimately differ.
+    //
+    // dispatchId/dispatchSource must already be resolved (resolveTtsDispatch())
+    // by the caller. The very first thing this function does is the
+    // double-callback guard: ttsDispatchSources.remove() is the single place
+    // a dispatch's entry is actually removed, so if it's already gone (a
+    // previous callback got here first -- some TTS engines are not
+    // guaranteed not to deliver more than one terminal callback for the same
+    // utterance), every side effect below is skipped rather than re-applied
+    // a second time for the same utterance.
+    private fun finishSpeechDispatch(
+        dispatchId: Int,
+        dispatchSource: DiagLog.TtsDispatchSource,
+        kind: ScoutSpeechCompletionPolicy.Kind
+    ) {
+        if (ttsDispatchSources.remove(dispatchId) == null) return
+
+        isSpeaking = false
+        val ttsDurationMs = if (speakingStartedMs > 0L)
+            System.currentTimeMillis() - speakingStartedMs else 0L
+        speakingStartedMs = 0L
+
+        when (kind) {
+            ScoutSpeechCompletionPolicy.Kind.NATURAL -> {
+                diagLog.logResponseDone(ttsDurationMs)
+                diagLog.logTtsCompleted(dispatchId, dispatchSource, ttsDurationMs)
+            }
+            ScoutSpeechCompletionPolicy.Kind.ENGINE_ERROR -> diagLog.logTtsFailed(dispatchId, dispatchSource)
+            ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED -> diagLog.logTtsInterrupted(dispatchId, dispatchSource)
+        }
+
+        faceView.setSpeaking(false)
+
+        isThinking = false
+
+        refreshThinkingFaceState()
+
+        // Tap-to-interrupt v1: captions must still tidy up on an
+        // interruption (the approved cleanup checklist explicitly includes
+        // them). onError() alone keeps its pre-existing behavior of never
+        // scheduling this -- that's unrelated, unchanged from before this
+        // feature existed, and this change has no reason to touch it.
+        if (captionsEnabled && kind != ScoutSpeechCompletionPolicy.Kind.ENGINE_ERROR) {
+            handler.postDelayed(captionHideRunnable, 2500L)
+        }
+
+        val now = System.currentTimeMillis()
+
+        lastSpeechDoneMs = now
+
+        ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
+
+        if (!bootFinishedSpeaking) bootFinishedSpeaking = true
+
+        // Companion Moments quiet-period anchor -- deliberately NOT the same
+        // event as bootFinishedSpeaking just above (see that field's own doc
+        // comment). Stamped for every kind, including USER_INTERRUPTED -- see
+        // ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished()'s doc
+        // comment: PR #68's quiet period must not wait for a greeting Patrick
+        // has already deliberately ended himself.
+        if (dispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
+            startupGreetingFinishedAtMs == 0L &&
+            ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished(kind)) {
+            startupGreetingFinishedAtMs = now
+        }
+
+        // onDone()'s pre-existing behavior, preserved exactly: only a
+        // NATURAL completion stamps this (onError() never did either,
+        // before this change existed).
+        if (kind == ScoutSpeechCompletionPolicy.Kind.NATURAL) {
+            lastScoutResponseMs = System.currentTimeMillis()
+        }
+
+        // pendingAiAnswer lifecycle fix: capture whether THIS completing
+        // utterance was presence-initiated before it's reset below -- see
+        // ScoutPendingAnswerGate's doc comment for why this matters (a
+        // presence-initiated completion must HOLD a fresh queued answer
+        // rather than draining onto it). Read unconditionally so the value
+        // is always defined, even though only the NATURAL/ENGINE_ERROR
+        // branches below actually use it.
+        val completionWasPresenceInitiated = lastUtteranceWasPresenceRemark
+
+        if (completionWasPresenceInitiated && ScoutSpeechCompletionPolicy.opensPresenceReplyWindow(kind)) {
+            presenceReplyWindowUntilMs = System.currentTimeMillis() + PRESENCE_REPLY_WINDOW_MS
+            lastUtteranceWasPresenceRemark = false
+            // TEMPORARY SMOKE-TEST LOGGING -- remove or disable once A32
+            // testing confirms the behavior.
+            Log.d("ScoutPresenceDebug", "Forty-second reply window opened")
+            handler.postDelayed({
+                Log.d("ScoutPresenceDebug", "Forty-second reply window expired")
+            }, PRESENCE_REPLY_WINDOW_MS)
+        } else {
+            // Either this completion wasn't presence-initiated at all (the
+            // pre-existing NATURAL "else" case -- no window to open), or it
+            // was but this kind never opens one (engine error or user
+            // interruption: TTS never finished normally as far as the person
+            // is concerned) -- either way just clear the flag rather than
+            // leave it to misattribute later. Harmless no-op when it was
+            // already false.
+            lastUtteranceWasPresenceRemark = false
+        }
+
+        wantListening = true
+
+        if (ScoutSpeechCompletionPolicy.drainsPendingAnswer(kind)) {
+            // Busy-Brain PR 2 / pendingAiAnswer lifecycle fix: deliver, hold,
+            // or expire a held AI answer now that Scout is free, instead of
+            // unconditionally restarting the mic -- this is the one drain
+            // point for pendingAiAnswer (see deliverAiResult() and
+            // handlePendingAnswerAfterTts()).
+            handlePendingAnswerAfterTts(completionWasPresenceInitiated)
+        } else {
+            // Tap-to-interrupt v1: a user interruption must never drain
+            // pendingAiAnswer -- see ScoutSpeechCompletionPolicy.drainsPendingAnswer()'s
+            // doc comment. pendingAiAnswer, pendingAiAnswerQueuedAtMs, and
+            // busyBrainState are left completely untouched here; a future
+            // NATURAL completion still drains it normally, subject to its
+            // existing PENDING_AI_ANSWER_MAX_AGE_MS expiry.
+            //
+            // QUEUE_ADD edge case: a second utterance queued (not flushed)
+            // behind the one just interrupted -- e.g. the STT-unavailable
+            // follow-up spoken after the boot announcement -- is silently
+            // discarded by tts.stop() with no callback of its own ever
+            // arriving (Android only reports onStop()/onDone()/onError() for
+            // the utterance actually interrupted). lastTtsDispatchId is
+            // whatever speak() most recently requested; if that's not the
+            // dispatch that was just interrupted, it was still queued behind
+            // it and is now gone from the engine's queue with nothing else
+            // ever going to remove its entry -- clean it up here rather than
+            // leaking it for the rest of the process's lifetime. No other
+            // state exists for it (it never reached onStart()), so removing
+            // the map entry is the only cleanup it needs.
+            if (lastTtsDispatchId != dispatchId) {
+                ttsDispatchSources.remove(lastTtsDispatchId)
+            }
+            scheduleListenRestart(immediate = true)
+        }
+    }
+
     private fun speak(text: String, flush: Boolean, ttsSource: DiagLog.TtsDispatchSource = DiagLog.TtsDispatchSource.NORMAL) {
 
         wantListening = false
@@ -4344,7 +4421,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         }
 
-        handler.postDelayed({
+        // Tap-to-interrupt v1. This Runnable is the pre-dispatch delay itself
+        // -- isSpeaking is already true above, but nothing has reached the
+        // TTS engine yet. Stored in pendingSpeechDispatchRunnable/
+        // pendingSpeechDispatchId (keyed to this exact dispatchId) so a tap
+        // landing in this window can cancel it outright instead of waiting
+        // for a tts.stop()/onStop() round trip that has nothing to act on
+        // yet -- see interruptCurrentSpeech(). Both fields are cleared as the
+        // very first thing once this Runnable actually starts running (normal
+        // path or cancelled-too-late race), and ScoutSpeechDispatchGuard
+        // confirms this dispatch still owns the pending slot before doing
+        // anything else -- a tap that fires in the same Looper pass this
+        // Runnable was already about to run in must never let it dispatch to
+        // the TTS engine anyway.
+        val dispatchRunnable = Runnable {
+
+            val stillPending = ScoutSpeechDispatchGuard.isStillPending(pendingSpeechDispatchId, dispatchId)
+            pendingSpeechDispatchId = 0
+            pendingSpeechDispatchRunnable = null
+            if (!stillPending) return@Runnable
 
             val ttsResult = tts.speak(
 
@@ -4377,8 +4472,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 scheduleListenRestart(immediate = true)
             }
 
-        }, delay)
+        }
 
+        pendingSpeechDispatchId = dispatchId
+        pendingSpeechDispatchRunnable = dispatchRunnable
+        handler.postDelayed(dispatchRunnable, delay)
+
+    }
+
+    // Tap-to-interrupt v1. The one entry point for "Patrick tapped the
+    // screen while Scout has an active or pending speech dispatch" -- called
+    // only while isSpeaking is true (see the tap gesture handler below;
+    // isSpeaking is set synchronously at the top of speak(), true for both
+    // the pre-dispatch delay and actual TTS playback, so it's the correct,
+    // already-existing guard for "is there anything to interrupt right now").
+    //
+    // Two windows, handled differently:
+    //  - Pre-dispatch delay (pendingSpeechDispatchRunnable != null): nothing
+    //    has reached the TTS engine yet, so there is no live utterance for
+    //    tts.stop() to interrupt and no onStop() callback will ever arrive
+    //    for it. Cancelled directly here, running the exact same terminal
+    //    cleanup onStop() would otherwise have run.
+    //  - Already dispatched to TextToSpeech: tts.stop() is called and the
+    //    actual cleanup happens from the explicit onStop() override once
+    //    Android delivers it -- deliberately NOT performed here too, to
+    //    avoid the double-cleanup risk called out in that override's own
+    //    comment (finishSpeechDispatch()'s ttsDispatchSources-based guard
+    //    protects against it either way, but there is no reason to race it).
+    private fun interruptCurrentSpeech() {
+        val runnable = pendingSpeechDispatchRunnable
+        if (runnable != null) {
+            val dispatchId = pendingSpeechDispatchId
+            val dispatchSource = ttsDispatchSources[dispatchId] ?: DiagLog.TtsDispatchSource.NORMAL
+            handler.removeCallbacks(runnable)
+            pendingSpeechDispatchRunnable = null
+            pendingSpeechDispatchId = 0
+            finishSpeechDispatch(dispatchId, dispatchSource, ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED)
+        } else {
+            tts.stop()
+        }
     }
 
     // =======================
