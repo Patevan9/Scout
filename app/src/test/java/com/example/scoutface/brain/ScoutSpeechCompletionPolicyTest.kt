@@ -102,4 +102,28 @@ class ScoutSpeechDispatchGuardTest {
         // must not dispatch to the TTS engine on its own stale schedule.
         assertFalse(ScoutSpeechDispatchGuard.isStillPending(activeDispatchId = 8, candidateDispatchId = 7))
     }
+
+    // --- PR #71 review round 2: the same function, reused by onStop() to
+    // tell a genuine user tap apart from any other reason Android might
+    // deliver onStop() (e.g. a QUEUE_FLUSH from a newer dispatch). Framed
+    // here as MainActivity.onStop() actually calls it:
+    // isStillPending(tapInterruptTargetDispatchId, stoppedDispatchId) ---
+
+    @Test fun `onStop matching the tap's own target dispatch id is recognized as the user's tap`() {
+        assertTrue(ScoutSpeechDispatchGuard.isStillPending(activeDispatchId = 12, candidateDispatchId = 12))
+    }
+
+    @Test fun `onStop for a different dispatch than the tap targeted is NOT misattributed to the tap`() {
+        // e.g. tts.stop() actually interrupted an older, still-genuinely-
+        // audible dispatch than the one tapInterruptTargetDispatchId names
+        // (the QUEUE_ADD edge case) -- must fall back to NATURAL, not be
+        // misread as the user's own interruption.
+        assertFalse(ScoutSpeechDispatchGuard.isStillPending(activeDispatchId = 12, candidateDispatchId = 13))
+    }
+
+    @Test fun `onStop arriving with no tap in flight (target id 0) is never treated as a user tap`() {
+        // An internal QUEUE_FLUSH replacement, or any onStop() Android
+        // delivers when interruptCurrentSpeech() never set a target at all.
+        assertFalse(ScoutSpeechDispatchGuard.isStillPending(activeDispatchId = 0, candidateDispatchId = 12))
+    }
 }

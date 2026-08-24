@@ -437,6 +437,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var pendingSpeechDispatchId: Int = 0
     private var pendingSpeechDispatchRunnable: Runnable? = null
 
+    // Tap-to-interrupt v1, PR #71 review round 2. Which dispatch, if any, is
+    // currently the one actually handed to the TTS engine (tts.speak() was
+    // called for it and it hasn't terminated yet) -- i.e. which dispatch's
+    // completion is allowed to touch Scout's GLOBAL speaking state
+    // (isSpeaking, face, captions, cooldown timers, wantListening, presence
+    // reply window, pendingAiAnswer drain). 0 means no dispatch currently
+    // owns that state.
+    //
+    // Real-device-shaped finding from review: a pending pre-dispatch delay
+    // (pendingSpeechDispatchId above) and a genuinely audible dispatch CAN
+    // coexist -- e.g. the boot announcement (dispatch A, still audible) and
+    // the STT-unavailable QUEUE_ADD follow-up fired 4000ms later (dispatch
+    // B, still waiting out its OWN pre-dispatch delay) if the boot message
+    // takes >=4s to speak. Before this field existed, cancelling B during
+    // that window called finishSpeechDispatch() unconditionally, which
+    // cleared isSpeaking/wantListening/etc. globally even though A was still
+    // genuinely talking. Set the moment a dispatch's pre-dispatch Runnable
+    // actually calls tts.speak() (see that Runnable below); cleared only by
+    // finishSpeechDispatch() when the id it's finishing matches. A dispatch
+    // cancelled purely from the pending state (see interruptCurrentSpeech())
+    // never reaches this field at all -- it never owned the global state to
+    // begin with, so its own cleanup must not touch it.
+    private var activeSpeechDispatchId: Int = 0
+
+    // Tap-to-interrupt v1, PR #71 review round 2. Set only by
+    // interruptCurrentSpeech() to the exact dispatch id a tap just asked
+    // tts.stop() to interrupt, right before calling it -- consumed and reset
+    // by the explicit onStop() override below. This is what lets onStop()
+    // tell a genuine user tap apart from any other reason Android might
+    // deliver onStop() for a dispatch (e.g. a QUEUE_FLUSH from a newer
+    // dispatch legitimately interrupting an older one on its own -- possible
+    // in principle even though no current call site is known to trigger it
+    // while a dispatch is genuinely still active). Id-scoped rather than a
+    // bare boolean specifically so it can't be misattributed to a
+    // DIFFERENT dispatch's onStop() arriving instead (e.g. the QUEUE_ADD
+    // edge case where tts.stop() actually interrupts an older dispatch than
+    // the one this field was last set to -- see interruptCurrentSpeech()'s
+    // own comment).
+    private var tapInterruptTargetDispatchId: Int = 0
+
     // Busy-Brain PR 2 status-feedback strings. Spoken via
     // respond(isStatusOnly = true) -- see that parameter's doc comment for
     // exactly what "status-only" excludes.
@@ -4073,17 +4113,38 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // tap-to-interrupt exists to avoid. See
                 // ScoutSpeechCompletionPolicy.drainsPendingAnswer().
                 //
-                // tts.stop() (interruptCurrentSpeech() below) is currently the
-                // only caller anywhere in this file, so any onStop() arrival
-                // here is, by construction, a user-initiated interruption --
-                // `interrupted` is read from the platform for logging/clarity
-                // only, never as the sole signal (finishSpeechDispatch()'s own
-                // ttsDispatchSources-based double-callback guard is what
-                // actually protects against an unexpected repeat callback from
-                // some engine).
+                // PR #71 review round 2: onStop() is NOT necessarily a user
+                // tap. tts.stop() (interruptCurrentSpeech() below) is the only
+                // caller anywhere in this file today, but Android can also
+                // deliver onStop(interrupted=true) when a dispatch is
+                // flushed out by a NEWER dispatch's own QUEUE_FLUSH tts.speak()
+                // call -- a normal TTS replacement, not something Patrick did.
+                // Before this change existed, that scenario (if it ever
+                // occurred) fell to the platform's default onStop() -> onDone()
+                // delegation, i.e. it was already silently treated as a
+                // NATURAL completion. tapInterruptTargetDispatchId preserves
+                // that exact pre-existing semantic: only the ONE dispatch id
+                // interruptCurrentSpeech() itself just asked tts.stop() to
+                // interrupt is classified USER_INTERRUPTED; any other onStop()
+                // arrival (a different dispatch id, or this field unset) is
+                // classified NATURAL, same as it always implicitly would have
+                // been. Id-scoped rather than a bare "a tap happened" boolean
+                // specifically so it can't misattribute a DIFFERENT dispatch's
+                // stop to this one -- see that field's own doc comment for the
+                // QUEUE_ADD case this guards against.
                 override fun onStop(utteranceId: String?, interrupted: Boolean) {
                     val (stoppedDispatchId, stoppedDispatchSource) = resolveTtsDispatch(utteranceId)
-                    finishSpeechDispatch(stoppedDispatchId, stoppedDispatchSource, ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED)
+                    // Reuses the same id-scoped match ScoutSpeechDispatchGuard
+                    // already provides for the pre-dispatch cancellation race
+                    // -- the shape of the question is identical ("does this
+                    // specific id still match the one slot that owns it").
+                    val wasUserTap = ScoutSpeechDispatchGuard.isStillPending(tapInterruptTargetDispatchId, stoppedDispatchId)
+                    if (wasUserTap) tapInterruptTargetDispatchId = 0
+                    val kind = if (wasUserTap)
+                        ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED
+                    else
+                        ScoutSpeechCompletionPolicy.Kind.NATURAL
+                    finishSpeechDispatch(stoppedDispatchId, stoppedDispatchSource, kind)
                 }
 
             })
@@ -4219,6 +4280,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // guaranteed not to deliver more than one terminal callback for the same
     // utterance), every side effect below is skipped rather than re-applied
     // a second time for the same utterance.
+    //
+    // PR #71 review round 2: a dispatch finishing here is not necessarily the
+    // one that owns Scout's GLOBAL speaking state (isSpeaking/face/captions/
+    // cooldown timers/wantListening/presence window/pendingAiAnswer drain) --
+    // see activeSpeechDispatchId's own doc comment for the boot-announcement
+    // + STT-unavailable QUEUE_ADD scenario this guards against. Only the
+    // per-dispatch bookkeeping (the double-callback guard above, the
+    // diagnostic log, and the STARTUP_GREETING anchor -- all keyed to THIS
+    // dispatch's own identity, not to global state) applies unconditionally;
+    // everything else is gated on wasActiveDispatch below.
     private fun finishSpeechDispatch(
         dispatchId: Int,
         dispatchSource: DiagLog.TtsDispatchSource,
@@ -4226,19 +4297,53 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     ) {
         if (ttsDispatchSources.remove(dispatchId) == null) return
 
-        isSpeaking = false
-        val ttsDurationMs = if (speakingStartedMs > 0L)
-            System.currentTimeMillis() - speakingStartedMs else 0L
-        speakingStartedMs = 0L
+        val wasActiveDispatch = (dispatchId == activeSpeechDispatchId)
+
+        val now = System.currentTimeMillis()
 
         when (kind) {
             ScoutSpeechCompletionPolicy.Kind.NATURAL -> {
+                // A duration only means something if this dispatch actually
+                // owned speakingStartedMs -- for a dispatch that finishes
+                // after a newer one already took over (see
+                // activeSpeechDispatchId), speakingStartedMs no longer
+                // describes it.
+                val ttsDurationMs = if (wasActiveDispatch && speakingStartedMs > 0L)
+                    now - speakingStartedMs else 0L
                 diagLog.logResponseDone(ttsDurationMs)
                 diagLog.logTtsCompleted(dispatchId, dispatchSource, ttsDurationMs)
             }
             ScoutSpeechCompletionPolicy.Kind.ENGINE_ERROR -> diagLog.logTtsFailed(dispatchId, dispatchSource)
             ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED -> diagLog.logTtsInterrupted(dispatchId, dispatchSource)
         }
+
+        // Companion Moments quiet-period anchor -- deliberately NOT the same
+        // event as bootFinishedSpeaking below (see that field's own doc
+        // comment). Stamped for every kind, including USER_INTERRUPTED -- see
+        // ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished()'s doc
+        // comment: PR #68's quiet period must not wait for a greeting Patrick
+        // has already deliberately ended himself. This is an identity check
+        // on dispatchSource, not global state, so it applies regardless of
+        // wasActiveDispatch.
+        if (dispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
+            startupGreetingFinishedAtMs == 0L &&
+            ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished(kind)) {
+            startupGreetingFinishedAtMs = now
+        }
+
+        if (!wasActiveDispatch) {
+            // This dispatch never actually owned (or no longer owns) Scout's
+            // global speaking state -- a different dispatch does, and this
+            // one finishing must not touch isSpeaking/face/captions/cooldown
+            // timers/wantListening/presence window/pendingAiAnswer on its
+            // behalf. Nothing else to do.
+            return
+        }
+
+        activeSpeechDispatchId = 0
+
+        isSpeaking = false
+        speakingStartedMs = 0L
 
         faceView.setSpeaking(false)
 
@@ -4255,25 +4360,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             handler.postDelayed(captionHideRunnable, 2500L)
         }
 
-        val now = System.currentTimeMillis()
-
         lastSpeechDoneMs = now
 
         ttsLockoutUntilMs = now + TTS_LOCKOUT_MS
 
         if (!bootFinishedSpeaking) bootFinishedSpeaking = true
-
-        // Companion Moments quiet-period anchor -- deliberately NOT the same
-        // event as bootFinishedSpeaking just above (see that field's own doc
-        // comment). Stamped for every kind, including USER_INTERRUPTED -- see
-        // ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished()'s doc
-        // comment: PR #68's quiet period must not wait for a greeting Patrick
-        // has already deliberately ended himself.
-        if (dispatchSource == DiagLog.TtsDispatchSource.STARTUP_GREETING &&
-            startupGreetingFinishedAtMs == 0L &&
-            ScoutSpeechCompletionPolicy.countsAsStartupGreetingFinished(kind)) {
-            startupGreetingFinishedAtMs = now
-        }
 
         // onDone()'s pre-existing behavior, preserved exactly: only a
         // NATURAL completion stamps this (onError() never did either,
@@ -4441,6 +4532,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             pendingSpeechDispatchRunnable = null
             if (!stillPending) return@Runnable
 
+            // PR #71 review round 2: this dispatch is about to actually reach
+            // the TTS engine -- from this point on it (not whatever dispatch
+            // held this claim before, if any) owns Scout's global speaking
+            // state. See activeSpeechDispatchId's own doc comment.
+            activeSpeechDispatchId = dispatchId
+
             val ttsResult = tts.speak(
 
                 text,
@@ -4461,8 +4558,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // this dispatch's entry from ttsDispatchSources -- no
                 // onStart()/onDone()/onError() is ever coming to consume it,
                 // so it would otherwise sit in the map for the rest of the
-                // process's lifetime.
+                // process's lifetime. activeSpeechDispatchId is cleared here
+                // too -- it was only just claimed above, synchronously, so it
+                // is still guaranteed to be this dispatch's own id.
                 ttsDispatchSources.remove(dispatchId)
+                activeSpeechDispatchId = 0
                 isSpeaking = false
                 isThinking = false
                 speakingStartedMs = 0L
@@ -4487,28 +4587,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // the pre-dispatch delay and actual TTS playback, so it's the correct,
     // already-existing guard for "is there anything to interrupt right now").
     //
-    // Two windows, handled differently:
-    //  - Pre-dispatch delay (pendingSpeechDispatchRunnable != null): nothing
-    //    has reached the TTS engine yet, so there is no live utterance for
-    //    tts.stop() to interrupt and no onStop() callback will ever arrive
-    //    for it. Cancelled directly here, running the exact same terminal
-    //    cleanup onStop() would otherwise have run.
-    //  - Already dispatched to TextToSpeech: tts.stop() is called and the
-    //    actual cleanup happens from the explicit onStop() override once
-    //    Android delivers it -- deliberately NOT performed here too, to
-    //    avoid the double-cleanup risk called out in that override's own
-    //    comment (finishSpeechDispatch()'s ttsDispatchSources-based guard
-    //    protects against it either way, but there is no reason to race it).
+    // PR #71 review round 2: a pending pre-dispatch delay and a genuinely
+    // active (already reached TextToSpeech) dispatch CAN coexist -- e.g. the
+    // boot announcement (still audible) and the STT-unavailable QUEUE_ADD
+    // follow-up (still waiting out its own pre-dispatch delay) if the boot
+    // message takes >=4s to speak. The two checks below are therefore
+    // independent, NOT an if/else -- a tap must cancel a pending delay AND
+    // stop a genuinely active dispatch whenever both happen to be true at
+    // once, not just whichever one this function happens to check first.
     private fun interruptCurrentSpeech() {
-        val runnable = pendingSpeechDispatchRunnable
-        if (runnable != null) {
-            val dispatchId = pendingSpeechDispatchId
-            val dispatchSource = ttsDispatchSources[dispatchId] ?: DiagLog.TtsDispatchSource.NORMAL
-            handler.removeCallbacks(runnable)
+        // Cancel a still-pending pre-dispatch delay, if any. Nothing has
+        // reached the TTS engine for it, so there is no live utterance for
+        // tts.stop() to interrupt and no onStop() callback will ever arrive
+        // for it -- cleaned up directly here instead. This dispatch never
+        // claimed activeSpeechDispatchId (see that field's doc comment), so
+        // finishSpeechDispatch() correctly skips all global isSpeaking/face/
+        // cooldown/etc. cleanup for it if a DIFFERENT dispatch is still
+        // genuinely active -- that state is untouched here and handled by
+        // the independent check below instead.
+        val pending = pendingSpeechDispatchRunnable
+        if (pending != null) {
+            val pendingId = pendingSpeechDispatchId
+            val pendingSource = ttsDispatchSources[pendingId] ?: DiagLog.TtsDispatchSource.NORMAL
+            handler.removeCallbacks(pending)
             pendingSpeechDispatchRunnable = null
             pendingSpeechDispatchId = 0
-            finishSpeechDispatch(dispatchId, dispatchSource, ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED)
-        } else {
+            finishSpeechDispatch(pendingId, pendingSource, ScoutSpeechCompletionPolicy.Kind.USER_INTERRUPTED)
+        }
+
+        // Independently stop whatever is genuinely audible right now, if
+        // anything. tapInterruptTargetDispatchId records exactly which
+        // dispatch this tap is asking tts.stop() to interrupt, so the
+        // explicit onStop() override can tell this specific, tap-driven stop
+        // apart from any other reason Android might deliver onStop() for a
+        // (possibly different) dispatch -- see that field's and onStop()'s
+        // own doc comments. The actual cleanup happens from onStop() once
+        // Android delivers it, not here, to avoid the double-cleanup risk
+        // called out in that override's comment.
+        val activeId = activeSpeechDispatchId
+        if (activeId != 0) {
+            tapInterruptTargetDispatchId = activeId
             tts.stop()
         }
     }
