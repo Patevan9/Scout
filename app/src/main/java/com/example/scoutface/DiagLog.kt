@@ -621,6 +621,18 @@ class DiagLog(private val db: DiagnosticDb) {
     }
 
     /**
+     * Tap-to-interrupt v1. Recorded when a user tap stops a dispatch before
+     * it finished speaking -- from the explicit onStop() override for one
+     * already reaching the TTS engine, or from the pre-dispatch cancellation
+     * path in speak() for one still waiting out its natural-pause delay.
+     * Kept distinct from logTtsCompleted()/logTtsFailed() so an interrupted
+     * dispatch is never misread as a normal completion or an engine error.
+     */
+    fun logTtsInterrupted(dispatchId: Int, source: TtsDispatchSource) = safe("TTS") {
+        "event=interrupted id=${dispatchId.coerceAtLeast(0)} source=${source.name.lowercase()}"
+    }
+
+    /**
      * Recorded for controlled error events.
      * area      — which Scout subsystem encountered the error; compiler-enforced.
      * throwable — optional. Only javaClass.simpleName is extracted and stored.
