@@ -70,4 +70,36 @@ object ScoutSpeechDispatchGuard {
      */
     fun isStillPending(activeDispatchId: Int, candidateDispatchId: Int): Boolean =
         candidateDispatchId != 0 && activeDispatchId == candidateDispatchId
+
+    /**
+     * PR #71 review round 3. Whether `dispatchId` is the one whose
+     * completion should drive MainActivity's GLOBAL speaking state cleanup
+     * (isSpeaking, face, captions, cooldown timers, wantListening, presence
+     * reply window, pendingAiAnswer drain) -- as opposed to a dispatch that
+     * merely finished (or was cancelled) while a DIFFERENT dispatch still
+     * owns that state.
+     *
+     * "Submitted to the TTS engine" and "actually audible" are NOT the same
+     * thing: with QUEUE_ADD, a newer dispatch can be accepted by the engine
+     * while an older one is still genuinely playing (real-device-shaped
+     * scenario: the boot announcement, still audible, with the
+     * STT-unavailable follow-up already queued behind it). audibleDispatchId
+     * -- set only from onStart()'s own resolved id, the one ground-truth
+     * signal Android gives for "playing right now" -- is authoritative
+     * whenever it's known (non-zero). submittedDispatchId (set at
+     * tts.speak()-call time) is used ONLY as a fallback for the narrow
+     * window between a dispatch reaching the engine and Android actually
+     * confirming it started, or for an engine that never reliably calls
+     * onStart() at all -- without this fallback, a dispatch finishing before
+     * its own onStart() ever arrives (or a tap landing in that exact gap)
+     * would be treated as if nothing owned Scout's speaking state, which
+     * would leave Scout stuck appearing to speak forever.
+     */
+    fun ownsGlobalSpeakingState(
+        dispatchId: Int,
+        audibleDispatchId: Int,
+        submittedDispatchId: Int
+    ): Boolean =
+        dispatchId == audibleDispatchId ||
+            (audibleDispatchId == 0 && dispatchId == submittedDispatchId)
 }

@@ -126,4 +126,61 @@ class ScoutSpeechDispatchGuardTest {
         // delivers when interruptCurrentSpeech() never set a target at all.
         assertFalse(ScoutSpeechDispatchGuard.isStillPending(activeDispatchId = 0, candidateDispatchId = 12))
     }
+
+    // --- PR #71 review round 3: ownsGlobalSpeakingState() -- "submitted to
+    // the TTS engine" (submittedDispatchId) is NOT the same as "actually
+    // audible" (audibleDispatchId, ground truth from onStart()). These map
+    // directly onto the review's scenarios A-D. ---
+
+    @Test fun `a single active dispatch with no queued follow-up owns global state`() {
+        // Scenario A: dispatch 1 reached onStart() and nothing else is queued.
+        assertTrue(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 1, audibleDispatchId = 1, submittedDispatchId = 1
+        ))
+    }
+
+    @Test fun `a dispatch merely submitted, before its own onStart arrives, owns global state via the fallback`() {
+        // The narrow gap between tts.speak() and Android's onStart()
+        // callback -- nothing has been confirmed audible yet (0), so the
+        // submitted dispatch is the best available ground truth. Without
+        // this fallback, a tap or a synchronous dispatch failure landing in
+        // this exact gap would find nothing owning global state at all.
+        assertTrue(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 1, audibleDispatchId = 0, submittedDispatchId = 1
+        ))
+    }
+
+    @Test fun `an older audible dispatch is NOT superseded merely because a newer one was submitted behind it`() {
+        // Scenario C, the exact bug this round fixes: dispatch 1 (A) is
+        // genuinely audible; dispatch 2 (B) has been accepted via QUEUE_ADD
+        // but has NOT started yet. Dispatch 1 must still own global state --
+        // being merely submitted does not steal ownership from what's
+        // actually playing.
+        assertTrue(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 1, audibleDispatchId = 1, submittedDispatchId = 2
+        ))
+        assertFalse(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 2, audibleDispatchId = 1, submittedDispatchId = 2
+        ))
+    }
+
+    @Test fun `ownership passes to the newer dispatch only once its own onStart is confirmed`() {
+        // Scenario D: dispatch 1 (A) finished, dispatch 2 (B) has since been
+        // confirmed audible -- B now owns global state, A no longer does.
+        assertTrue(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 2, audibleDispatchId = 2, submittedDispatchId = 2
+        ))
+        assertFalse(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 1, audibleDispatchId = 2, submittedDispatchId = 2
+        ))
+    }
+
+    @Test fun `a dispatch that is neither audible nor the most recently submitted never owns global state`() {
+        // A stale/superseded dispatch's own (possibly delayed) terminal
+        // callback must never claim ownership away from whichever dispatch
+        // genuinely holds it now.
+        assertFalse(ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+            dispatchId = 1, audibleDispatchId = 3, submittedDispatchId = 3
+        ))
+    }
 }
