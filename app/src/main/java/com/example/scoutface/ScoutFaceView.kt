@@ -5,6 +5,8 @@ import android.graphics.*
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
+import com.example.scoutface.brain.ScoutExpressionLayer
+import com.example.scoutface.brain.ScoutExpressionPriority
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
@@ -106,6 +108,54 @@ class ScoutFaceView @JvmOverloads constructor(
     }
 
     /**
+     * Emotional Face v1 -- ATTENTIVE. Sustained, not a pulse: mirrors
+     * setListening()'s exact shape (a plain boolean the caller keeps
+     * up-to-date every frame, smoothed on this side so it rises/falls
+     * gently rather than snapping). Callers pass the existing sustained
+     * direct-address signal (directAddressStreakStartMs/
+     * DIRECT_ADDRESS_SUSTAIN_MS) -- no new detector or debounce lives here;
+     * this method only owns how ATTENTIVE looks once the caller has already
+     * decided the person has been genuinely, continuously facing Scout long
+     * enough. Whether it's actually visible this frame is decided by
+     * ScoutExpressionPriority.resolveBrowOwner() in updateLife() -- thinking
+     * and listening (which already claim the brow) take priority, and so do
+     * PLEASED/UNCERTAIN and PR #73's own arrival pulse, per the approved
+     * ownership order.
+     */
+    fun setAttentive(active: Boolean) = setOnUiThread {
+        if (vAttentive != active) { vAttentive = active; requestActiveFrame() }
+    }
+
+    /**
+     * Emotional Face v1 -- PLEASED / WARM. A single deliberate expressive
+     * beat -- same rise/hold/decay idiom as noticePresence(), a distinct
+     * pulse and magnitude so the two never blend into each other (see
+     * ScoutExpressionPriority for how ownership between them is decided
+     * when both are somehow active at once). Callers decide WHEN (see
+     * MainActivity's PRAISE/AFFECTION/THANKS/successful-teaching call
+     * sites); this method only owns HOW it looks. Safe to call as often as
+     * a caller likes -- each call simply (re)starts the hold window.
+     */
+    fun pleasedBeat() = setOnUiThread {
+        pleasedPulseUntilMs = System.currentTimeMillis() + PLEASED_HOLD_MS
+        requestActiveFrame()
+    }
+
+    /**
+     * Emotional Face v1 -- UNCERTAIN. Same fire-and-forget pulse shape as
+     * pleasedBeat()/noticePresence(). Callers decide WHEN (see
+     * MainActivity's DONT_KNOW / unrecognized-teaching / TinyLlama-null-
+     * fallback call sites); this method only owns HOW it looks -- "I didn't
+     * quite get that," never sadness, fear, or distress. Never changes what
+     * text is spoken or how a reply is routed; purely an accompanying
+     * facial beat.
+     */
+    fun uncertainBeat() = setOnUiThread {
+        uncertainPulseUntilMs = System.currentTimeMillis() + UNCERTAIN_HOLD_MS
+        requestActiveFrame()
+    }
+
+    /**
      * Full recovery reset.
      * Call when: STT/TTS crashes, app resumes from background, camera lost/regained.
      * Battery level intentionally NOT reset — it is system state, not animation state.
@@ -159,6 +209,16 @@ class ScoutFaceView @JvmOverloads constructor(
 
         noticePulse      = 0f
         noticePulseUntilMs = 0L
+
+        // Emotional Face v1
+        vAttentive          = false
+        attentiveSmooth     = 0f
+        pleasedPulse        = 0f
+        pleasedPulseUntilMs = 0L
+        uncertainPulse        = 0f
+        uncertainPulseUntilMs = 0L
+        browExpressionOwner  = ScoutExpressionLayer.NONE
+        mouthExpressionOwner = ScoutExpressionLayer.NONE
 
         saccadeX = 0f; saccadeY = 0f
         saccadeTargetX = 0f; saccadeTargetY = 0f
@@ -260,17 +320,93 @@ class ScoutFaceView @JvmOverloads constructor(
     private var nextBrowMicroAt = 0L
 
     // Silent Arrival Acknowledgment v1. noticePulse is the current brow-lift
-    // amount this pulse contributes (added into drawBrow() alongside, but
-    // kept fully separate from, browMicroY above); noticePulseUntilMs is the
-    // wall-clock time the current pulse's hold phase ends. 0L means no pulse
-    // has ever been requested (or the last one has fully finished decaying
-    // and self-cleared) -- see updateLife() for the rise/hold/decay curve.
+    // amount this pulse contributes, kept fully separate from browMicroY
+    // above; noticePulseUntilMs is the wall-clock time the current pulse's
+    // hold phase ends. 0L means no pulse has ever been requested (or the
+    // last one has fully finished decaying and self-cleared) -- see
+    // updateLife() for the rise/hold/decay curve. This pulse's own timing
+    // and magnitude are completely unchanged by Emotional Face v1 below --
+    // only WHERE its resulting value gets used in drawBrow() changed, from
+    // "always subtracted directly" to "the NOTICE candidate in
+    // ScoutExpressionPriority's ownership resolution," so it can no longer
+    // silently stack with a higher-priority PLEASED/UNCERTAIN beat.
     private var noticePulse       = 0f
     private var noticePulseUntilMs = 0L
     private val NOTICE_PULSE_LIFT_PX = 9f   // between ambient browMicroY's ±4f range and the 20f sustained listening lift
     private val NOTICE_PULSE_HOLD_MS = 500L
     private val NOTICE_PULSE_RISE_TAU_MS = 220f
     private val NOTICE_PULSE_DECAY_TAU_MS = 480f
+
+    // Emotional Face v1 -- ATTENTIVE, PLEASED, UNCERTAIN. Each pulse
+    // (pleased/uncertain) follows the exact same rise/hold/decay idiom as
+    // noticePulse above, at its own magnitude/timing so the three read as
+    // clearly different events; ATTENTIVE is sustained (driven by a plain
+    // boolean, smoothed like listeningBiasSmooth) rather than a pulse, since
+    // it's meant to persist for as long as the caller reports genuine
+    // sustained direct address, not fire once and decay.
+    //
+    // Amplitudes are deliberately chosen in the visually-readable
+    // neighborhood the investigation identified (roughly the existing
+    // LISTENING/THINKING 20-38px range), not PR #73's own deliberately
+    // conservative 9px pilot value -- see each constant's own comment for
+    // the reasoning. browExpressionOwner/mouthExpressionOwner are computed
+    // once per frame in updateLife() via ScoutExpressionPriority and read
+    // by drawBrow()/drawMouth() -- the single place that decides which one
+    // (if any) of these candidates, plus NOTICE above, actually renders.
+    private var vAttentive      = false
+    private var attentiveSmooth = 0f
+    // Symmetric brow lift, both eyebrows equally -- a plain, restrained
+    // "I notice you" cue, deliberately the smallest of the three new
+    // amplitudes since it's sustained continuously rather than a deliberate
+    // beat. Still well above ambient browMicroY (±4px) and PR #73's own 9px
+    // pulse, and in the same neighborhood as LISTENING's existing 20px.
+    private val ATTENTIVE_BROW_LIFT_PX = 16f
+    private val ATTENTIVE_TAU_MS       = 260f
+    // Very slight upper-lid opening while ATTENTIVE owns the brow -- an
+    // optional, small "alert eyes" cue layered on top of the brow lift.
+    // Expressed as a fraction subtracted from drawEye()'s existing 0..1 lid
+    // closure amount (b), not a new geometry capability.
+    private val ATTENTIVE_EYE_OPEN_MAX = 0.035f
+
+    private var pleasedPulse        = 0f
+    private var pleasedPulseUntilMs = 0L
+    // A deliberate positive beat -- stronger than ATTENTIVE since it's a
+    // one-off event, not a sustained cue, and comfortably inside the
+    // investigation's 15-30px readable range rather than near-ambient.
+    private val PLEASED_BROW_LIFT_PX     = 22f
+    private val PLEASED_HOLD_MS          = 700L
+    private val PLEASED_RISE_TAU_MS      = 150f
+    private val PLEASED_DECAY_TAU_MS     = 450f
+    // Mouth-corner lift (both corners) when PLEASED owns the mouth -- a real
+    // smile-shape change, several times the ~2-6px swing the resting mouth
+    // shows across every existing state today.
+    private val PLEASED_MOUTH_CORNER_PX  = 12f
+
+    private var uncertainPulse        = 0f
+    private var uncertainPulseUntilMs = 0L
+    // Asymmetric -- only the LEFT eyebrow (side < 0) lifts by this amount;
+    // the right eyebrow gets none of it. Deliberately the opposite side and
+    // a plain height change with no arc/tilt at all, unlike THINKING's own
+    // right-eyebrow arch (thinkTilt/thinkInward/thinkInnerLift below), so
+    // the two read as clearly different shapes, not just different amounts.
+    // Roughly half of THINKING's 38px, comfortably above LISTENING's 20px
+    // floor for restraint while staying unmistakably visible -- a single
+    // raised eyebrow is a common, readable "hmm, not sure" cue on its own.
+    private val UNCERTAIN_BROW_PRIMARY_PX = 18f
+    private val UNCERTAIN_HOLD_MS         = 550L
+    private val UNCERTAIN_RISE_TAU_MS     = 180f
+    private val UNCERTAIN_DECAY_TAU_MS    = 380f
+    // Mouth corners flatten (move toward/slightly past the default resting
+    // height, never past the center dip point -- see drawMouth()'s own
+    // comment) rather than dropping into anything frown-shaped. Asymmetric
+    // like the brow: the left corner (same side as the raised eyebrow)
+    // moves more than the right, reinforcing one coherent "off-kilter,
+    // didn't quite follow" read rather than a symmetric, sadder-looking dip.
+    private val UNCERTAIN_MOUTH_PRIMARY_PX   = 10f
+    private val UNCERTAIN_MOUTH_SECONDARY_PX = 2f
+
+    private var browExpressionOwner: ScoutExpressionLayer  = ScoutExpressionLayer.NONE
+    private var mouthExpressionOwner: ScoutExpressionLayer = ScoutExpressionLayer.NONE
 
     private var speechPhase = 0f
     private var mouthOpen   = 0f
@@ -591,8 +727,17 @@ class ScoutFaceView @JvmOverloads constructor(
         // Per-eye lower lid: base (speech/breath) + expression layer + blink rise
         val lowerL = (lowerLidSmooth + lowerLidExprL + blinkL * 6f).coerceIn(0f, 20f)
         val lowerR = (lowerLidSmooth + lowerLidExprR + blinkR * 6f).coerceIn(0f, 20f)
-        drawEye(c, leftGeom,  blinkL, lidDroopL,                lowerL, now)
-        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, lowerR, now)
+        // Emotional Face v1 -- ATTENTIVE's optional subtle "more open" eye
+        // cue, symmetric like its brow lift. Zero whenever ATTENTIVE doesn't
+        // own the brow layer this frame (any higher-priority expression, or
+        // thinking/listening, forces browExpressionOwner away from
+        // ATTENTIVE, which zeroes this too -- no separate suppression check
+        // needed here).
+        val attentiveEyeOpen = if (browExpressionOwner == ScoutExpressionLayer.ATTENTIVE) {
+            attentiveSmooth * ATTENTIVE_EYE_OPEN_MAX
+        } else 0f
+        drawEye(c, leftGeom,  blinkL, lidDroopL,                lowerL, now, attentiveEyeOpen)
+        drawEye(c, rightGeom, blinkR, lidDroopR + thinkLidSmooth, lowerR, now, attentiveEyeOpen)
         drawBrow(c, leftGeom, side = -1)
         drawBrow(c, rightGeom, side = 1)
         drawMouth(c, faceCx, faceCy + 240f)
@@ -603,7 +748,8 @@ class ScoutFaceView @JvmOverloads constructor(
     //  EYE
     // ======================================================
     private fun drawEye(c: Canvas, eye: EyeGeom, blinkAmount: Float,
-                        lidDroop: Float, lowerLid: Float, now: Long) {
+                        lidDroop: Float, lowerLid: Float, now: Long,
+                        eyeOpenBoost: Float = 0f) {
 
         val pxSocket = lookX * 0.03f
         val pySocket = lookY * 0.03f
@@ -706,7 +852,7 @@ class ScoutFaceView @JvmOverloads constructor(
         c.drawOval(tmpParallaxRect, pUpperShadow)
         pUpperShadow.shader = null
 
-        val b = (blinkAmount + lidDroop).coerceIn(0f, 1f)
+        val b = (blinkAmount + lidDroop - eyeOpenBoost).coerceIn(0f, 1f)
         if (b > 0.01f) {
             val lidBottom = tmpParallaxRect.top + tmpParallaxRect.height() * b
             tmpLidRect.set(
@@ -898,14 +1044,30 @@ class ScoutFaceView @JvmOverloads constructor(
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
         val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)
-        // Silent Arrival Acknowledgment v1: applied symmetrically to both
+
+        // Emotional Face v1: exactly one of {UNCERTAIN, PLEASED, NOTICE,
+        // ATTENTIVE} contributes here, per browExpressionOwner (resolved
+        // once per frame in updateLife() via ScoutExpressionPriority) --
+        // never a sum of several at once, which is what let ambient/pulse
+        // terms simply stack before. UNCERTAIN is the one asymmetric case
+        // (left brow only, side < 0); PLEASED/NOTICE/ATTENTIVE all lift both
+        // brows equally, same as PR #73's original symmetric notice pulse.
+        val expressionBrowLift = when (browExpressionOwner) {
+            ScoutExpressionLayer.UNCERTAIN -> if (side < 0) uncertainPulse else 0f
+            ScoutExpressionLayer.PLEASED   -> pleasedPulse
+            ScoutExpressionLayer.NOTICE    -> noticePulse
+            ScoutExpressionLayer.ATTENTIVE -> attentiveSmooth * ATTENTIVE_BROW_LIFT_PX
+            ScoutExpressionLayer.NONE      -> 0f
+        }
+        // Silent Arrival Acknowledgment v1 (now folded into expressionBrowLift
+        // above when NOTICE owns the layer): applied symmetrically to both
         // brows (unlike thinking's deliberately asymmetric curious arch) --
         // a clean, even lift reads as "noticed/interested," not "curious" or
         // "surprised." Subtracted the same way listeningLift/thinkingLift
         // are, since this coordinate system is Y-down (raising a brow means
         // decreasing browCy).
         val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop +
-                browMicroY + blinkBrowRelax - speechBrowLift - noticePulse
+                browMicroY + blinkBrowRelax - speechBrowLift - expressionBrowLift
 
         val bw   = eye.eyeRect.width() * 0.40f
         val tilt = 22f
@@ -1004,8 +1166,33 @@ class ScoutFaceView @JvmOverloads constructor(
             val mw    = 80f
             val ctrY  = if (vThinking) cy + 11f else cy + 18f
             val ctrXo = mw * 0.44f
-            val corYL = if (vThinking) cy - 2f else cy + 2f   // both corners rise → warm smile
-            val corYR = if (vThinking) cy - 4f else cy + 2f   // right corner slightly higher
+            // Emotional Face v1: PLEASED/UNCERTAIN corner targets, owned
+            // exclusively per mouthExpressionOwner (resolved once per frame
+            // in updateLife() -- already NONE whenever speaking/thinking/
+            // listening holds the mouth, so the existing vThinking-aware
+            // fallback below is untouched in every case it used to apply).
+            // Both are a real, deliberately larger corner-height swing than
+            // the ~2-6px difference the existing thinking/default states
+            // show -- see PLEASED_MOUTH_CORNER_PX/UNCERTAIN_MOUTH_*_PX's own
+            // comments for the reasoning.
+            val corYL: Float
+            val corYR: Float
+            when (mouthExpressionOwner) {
+                ScoutExpressionLayer.PLEASED -> {
+                    val lift = pleasedPulse * (PLEASED_MOUTH_CORNER_PX / PLEASED_BROW_LIFT_PX)
+                    corYL = cy + 2f - lift
+                    corYR = cy + 2f - lift
+                }
+                ScoutExpressionLayer.UNCERTAIN -> {
+                    val t = uncertainPulse / UNCERTAIN_BROW_PRIMARY_PX
+                    corYL = cy + 2f + UNCERTAIN_MOUTH_PRIMARY_PX * t
+                    corYR = cy + 2f + UNCERTAIN_MOUTH_SECONDARY_PX * t
+                }
+                else -> {
+                    corYL = if (vThinking) cy - 2f else cy + 2f   // both corners rise → warm smile
+                    corYR = if (vThinking) cy - 4f else cy + 2f   // right corner slightly higher
+                }
+            }
             tmpPath.reset()
             tmpPath.moveTo(cx - mw, corYL)
             tmpPath.quadTo(cx - ctrXo, ctrY, cx, ctrY * 0.72f + cy * 0.28f)
@@ -1220,6 +1407,47 @@ class ScoutFaceView @JvmOverloads constructor(
         val noticePulseTarget = if (now < noticePulseUntilMs) NOTICE_PULSE_LIFT_PX else 0f
         val noticePulseTau = if (noticePulseTarget > noticePulse) NOTICE_PULSE_RISE_TAU_MS else NOTICE_PULSE_DECAY_TAU_MS
         noticePulse += (noticePulseTarget - noticePulse) * smoothAlpha(dtMs, noticePulseTau)
+
+        // Emotional Face v1 -- PLEASED/UNCERTAIN pulses. Same rise/hold/decay
+        // shape as noticePulse above, each at its own magnitude/timing (see
+        // the constants' own doc comments) so the three read as distinct
+        // events rather than variations on one animation.
+        val pleasedPulseTarget = if (now < pleasedPulseUntilMs) PLEASED_BROW_LIFT_PX else 0f
+        val pleasedPulseTau = if (pleasedPulseTarget > pleasedPulse) PLEASED_RISE_TAU_MS else PLEASED_DECAY_TAU_MS
+        pleasedPulse += (pleasedPulseTarget - pleasedPulse) * smoothAlpha(dtMs, pleasedPulseTau)
+
+        val uncertainPulseTarget = if (now < uncertainPulseUntilMs) UNCERTAIN_BROW_PRIMARY_PX else 0f
+        val uncertainPulseTau = if (uncertainPulseTarget > uncertainPulse) UNCERTAIN_RISE_TAU_MS else UNCERTAIN_DECAY_TAU_MS
+        uncertainPulse += (uncertainPulseTarget - uncertainPulse) * smoothAlpha(dtMs, uncertainPulseTau)
+
+        // ATTENTIVE is sustained, not a pulse -- a single tau smooths both
+        // the rise (when the caller reports genuine sustained direct
+        // address) and the fall (when it stops), same idiom as
+        // listeningBiasSmooth above.
+        val attentiveTarget = if (vAttentive) 1f else 0f
+        attentiveSmooth += (attentiveTarget - attentiveSmooth) * smoothAlpha(dtMs, ATTENTIVE_TAU_MS)
+
+        // Expression ownership: resolved once per frame, read by
+        // drawBrow()/drawMouth() below. "Active" for each pulse-based
+        // candidate is its own current magnitude clearing a small epsilon --
+        // once a pulse decays past that point, ownership falls through to
+        // the next candidate in priority order on its own, with no separate
+        // expiry bookkeeping needed here.
+        browExpressionOwner = ScoutExpressionPriority.resolveBrowOwner(
+            isThinking = vThinking,
+            isListening = vListening,
+            uncertainActive = uncertainPulse > 0.5f,
+            pleasedActive = pleasedPulse > 0.5f,
+            noticeActive = noticePulse > 0.5f,
+            attentiveActive = vAttentive
+        )
+        mouthExpressionOwner = ScoutExpressionPriority.resolveMouthOwner(
+            isSpeaking = vSpeaking,
+            isThinking = vThinking,
+            isListening = vListening,
+            uncertainActive = uncertainPulse > 0.5f,
+            pleasedActive = pleasedPulse > 0.5f
+        )
 
         val hasExternalGaze = abs(vLookTargetX) > 1f || abs(vLookTargetY) > 1f
         if (!hasExternalGaze) {
@@ -1493,12 +1721,20 @@ class ScoutFaceView @JvmOverloads constructor(
         // the eventual decay tick.
         val movingNotice = noticePulse > 0.05f || now < noticePulseUntilMs
 
+        // Emotional Face v1: same "keep ticking through the whole rise/hold/
+        // decay" reasoning as movingNotice above, for the two new pulses;
+        // ATTENTIVE keeps ticking while its smoothed value hasn't yet
+        // settled at its current target (mirrors movingListenBias's shape).
+        val movingPleased   = pleasedPulse > 0.05f || now < pleasedPulseUntilMs
+        val movingUncertain = uncertainPulse > 0.05f || now < uncertainPulseUntilMs
+        val movingAttentive = abs(attentiveSmooth - (if (vAttentive) 1f else 0f)) > 0.01f
+
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
                 movingLowerLid || movingListenBias || isLockedOn ||
                 micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid ||
-                movingNotice
+                movingNotice || movingPleased || movingUncertain || movingAttentive
 
         if (active) {
             idleMode = false
