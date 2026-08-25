@@ -104,6 +104,7 @@ import com.example.scoutface.brain.ScoutMemoryPhraser
 import com.example.scoutface.brain.ScoutPostBootQuietGate
 import com.example.scoutface.brain.ScoutPresenceStreakTracker
 import com.example.scoutface.brain.ScoutReturnGreetingGate
+import com.example.scoutface.brain.ScoutArrivalAcknowledgmentGate
 import com.example.scoutface.brain.ScoutStaleResultGuard
 import com.example.scoutface.brain.StaleFact
 
@@ -934,6 +935,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var candidateAbsenceLogged = false  // avoids re-logging "absence started" every frame
     private var genuineAbsenceMarked = false    // true once the current absence crossed MIN_GENUINE_ABSENCE_MS
     private var returnStabilizingSinceMs = 0L   // 0 = not currently in a post-absence stabilization window
+
+    // Silent Arrival Acknowledgment v1. True once the CURRENT continuous
+    // arrival has already received its one silent facial acknowledgment
+    // (ScoutFaceView.noticePresence()) -- see the
+    // ScoutArrivalAcknowledgmentGate.shouldAcknowledge() call site in the
+    // face-detection callback below. Deliberately independent of
+    // greetedThisSession: that flag
+    // governs the spoken "Hello. I am Scout." greeting and must not be
+    // coupled to, or gate, silent facial awareness (see this feature's own
+    // design note: PR #68's post-boot Companion Moment quiet period is
+    // about SPEECH and is deliberately NOT reused here). Reset to false only
+    // when genuineAbsenceMarked is freshly set below -- i.e. only after a
+    // real departure, never merely because faceAppearanceMs itself reset
+    // from a brief detector flicker -- so a momentary missed frame during
+    // continued presence can never re-arm a fresh acknowledgment.
+    private var arrivalAcknowledged = false
 
     @Volatile
 
@@ -3053,6 +3070,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 }
 
+                                // Silent Arrival Acknowledgment v1. Deliberately independent of
+                                // the greeting block above -- reuses the exact same
+                                // faceAppearanceMs/GREET_STABILIZE_MS stabilization signal (the
+                                // smallest existing anti-flicker mechanism for "is this a
+                                // genuine, stable arrival," not a momentary detector glitch),
+                                // but with its own gate (no !isListening requirement -- Scout
+                                // may quietly notice someone while listening) and its own
+                                // one-shot latch (arrivalAcknowledged, not greetedThisSession).
+                                // Also gated on the existing gazeEnabled boot lock (unrelated to
+                                // this feature, already governs BOOT_GAZE_LOCK_MS) so the brow
+                                // acknowledgment can never fire before gaze-tracking itself is
+                                // even active -- keeps the intended "gaze leads, brow follows"
+                                // sequence intact through the brief post-boot window instead of
+                                // inventing a new timer of its own. Never speaks, never touches
+                                // TruthDb/HabitLayer/Companion Moments/AI generation -- purely a
+                                // facial expression call on the existing ScoutFaceView.
+                                if (gazeEnabled && ScoutArrivalAcknowledgmentGate.shouldAcknowledge(
+                                        alreadyAcknowledged = arrivalAcknowledged,
+                                        isSpeaking = isSpeaking,
+                                        isThinking = isThinking,
+                                        faceAppearanceMs = faceAppearanceMs,
+                                        nowMs = now,
+                                        stabilizeMs = GREET_STABILIZE_MS
+                                    )) {
+                                    arrivalAcknowledged = true
+                                    runOnUiThread { faceView.noticePresence() }
+                                }
+
                             } else {
 
                                 lastFaceHashes = emptyList()
@@ -3104,6 +3149,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     if (!genuineAbsenceMarked && absenceGapMs >= MIN_GENUINE_ABSENCE_MS) {
                                         genuineAbsenceMarked = true
                                         logPresenceDebug("Genuine absence confirmed")
+                                        // Silent Arrival Acknowledgment v1: a real departure just
+                                        // began -- the next stabilized return is a genuinely new
+                                        // arrival, eligible for its own acknowledgment again.
+                                        arrivalAcknowledged = false
                                     }
                                 }
                                 returnStabilizingSinceMs = 0L // cancel any in-progress return stabilization
