@@ -521,4 +521,81 @@ class ScoutFactExtractorTest {
         )
         assertEquals("Your dog's name is Nicolas.", out)
     }
+
+    // --- containsSelfPetRelationshipClaim() -- Layer-2 backstop, dog/pet
+    // only (v1). Real-device finding: asked about family, a fact-blind
+    // Gemini or an empty-TruthDb TinyLlama fallback produced "my dog's
+    // name is Scout" -- a distinct identity failure from the third-person
+    // confusion above (Scout isn't denied/absent here, it's misassigned the
+    // dog/pet's relationship role entirely). See
+    // SELF_PET_RELATIONSHIP_BREAK_PATTERNS' doc comment for the two
+    // grammatical shapes and why negation is safely excluded without any
+    // explicit lookahead. ---
+
+    @Test fun `self pet relationship claim positives -- scout or I falsely assigned as dog or pet`() {
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is a dog."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is my dog."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is your dog."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is a pet."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("I'm your dog."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("I am a pet."))
+    }
+
+    @Test fun `self pet relationship claim positives -- dog or pet relation falsely assigned scout as the value`() {
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("My dog's name is Scout."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Your dog's name is Scout."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("My pet is Scout."))
+        assertTrue(ScoutFactExtractor.containsSelfPetRelationshipClaim("Your pet is Scout."))
+    }
+
+    @Test fun `self pet relationship claim adversarial -- correct facts and correct mentions never match`() {
+        // Correct dog fact -- the actual value is Nicolas, not Scout.
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("Your dog's name is Nicolas."))
+        // Correct sentences mentioning Scout and the real dog together --
+        // neither grammatical shape appears in any of these.
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim(
+            "Your dog Nicolas and I, Scout, are both part of the family."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim(
+            "Scout knows your dog's name is Nicolas."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim(
+            "I'm Scout, and Nicolas is your dog."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim(
+            "You said Scout is part of the family, and Nicolas is your dog."))
+        // Family-belonging and ordinary identity statements -- no dog/pet
+        // predicate at all.
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is part of the family."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("My name is Scout."))
+    }
+
+    @Test fun `self pet relationship claim adversarial -- explicit negation never matches`() {
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("Scout is not your dog."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("I'm not your pet."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("Your dog's name is not Scout."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("Your dog is not Scout."))
+        assertFalse(ScoutFactExtractor.containsSelfPetRelationshipClaim("No, Scout is not the dog."))
+    }
+
+    @Test fun `the combined guard replaces a self pet relationship claim reply`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "scout is also part of the family",
+            "My dog's name is Scout."
+        )
+        assertEquals(ScoutFactExtractor.SELF_PET_RELATIONSHIP_CLARIFICATION, out)
+    }
+
+    @Test fun `the combined guard leaves a correct dog fact untouched by the pet relationship check`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "what is my dog's name",
+            "Your dog's name is Nicolas."
+        )
+        assertEquals("Your dog's name is Nicolas.", out)
+    }
+
+    @Test fun `the combined guard leaves an explicit pet-relationship denial untouched`() {
+        val out = ScoutFactExtractor.applyScoutCapabilityIntegrityGuards(
+            "scout is also part of the family",
+            "Scout is not your dog."
+        )
+        assertEquals("Scout is not your dog.", out)
+    }
 }

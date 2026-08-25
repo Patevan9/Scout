@@ -120,6 +120,17 @@ object ScoutFactExtractor {
     const val SELF_IDENTITY_CLARIFICATION =
         "That's me you're asking about -- I'm right here, I haven't gone anywhere."
 
+    // Layer-2 replacement for a self/pet-relationship break (see
+    // containsSelfPetRelationshipClaim() below) -- a distinct identity
+    // failure from the third-person confusion above: here the model doesn't
+    // deny knowing Scout, it falsely assigns Scout the dog/pet's role
+    // ("Scout is a dog," "my dog's name is Scout"). Deliberately static, not
+    // built from TruthDb's real dog name -- keeps this guard pure (string
+    // in, string out), matching every other guard in this file, and never
+    // wrong even before any dog fact has been taught.
+    const val SELF_PET_RELATIONSHIP_CLARIFICATION =
+        "I'm Scout. I'm part of the family, but I'm not your dog or pet."
+
     // Self-referential "are you even capable of learning/remembering" questions
     // -- "Can you learn?", "Do you have a memory?", "Are you capable of
     // remembering?". Deliberately narrow modal/capability phrasing, gated so a
@@ -307,6 +318,51 @@ object ScoutFactExtractor {
         Regex("""\bno (?:indication|information|mention) of scout\b"""),
         Regex("""\bscout (?:has|have|had|may(?:\s+have)?|might(?:\s+have)?|could(?:\s+have)?) (?:moved|relocated|passed away|died|left)\b"""),
         Regex("""\bscout (?:is|was) (?:no longer|not) (?:around|here|with (?:us|the family))\b""")
+    )
+
+    // Layer 2, dog/pet only (v1): a strong, unambiguous indication that a
+    // generative reply assigned Scout the dog/pet's relationship role --
+    // "Scout is a dog," "my dog's name is Scout" -- rather than Scout's own
+    // real identity. Real-device finding: asked about family, a fact-blind
+    // Gemini or an empty-TruthDb TinyLlama fallback conflated the two most
+    // salient entities in its own context (Scout, the addressee, and "the
+    // dog," the most recently discussed relation) and produced exactly this
+    // false relationship claim.
+    //
+    // Two grammatical shapes, both direct-subject-anchored like
+    // SELF_FAMILY_BELONGING_PATTERNS/SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS
+    // above -- never a loose contains("scout") && contains("dog") check:
+    //   1. Scout/I directly claimed to BE the dog/pet ("scout is a dog,"
+    //      "i'm your pet").
+    //   2. The dog/pet relation directly assigned "scout" as its value
+    //      ("my dog's name is scout," "your pet is scout").
+    //
+    // Negation safety comes from the same contiguous-match property the two
+    // pattern lists above already rely on, not from an explicit lookahead:
+    // "scout is not a dog" fails to match shape 1 because "not" occupies the
+    // exact slot the optional article/predicate would need to fill, and
+    // "isn't" is a single token with no space for "\bscout is\b" to match
+    // inside at all -- see SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS' own
+    // literal "isn't"/"is not" alternatives for the same precedent. Verified
+    // against every required negation/false-positive case (correct dog
+    // facts, "Scout is part of the family," Scout+dog mentioned together
+    // correctly, explicit denials) before this was written.
+    //
+    // Known v1 limitation, accepted rather than preemptively guarded: an
+    // adverb wedged between "is"/"am" and the predicate ("Scout is
+    // definitely a dog") would slip past this, the same way "also" slipped
+    // past the original SELF_FAMILY_BELONGING_PATTERNS before it was
+    // widened -- no such wording has been observed on a real device for
+    // this failure, so it's left narrow rather than speculatively broadened
+    // (stability over completeness, per this guard's own design brief).
+    // "cat" is architecturally equivalent to "dog"/"pet" (all three map to
+    // the same DOG_NAME key -- see ScoutEntityResolver) but has no
+    // real-device evidence either, so it's deliberately excluded from v1
+    // scope, not an oversight.
+    private val SELF_PET_RELATIONSHIP_BREAK_PATTERNS = listOf(
+        Regex("""\bscout is (?:a |my |your |the )?(?:dog|pet)\b"""),
+        Regex("""\bi(?:'m| am) (?:a |your |the )?(?:dog|pet)\b"""),
+        Regex("""\b(?:my|your|the) (?:dog|pet)(?:'s name)? is scout\b""")
     )
 
     private val DATE_VALUE = Regex(
@@ -611,12 +667,33 @@ object ScoutFactExtractor {
         return SELF_THIRD_PERSON_IDENTITY_BREAK_PATTERNS.any { it.containsMatchIn(lower) }
     }
 
+    // Layer 2, dog/pet only (v1): does [reply] clearly and affirmatively
+    // assign Scout the dog/pet's relationship role -- "Scout is a dog,"
+    // "I'm your pet," "my dog's name is Scout"? A distinct identity failure
+    // from containsSelfThirdPersonConfusion() above: that guard catches
+    // Scout being denied/treated as absent, this one catches Scout being
+    // misassigned an impossible relationship role entirely. See
+    // SELF_PET_RELATIONSHIP_BREAK_PATTERNS' doc comment for the real-device
+    // finding, the two grammatical shapes, and why negation ("Scout is not
+    // your dog") is safely excluded without any explicit lookahead. [reply]
+    // is a model's raw free-text output, so it is not assumed pre-normalized
+    // here, matching containsSelfThirdPersonConfusion().
+    fun containsSelfPetRelationshipClaim(reply: String): Boolean {
+        val lower = reply.lowercase().replace("’", "'")
+        return SELF_PET_RELATIONSHIP_BREAK_PATTERNS.any { it.containsMatchIn(lower) }
+    }
+
     // Combined Layer-2 output guard for the generative (Gemini/TinyLlama)
     // fallback paths -- see MainActivity's two deliverAiResult() call sites.
-    // Order: capability-denial, reminder-promise, vision-denial, and
-    // self-third-person-confusion checks all run unconditionally on every
-    // reply (none has a legitimate global reading once matched, so no
-    // input-shape gate is needed, unlike the retention-claim guard below).
+    // Order: capability-denial, reminder-promise, vision-denial,
+    // self-third-person-confusion, and self-pet-relationship checks all run
+    // unconditionally on every reply (none has a legitimate global reading
+    // once matched, so no input-shape gate is needed, unlike the
+    // retention-claim guard below). The new self-pet-relationship check sits
+    // directly after self-third-person-confusion since both are identity
+    // guards over the same [reply] -- grouped together, in the order they
+    // were added, rather than interleaved with the unrelated
+    // capability/reminder/vision checks above them.
     // applyRetentionClaimGuard() keeps its own existing teaching-shaped gate,
     // unchanged from its original PR.
     fun applyScoutCapabilityIntegrityGuards(originalInput: String, reply: String): String {
@@ -624,6 +701,7 @@ object ScoutFactExtractor {
         if (containsReminderPromise(reply)) return REMINDER_NOT_AVAILABLE
         if (containsVisionCapabilityDenial(reply)) return VISION_CAPABILITY_CLARIFICATION
         if (containsSelfThirdPersonConfusion(reply)) return SELF_IDENTITY_CLARIFICATION
+        if (containsSelfPetRelationshipClaim(reply)) return SELF_PET_RELATIONSHIP_CLARIFICATION
         return applyRetentionClaimGuard(originalInput, reply)
     }
 
