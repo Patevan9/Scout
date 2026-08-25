@@ -135,9 +135,19 @@ class ScoutFaceView @JvmOverloads constructor(
      * MainActivity's PRAISE/AFFECTION/THANKS/successful-teaching call
      * sites); this method only owns HOW it looks. Safe to call as often as
      * a caller likes -- each call simply (re)starts the hold window.
+     *
+     * Round 2 fix: also arms the mouth's own, separately-timed release (see
+     * pleasedMouthArmed's doc comment) -- the brow pulse above starts aging
+     * immediately as before, but the mouth-corner shape must not, since
+     * speaking (which owns the mouth) doesn't actually begin until well
+     * after this call returns.
      */
     fun pleasedBeat() = setOnUiThread {
-        pleasedPulseUntilMs = System.currentTimeMillis() + PLEASED_HOLD_MS
+        val now = System.currentTimeMillis()
+        pleasedPulseUntilMs = now + PLEASED_HOLD_MS
+        pleasedMouthArmed = true
+        pleasedMouthSawSpeaking = false
+        pleasedMouthArmedAtMs = now
         requestActiveFrame()
     }
 
@@ -149,9 +159,15 @@ class ScoutFaceView @JvmOverloads constructor(
      * quite get that," never sadness, fear, or distress. Never changes what
      * text is spoken or how a reply is routed; purely an accompanying
      * facial beat.
+     *
+     * Round 2 fix: same mouth-arming addition as pleasedBeat() above.
      */
     fun uncertainBeat() = setOnUiThread {
-        uncertainPulseUntilMs = System.currentTimeMillis() + UNCERTAIN_HOLD_MS
+        val now = System.currentTimeMillis()
+        uncertainPulseUntilMs = now + UNCERTAIN_HOLD_MS
+        uncertainMouthArmed = true
+        uncertainMouthSawSpeaking = false
+        uncertainMouthArmedAtMs = now
         requestActiveFrame()
     }
 
@@ -219,6 +235,18 @@ class ScoutFaceView @JvmOverloads constructor(
         uncertainPulseUntilMs = 0L
         browExpressionOwner  = ScoutExpressionLayer.NONE
         mouthExpressionOwner = ScoutExpressionLayer.NONE
+
+        // Emotional Face v1 round 2 fix -- deferred mouth release state
+        pleasedMouthArmed       = false
+        pleasedMouthSawSpeaking = false
+        pleasedMouthArmedAtMs   = 0L
+        pleasedMouthUntilMs     = 0L
+        pleasedMouthIntensity   = 0f
+        uncertainMouthArmed       = false
+        uncertainMouthSawSpeaking = false
+        uncertainMouthArmedAtMs   = 0L
+        uncertainMouthUntilMs     = 0L
+        uncertainMouthIntensity   = 0f
 
         saccadeX = 0f; saccadeY = 0f
         saccadeTargetX = 0f; saccadeTargetY = 0f
@@ -381,6 +409,19 @@ class ScoutFaceView @JvmOverloads constructor(
     // smile-shape change, several times the ~2-6px swing the resting mouth
     // shows across every existing state today.
     private val PLEASED_MOUTH_CORNER_PX  = 12f
+    // Round 2 fix: the mouth's own independent release state -- deliberately
+    // separate from pleasedPulse above, which keeps driving the brow on its
+    // original immediate timing, completely unaffected by any of this. See
+    // ScoutExpressionPriority.shouldReleaseDeferredMouthExpression()'s doc
+    // comment for the full reasoning. pleasedMouthIntensity (0..1) is what
+    // drawMouth() actually reads; it only starts rising once the mouth is
+    // released, using the same PLEASED_RISE_TAU_MS/PLEASED_DECAY_TAU_MS
+    // shape as the brow pulse for a matching feel, just on its own clock.
+    private var pleasedMouthArmed         = false
+    private var pleasedMouthSawSpeaking   = false
+    private var pleasedMouthArmedAtMs     = 0L
+    private var pleasedMouthUntilMs       = 0L
+    private var pleasedMouthIntensity     = 0f
 
     private var uncertainPulse        = 0f
     private var uncertainPulseUntilMs = 0L
@@ -404,6 +445,19 @@ class ScoutFaceView @JvmOverloads constructor(
     // didn't quite follow" read rather than a symmetric, sadder-looking dip.
     private val UNCERTAIN_MOUTH_PRIMARY_PX   = 10f
     private val UNCERTAIN_MOUTH_SECONDARY_PX = 2f
+    // Round 2 fix: same independent mouth-release state as PLEASED above.
+    private var uncertainMouthArmed       = false
+    private var uncertainMouthSawSpeaking = false
+    private var uncertainMouthArmedAtMs   = 0L
+    private var uncertainMouthUntilMs     = 0L
+    private var uncertainMouthIntensity   = 0f
+
+    // Round 2 fix: shared safety-timeout for both mouth arms above -- see
+    // ScoutExpressionPriority.shouldReleaseDeferredMouthExpression()'s doc
+    // comment. Comfortably longer than MainActivity's own natural-pause
+    // pre-dispatch delay (220-650ms max), so it never fires for a normal
+    // dispatch; only guards the unanticipated case speech never starts.
+    private val MOUTH_EXPRESSION_ARM_TIMEOUT_MS = 2000L
 
     private var browExpressionOwner: ScoutExpressionLayer  = ScoutExpressionLayer.NONE
     private var mouthExpressionOwner: ScoutExpressionLayer = ScoutExpressionLayer.NONE
@@ -1174,19 +1228,22 @@ class ScoutFaceView @JvmOverloads constructor(
             // Both are a real, deliberately larger corner-height swing than
             // the ~2-6px difference the existing thinking/default states
             // show -- see PLEASED_MOUTH_CORNER_PX/UNCERTAIN_MOUTH_*_PX's own
-            // comments for the reasoning.
+            // comments for the reasoning. Scaled by each expression's own
+            // independent pleasedMouthIntensity/uncertainMouthIntensity
+            // (0..1, round 2 fix) rather than the brow pulse directly -- see
+            // that field's doc comment for why the two must not share a
+            // clock.
             val corYL: Float
             val corYR: Float
             when (mouthExpressionOwner) {
                 ScoutExpressionLayer.PLEASED -> {
-                    val lift = pleasedPulse * (PLEASED_MOUTH_CORNER_PX / PLEASED_BROW_LIFT_PX)
+                    val lift = pleasedMouthIntensity * PLEASED_MOUTH_CORNER_PX
                     corYL = cy + 2f - lift
                     corYR = cy + 2f - lift
                 }
                 ScoutExpressionLayer.UNCERTAIN -> {
-                    val t = uncertainPulse / UNCERTAIN_BROW_PRIMARY_PX
-                    corYL = cy + 2f + UNCERTAIN_MOUTH_PRIMARY_PX * t
-                    corYR = cy + 2f + UNCERTAIN_MOUTH_SECONDARY_PX * t
+                    corYL = cy + 2f + UNCERTAIN_MOUTH_PRIMARY_PX * uncertainMouthIntensity
+                    corYR = cy + 2f + UNCERTAIN_MOUTH_SECONDARY_PX * uncertainMouthIntensity
                 }
                 else -> {
                     corYL = if (vThinking) cy - 2f else cy + 2f   // both corners rise → warm smile
@@ -1427,12 +1484,56 @@ class ScoutFaceView @JvmOverloads constructor(
         val attentiveTarget = if (vAttentive) 1f else 0f
         attentiveSmooth += (attentiveTarget - attentiveSmooth) * smoothAlpha(dtMs, ATTENTIVE_TAU_MS)
 
+        // Round 2 fix: PLEASED/UNCERTAIN's mouth release, deferred until
+        // speaking has genuinely finished (not merely "isn't true right
+        // now," which is equally true during MainActivity's own pre-
+        // dispatch delay before speaking has even started) -- see
+        // ScoutExpressionPriority.shouldReleaseDeferredMouthExpression()'s
+        // doc comment. The brow pulses above are completely unaffected --
+        // pleasedPulse/uncertainPulse keep aging on their original,
+        // immediate clock regardless of any of this.
+        if (pleasedMouthArmed && vSpeaking) pleasedMouthSawSpeaking = true
+        if (ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+                armed = pleasedMouthArmed,
+                isSpeaking = vSpeaking,
+                sawSpeakingWhileArmed = pleasedMouthSawSpeaking,
+                armedForMs = now - pleasedMouthArmedAtMs,
+                armTimeoutMs = MOUTH_EXPRESSION_ARM_TIMEOUT_MS
+            )) {
+            pleasedMouthUntilMs = now + PLEASED_HOLD_MS
+            pleasedMouthArmed = false
+            pleasedMouthSawSpeaking = false
+        }
+        val pleasedMouthTarget = if (now < pleasedMouthUntilMs) 1f else 0f
+        val pleasedMouthTau = if (pleasedMouthTarget > pleasedMouthIntensity) PLEASED_RISE_TAU_MS else PLEASED_DECAY_TAU_MS
+        pleasedMouthIntensity += (pleasedMouthTarget - pleasedMouthIntensity) * smoothAlpha(dtMs, pleasedMouthTau)
+
+        if (uncertainMouthArmed && vSpeaking) uncertainMouthSawSpeaking = true
+        if (ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+                armed = uncertainMouthArmed,
+                isSpeaking = vSpeaking,
+                sawSpeakingWhileArmed = uncertainMouthSawSpeaking,
+                armedForMs = now - uncertainMouthArmedAtMs,
+                armTimeoutMs = MOUTH_EXPRESSION_ARM_TIMEOUT_MS
+            )) {
+            uncertainMouthUntilMs = now + UNCERTAIN_HOLD_MS
+            uncertainMouthArmed = false
+            uncertainMouthSawSpeaking = false
+        }
+        val uncertainMouthTarget = if (now < uncertainMouthUntilMs) 1f else 0f
+        val uncertainMouthTau = if (uncertainMouthTarget > uncertainMouthIntensity) UNCERTAIN_RISE_TAU_MS else UNCERTAIN_DECAY_TAU_MS
+        uncertainMouthIntensity += (uncertainMouthTarget - uncertainMouthIntensity) * smoothAlpha(dtMs, uncertainMouthTau)
+
         // Expression ownership: resolved once per frame, read by
         // drawBrow()/drawMouth() below. "Active" for each pulse-based
         // candidate is its own current magnitude clearing a small epsilon --
         // once a pulse decays past that point, ownership falls through to
         // the next candidate in priority order on its own, with no separate
-        // expiry bookkeeping needed here.
+        // expiry bookkeeping needed here. Note the brow and mouth resolvers
+        // deliberately read different magnitudes for the same expression --
+        // the brow pulse (immediate) for resolveBrowOwner(), the mouth's own
+        // independently-released intensity for resolveMouthOwner() -- see
+        // the round 2 fix above.
         browExpressionOwner = ScoutExpressionPriority.resolveBrowOwner(
             isThinking = vThinking,
             isListening = vListening,
@@ -1445,8 +1546,8 @@ class ScoutFaceView @JvmOverloads constructor(
             isSpeaking = vSpeaking,
             isThinking = vThinking,
             isListening = vListening,
-            uncertainActive = uncertainPulse > 0.5f,
-            pleasedActive = pleasedPulse > 0.5f
+            uncertainActive = uncertainMouthIntensity > 0.02f,
+            pleasedActive = pleasedMouthIntensity > 0.02f
         )
 
         val hasExternalGaze = abs(vLookTargetX) > 1f || abs(vLookTargetY) > 1f
@@ -1728,13 +1829,20 @@ class ScoutFaceView @JvmOverloads constructor(
         val movingPleased   = pleasedPulse > 0.05f || now < pleasedPulseUntilMs
         val movingUncertain = uncertainPulse > 0.05f || now < uncertainPulseUntilMs
         val movingAttentive = abs(attentiveSmooth - (if (vAttentive) 1f else 0f)) > 0.01f
+        // Round 2 fix: keep ticking through the whole armed-and-waiting
+        // window too (not just once the mouth's own curve is actually
+        // moving) -- otherwise idle mode could in principle delay noticing
+        // the exact frame speaking ends and the mouth should release.
+        val movingPleasedMouth = pleasedMouthArmed || pleasedMouthIntensity > 0.05f || now < pleasedMouthUntilMs
+        val movingUncertainMouth = uncertainMouthArmed || uncertainMouthIntensity > 0.05f || now < uncertainMouthUntilMs
 
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
                 movingLowerLid || movingListenBias || isLockedOn ||
                 micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid ||
-                movingNotice || movingPleased || movingUncertain || movingAttentive
+                movingNotice || movingPleased || movingUncertain || movingAttentive ||
+                movingPleasedMouth || movingUncertainMouth
 
         if (active) {
             idleMode = false

@@ -106,4 +106,47 @@ object ScoutExpressionPriority {
             else            -> ScoutExpressionLayer.NONE
         }
     }
+
+    // Round 2 fix: PLEASED/UNCERTAIN's mouth expression is armed by
+    // pleasedBeat()/uncertainBeat() at the same moment as the brow pulse,
+    // but speaking (which owns the mouth exclusively per
+    // resolveMouthOwner() above) doesn't actually become true until TTS's
+    // own onStart() callback fires -- MainActivity's "natural pause"
+    // pre-dispatch delay (220-650ms) sits entirely BEFORE that, and the
+    // brow pulse's own hold/decay clock keeps running the whole time
+    // regardless. Left as originally implemented, the brow pulse's
+    // magnitude (which the mouth's target was directly derived from) could
+    // fully decay before speaking ever starts, let alone finishes -- so the
+    // approved mouth shape would exist in code but never actually render in
+    // a real interaction. This function is the one small addition that
+    // fixes it: it decides, once per frame, whether an armed mouth
+    // expression should release now and start its OWN independent,
+    // freshly-timed hold/decay window (see ScoutFaceView's
+    // pleasedMouthIntensity/uncertainMouthIntensity) -- never whether to
+    // render anything, and never the brow pulse's timing, which is
+    // completely unaffected by this and stays on its original immediate
+    // clock.
+    //
+    // [sawSpeakingWhileArmed] is the caller's own bookkeeping of whether
+    // isSpeaking has been observed true at least once since arming --
+    // required because "isSpeaking is currently false" is ambiguous on its
+    // own (it's equally true during the pre-dispatch delay, before speech
+    // has started, as it is after speech has genuinely finished). Release
+    // fires on the real falling edge (was speaking, now isn't) once that
+    // flag is set. [armedForMs]/[armTimeoutMs] are a safety fallback only,
+    // for the case speech evidently never starts at all -- every real
+    // MainActivity call site always speaks shortly after arming, so this
+    // exists purely so an unanticipated edge case can't leave the mouth
+    // silently armed forever, not because it's expected to fire in
+    // practice.
+    fun shouldReleaseDeferredMouthExpression(
+        armed: Boolean,
+        isSpeaking: Boolean,
+        sawSpeakingWhileArmed: Boolean,
+        armedForMs: Long,
+        armTimeoutMs: Long
+    ): Boolean {
+        if (!armed || isSpeaking) return false
+        return sawSpeakingWhileArmed || armedForMs >= armTimeoutMs
+    }
 }

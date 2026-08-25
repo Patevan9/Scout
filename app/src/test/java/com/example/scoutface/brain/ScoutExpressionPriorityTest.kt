@@ -1,6 +1,8 @@
 package com.example.scoutface.brain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -240,5 +242,47 @@ class ScoutExpressionPriorityTest {
                 uncertainActive = false, pleasedActive = false
             )
         )
+    }
+
+    // --- shouldReleaseDeferredMouthExpression() -- Round 2 fix. Nothing
+    // armed, still speaking, and the real release-on-falling-edge/safety-
+    // timeout cases the ChatGPT review specifically asked to be covered. ---
+
+    @Test fun `nothing armed never releases regardless of any other input`() {
+        assertFalse(ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+            armed = false, isSpeaking = false, sawSpeakingWhileArmed = true,
+            armedForMs = 999_999L, armTimeoutMs = 2000L
+        ))
+    }
+
+    @Test fun `armed and still speaking never releases`() {
+        assertFalse(ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+            armed = true, isSpeaking = true, sawSpeakingWhileArmed = true,
+            armedForMs = 100L, armTimeoutMs = 2000L
+        ))
+    }
+
+    @Test fun `armed, not yet speaking, pre-dispatch delay window -- does not release early`() {
+        // Mirrors the real gap between pleasedBeat()/uncertainBeat() firing
+        // and MainActivity's own "natural pause" pre-dispatch delay (up to
+        // 650ms) elapsing, before TTS's onStart() ever sets isSpeaking true.
+        assertFalse(ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+            armed = true, isSpeaking = false, sawSpeakingWhileArmed = false,
+            armedForMs = 400L, armTimeoutMs = 2000L
+        ))
+    }
+
+    @Test fun `armed, speaking finished -- releases on the real falling edge`() {
+        assertTrue(ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+            armed = true, isSpeaking = false, sawSpeakingWhileArmed = true,
+            armedForMs = 1800L, armTimeoutMs = 2000L
+        ))
+    }
+
+    @Test fun `armed, speech evidently never started -- safety timeout releases anyway`() {
+        assertTrue(ScoutExpressionPriority.shouldReleaseDeferredMouthExpression(
+            armed = true, isSpeaking = false, sawSpeakingWhileArmed = false,
+            armedForMs = 2000L, armTimeoutMs = 2000L
+        ))
     }
 }
