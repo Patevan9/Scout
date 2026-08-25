@@ -83,6 +83,29 @@ class ScoutFaceView @JvmOverloads constructor(
     }
 
     /**
+     * Silent Arrival Acknowledgment v1. A single deliberate brow lift --
+     * "I noticed you" -- distinct from the ambient random brow micro-drift
+     * (browMicroY/browMicroTarget below) so a random idle twitch can never
+     * be mistaken for, or blended into, a deliberate acknowledgment. Callers
+     * decide WHEN this fires (once per genuine arrival, never from ambient
+     * animation); this method only owns HOW it looks. Safe to call as often
+     * as a caller likes -- each call simply (re)starts the hold window, so a
+     * caller with its own one-shot latch (as MainActivity's is designed)
+     * never needs to worry about this side.
+     *
+     * Existing gaze tracking (setGaze()) remains entirely responsible for
+     * looking toward whoever arrived; this only adds the small expressive
+     * accent on top of that, exactly like blinkBrowRelax already does for a
+     * blink -- same instant-rise/smooth-decay idiom, just a different
+     * trigger, magnitude, and decay time so the two read as clearly
+     * different events.
+     */
+    fun noticePresence() = setOnUiThread {
+        noticePulseUntilMs = System.currentTimeMillis() + NOTICE_PULSE_HOLD_MS
+        requestActiveFrame()
+    }
+
+    /**
      * Full recovery reset.
      * Call when: STT/TTS crashes, app resumes from background, camera lost/regained.
      * Battery level intentionally NOT reset — it is system state, not animation state.
@@ -133,6 +156,9 @@ class ScoutFaceView @JvmOverloads constructor(
         browMicroY      = 0f
         browMicroTarget = 0f
         nextBrowMicroAt = 0L
+
+        noticePulse      = 0f
+        noticePulseUntilMs = 0L
 
         saccadeX = 0f; saccadeY = 0f
         saccadeTargetX = 0f; saccadeTargetY = 0f
@@ -232,6 +258,19 @@ class ScoutFaceView @JvmOverloads constructor(
     private var browMicroY      = 0f
     private var browMicroTarget = 0f
     private var nextBrowMicroAt = 0L
+
+    // Silent Arrival Acknowledgment v1. noticePulse is the current brow-lift
+    // amount this pulse contributes (added into drawBrow() alongside, but
+    // kept fully separate from, browMicroY above); noticePulseUntilMs is the
+    // wall-clock time the current pulse's hold phase ends. 0L means no pulse
+    // has ever been requested (or the last one has fully finished decaying
+    // and self-cleared) -- see updateLife() for the rise/hold/decay curve.
+    private var noticePulse       = 0f
+    private var noticePulseUntilMs = 0L
+    private val NOTICE_PULSE_LIFT_PX = 9f   // between ambient browMicroY's ±4f range and the 20f sustained listening lift
+    private val NOTICE_PULSE_HOLD_MS = 500L
+    private val NOTICE_PULSE_RISE_TAU_MS = 220f
+    private val NOTICE_PULSE_DECAY_TAU_MS = 480f
 
     private var speechPhase = 0f
     private var mouthOpen   = 0f
@@ -859,8 +898,14 @@ class ScoutFaceView @JvmOverloads constructor(
         val tiredDrop     = if (vBatteryPct < 20) 8f else 0f
 
         val speechBrowLift = (speechSmooth * 6f).coerceIn(0f, 6f)
+        // Silent Arrival Acknowledgment v1: applied symmetrically to both
+        // brows (unlike thinking's deliberately asymmetric curious arch) --
+        // a clean, even lift reads as "noticed/interested," not "curious" or
+        // "surprised." Subtracted the same way listeningLift/thinkingLift
+        // are, since this coordinate system is Y-down (raising a brow means
+        // decreasing browCy).
         val browCy = eye.socketRect.top - 38f - listeningLift - thinkingLift + tiredDrop +
-                browMicroY + blinkBrowRelax - speechBrowLift
+                browMicroY + blinkBrowRelax - speechBrowLift - noticePulse
 
         val bw   = eye.eyeRect.width() * 0.40f
         val tilt = 22f
@@ -1165,6 +1210,17 @@ class ScoutFaceView @JvmOverloads constructor(
             browMicroY += (0f - browMicroY) * smoothAlpha(dtMs, 300f)
         }
 
+        // Silent Arrival Acknowledgment v1. Rise/hold/decay: target holds at
+        // the full lift until noticePulseUntilMs, then drops to 0 -- rising
+        // faster (220ms tau) than it decays (480ms tau) so it reads as a
+        // deliberate, considered raise-and-settle rather than a startled
+        // snap or a slow ambient drift. noticePulseUntilMs == 0L (no pulse
+        // ever requested, or fully finished) behaves identically to "already
+        // past the hold window" -- target is 0f either way.
+        val noticePulseTarget = if (now < noticePulseUntilMs) NOTICE_PULSE_LIFT_PX else 0f
+        val noticePulseTau = if (noticePulseTarget > noticePulse) NOTICE_PULSE_RISE_TAU_MS else NOTICE_PULSE_DECAY_TAU_MS
+        noticePulse += (noticePulseTarget - noticePulse) * smoothAlpha(dtMs, noticePulseTau)
+
         val hasExternalGaze = abs(vLookTargetX) > 1f || abs(vLookTargetY) > 1f
         if (!hasExternalGaze) {
             if (now >= nextDriftChangeAt) {
@@ -1430,12 +1486,19 @@ class ScoutFaceView @JvmOverloads constructor(
         val movingTremor    = (abs(microTremorX) + abs(microTremorY)) > 0.05f
         val movingGazeDrift = (abs(faceGazeDriftX) + abs(faceGazeDriftY)) > 0.08f
         val movingThinkLid  = thinkLidSmooth > 0.004f
+        // Silent Arrival Acknowledgment v1: keep ticking through the whole
+        // rise/hold/decay, not just while noticePulse itself is above the
+        // epsilon -- otherwise the hold phase (noticePulse already at its
+        // flat peak, nothing "moving") could let idle mode kick in and delay
+        // the eventual decay tick.
+        val movingNotice = noticePulse > 0.05f || now < noticePulseUntilMs
 
         val active = vSpeaking || vListening || vThinking || vDownloading ||
                 blinking || movingGaze || movingSpring || movingSaccade ||
                 movingBrow || movingVergence || movingMouth ||
                 movingLowerLid || movingListenBias || isLockedOn ||
-                micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid
+                micSmooth > 0.04f || movingTremor || movingGazeDrift || movingThinkLid ||
+                movingNotice
 
         if (active) {
             idleMode = false
