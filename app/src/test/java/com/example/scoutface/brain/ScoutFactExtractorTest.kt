@@ -427,6 +427,20 @@ class ScoutFactExtractorTest {
         assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout is family too"))
     }
 
+    // --- Real-device regression: Patrick's actual wording, "Scout is ALSO
+    // part of the family," had an extra word wedged between "is" and "part"
+    // that the original contiguous match didn't allow, demoting the
+    // statement to UNKNOWN and letting a false Scout-as-pet relationship get
+    // hallucinated downstream. Only the "also" insertion is covered -- the
+    // subject anchoring and every existing adversarial case below must stay
+    // intact. ---
+    @Test fun `self family belonging positives -- also insertion`() {
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout is also part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are also part of the family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are also part of our family"))
+        assertTrue(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout is also part of our household"))
+    }
+
     @Test fun `self family belonging adversarial -- other subjects never match`() {
         // The real FAMILY_NAMES trigger from PR #45 -- subject is "who," not
         // Scout/you, so it must keep routing to FAMILY_NAMES, not IDENTITY.
@@ -440,6 +454,12 @@ class ScoutFactExtractorTest {
         assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("tell me about my family"))
         assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("what are the names in my family"))
         assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("you are one of a kind"))
+        // Additional routing-safety cases confirmed against the "also"
+        // widening specifically -- none of these have "scout"/"you" directly
+        // followed by "is"/"are" (optionally "also") "part of," so they must
+        // stay false exactly as before this change.
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout knows who is part of my family"))
+        assertFalse(ScoutFactExtractor.looksLikeSelfFamilyBelongingStatement("scout who is also a part of my family"))
     }
 
     // --- containsSelfThirdPersonConfusion() -- Layer-2 backstop for a self/

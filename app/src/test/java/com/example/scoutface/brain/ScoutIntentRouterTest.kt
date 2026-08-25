@@ -387,4 +387,29 @@ class ScoutIntentRouterTest {
     @Test fun `who is a part of my family still routes to FAMILY_NAMES`() {
         assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("who is a part of my family"))
     }
+
+    // --- Real-device regression: Patrick's exact wording, "Scout is also
+    // part of the family," fell through to UNKNOWN (and from there into
+    // ungrounded generation, which hallucinated a false Scout-as-pet
+    // relationship) because the original pattern required "scout is part
+    // of" as a contiguous phrase. The "also" insertion must now route
+    // deterministically to IDENTITY, same as the un-inserted phrasing. ---
+
+    @Test fun `scout is also part of the family routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("scout is also part of the family"))
+    }
+
+    @Test fun `you are also part of the family routes to IDENTITY`() {
+        assertEquals(IntentType.IDENTITY, ScoutIntentRouter.route("you are also part of the family"))
+    }
+
+    // --- Adversarial: confirms the "also" widening didn't loosen the
+    // subject anchor -- this still names no self-subject directly next to
+    // "is" (optionally "also") "part of," so it must keep routing to
+    // FAMILY_NAMES exactly as before this change. ("who is part of my
+    // family" itself is already covered above.) ---
+
+    @Test fun `scout knows who is part of my family still routes to FAMILY_NAMES`() {
+        assertEquals(IntentType.FAMILY_NAMES, ScoutIntentRouter.route("scout knows who is part of my family"))
+    }
 }

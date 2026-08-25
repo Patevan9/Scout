@@ -264,9 +264,22 @@ object ScoutFactExtractor {
     // routes to. "scout" is matched as a literal, not the configured/renamed
     // name, matching existing precedent elsewhere in ScoutIntentRouter (e.g.
     // GREET's "hi scout"/"hello scout"/"hey scout").
+    //
+    // The two "part of" statement patterns additionally tolerate an optional
+    // "also" directly after "are"/"is" -- a second real-device finding:
+    // Patrick's actual wording, "Scout is ALSO part of the family," has that
+    // extra word wedged between "is" and "part," which the original
+    // contiguous "scout is part of" match didn't allow. That single miss
+    // demoted the statement to UNKNOWN, where it lacked both a self-word
+    // (ScoutMemoryGate's gate) and a known-name mention (Scout's own name is
+    // deliberately excluded from getAllKnownFacts()), so it reached
+    // generation ungrounded and produced a false Scout-as-pet relationship
+    // claim. Only "also" is added here, and only in this one position --
+    // still subject-anchored, still excluding "who"/other subjects, and
+    // still not a loose contains("scout") && contains("family") check.
     private val SELF_FAMILY_BELONGING_PATTERNS = listOf(
-        Regex("""\byou are part of (?:the|our|this|my) (?:family|household)\b"""),
-        Regex("""\bscout is part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\byou are (?:also )?part of (?:the|our|this|my) (?:family|household)\b"""),
+        Regex("""\bscout is (?:also )?part of (?:the|our|this|my) (?:family|household)\b"""),
         Regex("""\byou are family too\b"""),
         Regex("""\bscout is family too\b"""),
         Regex("""\byou are one of (?:the family|us)\b"""),
