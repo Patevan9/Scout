@@ -2635,6 +2635,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                         directAddressStreakStartMs = 0L
                                     }
 
+                                    // Emotional Face v1 -- ATTENTIVE. Reuses this exact
+                                    // existing sustained direct-address signal (no new
+                                    // detector or debounce timer) -- the same
+                                    // DIRECT_ADDRESS_SUSTAIN_MS threshold the listening
+                                    // reminder feature already uses. Raw signal is
+                                    // forwarded unconditionally; ScoutFaceView's own
+                                    // ScoutExpressionPriority resolver (not this call
+                                    // site) decides whether ATTENTIVE is actually
+                                    // permitted to show this frame beneath
+                                    // speaking/thinking/listening/PLEASED/UNCERTAIN/PR
+                                    // #73's arrival pulse. Never speaks, never touches
+                                    // TruthDb/HabitLayer/Companion Moments/AI generation.
+                                    val isAttentive = directAddressStreakStartMs != 0L &&
+                                        (now - directAddressStreakStartMs) >= DIRECT_ADDRESS_SUSTAIN_MS
+                                    runOnUiThread { faceView.setAttentive(isAttentive) }
+
                                     if (gazeEnabled && !isSpeaking && !isThinking) {
 
                                         val movedEnough =
@@ -3132,6 +3148,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 lastYawDegrees = 0f
                                 lastFaceHeightFraction = 0f
                                 lastCenterOffset = 0f
+
+                                // Emotional Face v1 -- ATTENTIVE never applies with no
+                                // face in frame at all.
+                                runOnUiThread { faceView.setAttentive(false) }
 
                                 // Layer 1 return greeting: absence tracking, reusing
                                 // presenceLastSeenMs (untouched in this branch) as the single
@@ -5187,6 +5207,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // "I don't know") answer is about to be given -- supersede
             // before it, not after.
             supersedeAnyPendingGeneration()
+            // Emotional Face v1 -- UNCERTAIN.
+            faceView.uncertainBeat()
             respond(voice.say("DONT_KNOW"))
             return
         }
@@ -5452,6 +5474,9 @@ Respond only with Scout's next reply.
                     )
                 } else {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_FAILED)
+                    // Emotional Face v1 -- UNCERTAIN. Genuine TinyLlama
+                    // generation failure, not a busy/still-thinking status.
+                    faceView.uncertainBeat()
                     deliverAiResult("I'm not sure about that one.", myBusyBrainGenerationId)
                 }
 
@@ -6231,6 +6256,11 @@ Respond only with Scout's next reply.
             CourtesyIntent.CONFIRM -> Phrases.COURTESY_CONFIRM
         }
 
+        // Emotional Face v1 -- PLEASED. THANKS only, deliberately excluding
+        // the other three intents sharing this branch above (ACKNOWLEDGE/
+        // WELCOME_BACK/CONFIRM are not in the approved trigger list).
+        if (courtesy == CourtesyIntent.THANKS) faceView.pleasedBeat()
+
         respond(Phrases.pick("courtesy_${courtesy.name.lowercase()}", pool))
 
         if (courtesy == CourtesyIntent.GOOD_NIGHT || courtesy == CourtesyIntent.GOODBYE) {
@@ -6319,7 +6349,12 @@ Respond only with Scout's next reply.
 
         val d = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.DOG_NAME)
 
-        val out = if (!d.isNullOrBlank()) "Your dog’s name is $d." else voice.say("DONT_KNOW")
+        val known = !d.isNullOrBlank()
+        val out = if (known) "Your dog’s name is $d." else voice.say("DONT_KNOW")
+
+        // Emotional Face v1 -- UNCERTAIN, only on the genuine DONT_KNOW
+        // fallback, never on a real answer.
+        if (!known) faceView.uncertainBeat()
 
         respond(out)
 
@@ -6388,7 +6423,12 @@ Respond only with Scout's next reply.
 
         val s = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.SON_NAME)
 
-        val out = if (!s.isNullOrBlank()) "Your son’s name is $s." else voice.say("DONT_KNOW")
+        val known = !s.isNullOrBlank()
+        val out = if (known) "Your son’s name is $s." else voice.say("DONT_KNOW")
+
+        // Emotional Face v1 -- UNCERTAIN, only on the genuine DONT_KNOW
+        // fallback, never on a real answer.
+        if (!known) faceView.uncertainBeat()
 
         respond(out)
 
@@ -6398,7 +6438,12 @@ Respond only with Scout's next reply.
 
         val w = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.WIFE_NAME)
 
-        val out = if (!w.isNullOrBlank()) "Your wife’s name is $w." else voice.say("DONT_KNOW")
+        val known = !w.isNullOrBlank()
+        val out = if (known) "Your wife’s name is $w." else voice.say("DONT_KNOW")
+
+        // Emotional Face v1 -- UNCERTAIN, only on the genuine DONT_KNOW
+        // fallback, never on a real answer.
+        if (!known) faceView.uncertainBeat()
 
         respond(out)
 
@@ -6408,7 +6453,12 @@ Respond only with Scout's next reply.
 
         val n = truthDb.getFactValue(ENTITY_USER_PRIMARY, FactKey.NAME)
 
-        val out = if (!n.isNullOrBlank()) "Your name is $n." else voice.say("DONT_KNOW")
+        val known = !n.isNullOrBlank()
+        val out = if (known) "Your name is $n." else voice.say("DONT_KNOW")
+
+        // Emotional Face v1 -- UNCERTAIN, only on the genuine DONT_KNOW
+        // fallback, never on a real answer.
+        if (!known) faceView.uncertainBeat()
 
         respond(out)
 
@@ -6624,9 +6674,14 @@ Respond only with Scout's next reply.
 
             IntentType.STOP_LISTENING -> handleStopListeningIntent()
 
-            IntentType.PRAISE -> handleVoiceBankIntent("PRAISE")
+            // Emotional Face v1 -- PLEASED. PRAISE/AFFECTION are the two
+            // most unambiguous, low-frequency, clearly-positive deterministic
+            // intents identified in the investigation -- fired here, not
+            // inside the shared handleVoiceBankIntent(), so GREET/
+            // HOW_ARE_YOU (which also use that function) never trigger it.
+            IntentType.PRAISE -> { faceView.pleasedBeat(); handleVoiceBankIntent("PRAISE") }
 
-            IntentType.AFFECTION -> handleVoiceBankIntent("AFFECTION")
+            IntentType.AFFECTION -> { faceView.pleasedBeat(); handleVoiceBankIntent("AFFECTION") }
 
             IntentType.IDENTITY -> handleIdentityIntent(qNorm)
 
@@ -6821,6 +6876,12 @@ Respond only with Scout's next reply.
 
             if (nickname != null) out += " And I'll remember you call $value $nickname."
 
+            // Emotional Face v1 -- PLEASED. A new fact was genuinely just
+            // written to TruthDb (wife/son/dog/generic) -- "successful
+            // teaching confirmation," one of the approved low-frequency
+            // triggers.
+            faceView.pleasedBeat()
+
             respond(out)
 
             return true
@@ -6850,6 +6911,10 @@ Respond only with Scout's next reply.
                     confirmations.add("$displayName's ${keyToHuman(fact.property)} is ${fact.value}")
                 }
             }
+            // Emotional Face v1 -- PLEASED. Same reasoning as the wife/son/
+            // dog/generic-fact confirmation above -- a real fact about
+            // someone else was just written to TruthDb.
+            faceView.pleasedBeat()
             respond("Got it. I'll remember that " + confirmations.joinToString(", and ") + ".")
             return true
         }
@@ -6860,6 +6925,8 @@ Respond only with Scout's next reply.
         // improvise a reply that sounds like confirmation without anything
         // actually having been learned.
         if (ScoutFactExtractor.looksLikeUnrecognizedTeaching(qNorm, aliasMap.keys)) {
+            // Emotional Face v1 -- UNCERTAIN.
+            faceView.uncertainBeat()
             respond(ScoutFactExtractor.UNRECOGNIZED_TEACHING_CLARIFICATION)
             return true
         }
