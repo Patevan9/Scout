@@ -48,19 +48,36 @@ object ScoutSpeechRangeMouth {
     }
 
     /**
-     * Whether the range-timed path should currently own mouth rendering
-     * rather than the existing synthetic fallback. True only once at least
-     * one real range event has been seen for the CURRENT speaking dispatch
-     * ([lastEventAtMs] != 0L -- callers reset this to 0L at the start of
-     * every new speaking dispatch, see `ScoutFaceView.setSpeaking()`) and
-     * that event happened recently enough ([nowMs] - [lastEventAtMs] is
-     * still under [activeWindowMs]) to still be trusted. A gap at or beyond
-     * [activeWindowMs] -- the engine stalled mid-utterance, or genuinely
-     * never calls `onRangeStart()` at all for this dispatch -- falls back to
-     * the synthetic animation gracefully rather than freezing the mouth or
-     * fighting the fallback; a later event within the same dispatch simply
-     * flips this back to true.
+     * Whether the range-timed path currently owns mouth rendering for the
+     * active speaking dispatch, rather than the existing synthetic fallback.
+     *
+     * PR #80 review correction: this is now a STICKY, dispatch-scoped
+     * decision with no time component at all -- once [everEstablishedThisDispatch]
+     * is true (a real, correctly-owned `onRangeStart()` event has been seen
+     * for the CURRENT speaking dispatch -- see `ScoutFaceView.speechRangePulse()`),
+     * it stays true for the remainder of that same dispatch, no matter how
+     * long a gap opens up between individual range events. A genuine spoken
+     * pause must read as a pause -- the separately-decaying impulse (see
+     * `ScoutFaceView.updateLife()`) settles toward 0 and closes the mouth --
+     * never as a reason to silently fall back to the unrelated synthetic
+     * animation mid-utterance, which would produce exactly the
+     * real-mouth/synthetic-mouth flicker the synthetic fallback is NOT meant
+     * to cause. The synthetic fallback exists only for a dispatch that never
+     * produces a single usable range callback in the first place -- it is
+     * compatibility protection, not a mid-utterance inactivity fallback.
+     *
+     * The previous version of this function additionally required the most
+     * recent event to be within a fixed recency window, which incorrectly
+     * let an ordinary pause between words fall back to the synthetic
+     * animation and then flip back once speech resumed. That time-based
+     * check has been removed entirely, not merely widened -- there is no
+     * elapsed-time input this function could still be given that would let
+     * time alone revert an established dispatch back to fallback; only a
+     * genuine dispatch boundary can, by [everEstablishedThisDispatch] itself
+     * being reset to false (see `ScoutFaceView.setSpeaking()`/`resetFace()`
+     * for exactly where that reset happens: a new dispatch starting, or this
+     * one ending via natural completion, engine error, user interruption, or
+     * a full recovery reset).
      */
-    fun isRangeDriven(lastEventAtMs: Long, nowMs: Long, activeWindowMs: Long): Boolean =
-        lastEventAtMs != 0L && (nowMs - lastEventAtMs) < activeWindowMs
+    fun isRangeDriven(everEstablishedThisDispatch: Boolean): Boolean = everEstablishedThisDispatch
 }

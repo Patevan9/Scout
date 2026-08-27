@@ -48,12 +48,16 @@ class ScoutFaceView @JvmOverloads constructor(
             if (s) {
                 // Speaking Mouth v1: each new speaking dispatch starts fresh
                 // in synthetic-fallback mode -- "has a real onRangeStart()
-                // event been seen yet" must be scoped per dispatch, never
+                // event ever been seen" must be scoped per dispatch, never
                 // carried over from whatever the previous utterance's TTS
                 // engine did or didn't support. See speechRangePulse()'s own
-                // doc comment for the full reasoning.
-                speechRangeImpulse       = 0f
-                lastSpeechRangeEventAtMs = 0L
+                // doc comment for the full reasoning. speechRangeEstablished
+                // is deliberately sticky once true (PR #80 review
+                // correction) -- only this per-dispatch reset, or the
+                // symmetric one in the !vSpeaking branch of updateLife()/
+                // resetFace(), ever clears it back to false.
+                speechRangeImpulse      = 0f
+                speechRangeEstablished  = false
             }
             requestActiveFrame()
         }
@@ -112,17 +116,25 @@ class ScoutFaceView @JvmOverloads constructor(
      * ScoutSpeechRangeMouth.impulseMagnitude()), never a claim of real audio
      * amplitude, which onRangeStart() does not provide. Safe to call as
      * often as real range events arrive; each call boosts (never additively
-     * stacks past the bounded ceiling) the current impulse and marks
-     * range-driven mode active for SPEECH_RANGE_ACTIVE_WINDOW_MS -- see
+     * stacks past the bounded ceiling) the current impulse.
+     *
+     * PR #80 review correction: the FIRST call for a given speaking dispatch
+     * also latches speechRangeEstablished to true, STICKY for the rest of
+     * that dispatch -- see ScoutSpeechRangeMouth.isRangeDriven()'s own doc
+     * comment for why this is deliberately not time-windowed. A long gap
+     * before the next real event no longer falls back to the synthetic
+     * animation; the separately-decaying speechRangeImpulse simply settles
+     * toward 0 (mouth closes) until the next event arrives. See
      * updateLife()'s own branch selection for exactly how that's used, and
-     * setSpeaking()/resetFace() for where this state is fully cleared.
+     * setSpeaking()/resetFace() for where this state is fully cleared back
+     * to false at a genuine dispatch boundary.
      */
     fun speechRangePulse(rangeChars: Int) = setOnUiThread {
         val magnitude = ScoutSpeechRangeMouth.impulseMagnitude(
             rangeChars, SPEECH_RANGE_PULSE_MIN, SPEECH_RANGE_PULSE_MAX, SPEECH_RANGE_CHARS_NORMALIZER
         )
         speechRangeImpulse = max(speechRangeImpulse, magnitude)
-        lastSpeechRangeEventAtMs = System.currentTimeMillis()
+        speechRangeEstablished = true
         requestActiveFrame()
     }
     fun setBatteryLevel(pct: Int) = setOnUiThread {
@@ -250,8 +262,8 @@ class ScoutFaceView @JvmOverloads constructor(
         wavePhase   = 0f
 
         // Speaking Mouth v1
-        speechRangeImpulse       = 0f
-        lastSpeechRangeEventAtMs = 0L
+        speechRangeImpulse     = 0f
+        speechRangeEstablished = false
 
         lookX  = 0f; lookY  = 0f
         lookVX = 0f; lookVY = 0f
@@ -531,16 +543,26 @@ class ScoutFaceView @JvmOverloads constructor(
     // (0..1, decayed every frame in updateLife() regardless of whether a new
     // event arrived that frame -- see SPEECH_RANGE_DECAY_TAU_MS); it is
     // never additively stacked, only boosted up to its own ceiling by each
-    // new event. lastSpeechRangeEventAtMs is the wall-clock time of the most
-    // recent real event for the CURRENT speaking dispatch, 0L meaning "none
-    // yet this dispatch" -- reset there by setSpeaking(true) and here by
-    // resetFace()/updateLife()'s !vSpeaking branch, so a new dispatch (or a
-    // TTS engine that never calls onRangeStart at all) always starts, and
-    // falls back to, the existing synthetic animation -- see
-    // ScoutSpeechRangeMouth.isRangeDriven()'s own doc comment for exactly
-    // how that decision is made.
-    private var speechRangeImpulse       = 0f
-    private var lastSpeechRangeEventAtMs = 0L
+    // new event.
+    //
+    // speechRangeEstablished (PR #80 review correction) is a STICKY,
+    // dispatch-scoped flag, deliberately NOT time-windowed: once a real
+    // onRangeStart() event has been seen for the CURRENT speaking dispatch
+    // it latches true and stays true for the rest of that same dispatch, no
+    // matter how long a gap opens up before the next event -- an ordinary
+    // spoken pause must read as a pause (speechRangeImpulse decays toward 0,
+    // closing the mouth) rather than silently falling back to the unrelated
+    // synthetic animation mid-utterance. It resets to false only at a
+    // genuine dispatch boundary: setSpeaking(true) (a NEW dispatch starting)
+    // or here/updateLife()'s !vSpeaking branch (this dispatch ending, by any
+    // of natural completion/engine error/user interruption) -- so a TTS
+    // engine that never calls onRangeStart at all for a given dispatch
+    // simply never sets this true, and that dispatch stays on the existing
+    // synthetic animation for its entire duration, exactly as before. See
+    // ScoutSpeechRangeMouth.isRangeDriven()'s own doc comment for the full
+    // reasoning.
+    private var speechRangeImpulse     = 0f
+    private var speechRangeEstablished = false
     // Character-length-to-magnitude mapping range -- deliberately similar in
     // overall scale to the existing synthetic fallback's own 0f..0.42f
     // target ceiling (see updateLife()'s speaking else-branch below), so the
@@ -555,7 +577,10 @@ class ScoutFaceView @JvmOverloads constructor(
     // that consecutive words/ranges visibly separate (typical spoken word
     // duration is a few hundred ms at Scout's configured speech rate) rather
     // than staying held open, producing a smooth fade between events instead
-    // of the old fixed-period cycling.
+    // of the old fixed-period cycling. This is the ONLY mechanism that
+    // returns the mouth toward rest between events now -- there is
+    // deliberately no separate "gave up waiting, fall back" timer alongside
+    // it (see speechRangeEstablished's own doc comment above for why).
     private val SPEECH_RANGE_DECAY_TAU_MS = 160f
     // How quickly the RENDERED mouthOpen chases speechRangeImpulse's target
     // -- deliberately close to the existing branches' own 38-42ms taus so
@@ -563,12 +588,6 @@ class ScoutFaceView @JvmOverloads constructor(
     // synthetic fallback) all feel like the same mouth, just driven
     // differently.
     private val SPEECH_RANGE_MOUTH_TAU_MS = 45f
-    // How long after the last real range event the range-driven path keeps
-    // owning the mouth before falling back -- long enough to bridge an
-    // ordinary pause between words/clauses without flickering between the
-    // two animation styles mid-utterance, short enough to recover
-    // reasonably quickly if a dispatch's events genuinely stop arriving.
-    private val SPEECH_RANGE_ACTIVE_WINDOW_MS = 1000L
 
     private var breathPhase      = Random.nextFloat() * (2f * Math.PI).toFloat()
     private val BREATH_PERIOD_MS = 4200f
@@ -1862,14 +1881,17 @@ class ScoutFaceView @JvmOverloads constructor(
             speechRangeImpulse += (0f - speechRangeImpulse) *
                     smoothAlpha(dtMs, SPEECH_RANGE_DECAY_TAU_MS)
 
-            if (ScoutSpeechRangeMouth.isRangeDriven(lastSpeechRangeEventAtMs, now, SPEECH_RANGE_ACTIVE_WINDOW_MS)) {
+            if (ScoutSpeechRangeMouth.isRangeDriven(speechRangeEstablished)) {
                 // Real speech-timed path: at least one onRangeStart() event
-                // has been seen recently enough for the current dispatch to
-                // be trusted -- this path now owns the mouth exclusively
-                // (see the else-if/else below, both skipped whenever this is
-                // true), matching "once usable range callbacks are
+                // has been seen for the current dispatch -- this path now
+                // owns the mouth exclusively for the REST of that dispatch
+                // (see the else-if/else below, both permanently skipped once
+                // this is true), matching "once usable range callbacks are
                 // established for a dispatch, the speech-timed path should
-                // own the mouth."
+                // own the mouth for the remainder of that dispatch." A
+                // pause between callbacks is handled entirely by
+                // speechRangeImpulse's own continuous decay above -- never
+                // by falling out of this branch.
                 val target = speechRangeImpulse.coerceIn(0f, 1f)
                 mouthOpen += (target - mouthOpen) * smoothAlpha(dtMs, SPEECH_RANGE_MOUTH_TAU_MS)
             } else if (speechSmooth > 0.05f) {
@@ -1903,8 +1925,8 @@ class ScoutFaceView @JvmOverloads constructor(
             // interrupt, a natural finish, and an engine error all return
             // this state to rest through this exact same line, with no
             // special-casing needed here.
-            speechRangeImpulse       = 0f
-            lastSpeechRangeEventAtMs = 0L
+            speechRangeImpulse     = 0f
+            speechRangeEstablished = false
             mouthOpen   += (0f - mouthOpen) * smoothAlpha(dtMs, 120f)
         }
 

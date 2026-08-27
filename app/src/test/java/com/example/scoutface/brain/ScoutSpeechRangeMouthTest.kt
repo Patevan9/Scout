@@ -7,7 +7,7 @@ import org.junit.Test
 
 class ScoutSpeechRangeMouthTest {
 
-    // --- impulseMagnitude() ---
+    // --- impulseMagnitude() -- unchanged by the PR #80 review correction ---
 
     private val MIN = 0.22f
     private val MAX = 0.55f
@@ -43,43 +43,44 @@ class ScoutSpeechRangeMouthTest {
         }
     }
 
-    // --- isRangeDriven() ---
+    // --- isRangeDriven() -- PR #80 review correction: now a sticky,
+    // dispatch-scoped boolean with NO time component at all. The signature
+    // itself changed (no more nowMs/activeWindowMs) specifically so that no
+    // caller can accidentally reintroduce a recency check here -- these
+    // tests lock in that contract. ---
 
-    @Test fun `no range event ever seen -- not range-driven, fallback remains available`() {
-        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 0L, nowMs = 10_000L, activeWindowMs = 1000L))
+    @Test fun `a dispatch that has never established range ownership is not range-driven -- fallback remains available`() {
+        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(everEstablishedThisDispatch = false))
     }
 
-    @Test fun `a range event just now -- range-driven becomes active`() {
-        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 5000L, nowMs = 5000L, activeWindowMs = 1000L))
+    @Test fun `once established, range-driven ownership is true`() {
+        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(everEstablishedThisDispatch = true))
     }
 
-    @Test fun `a range event just inside the active window -- still range-driven`() {
-        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 5000L, nowMs = 5000L + 999L, activeWindowMs = 1000L))
+    @Test fun `isRangeDriven has no time dependency -- there is no elapsed-interval input that could revert an established dispatch to fallback`() {
+        // Guards against reintroducing PR #80's bug: the function's entire
+        // contract is now "did this dispatch ever see a real event," full
+        // stop -- calling it "again later" (there being no clock it could
+        // consult) still returns true. If a future change ever needs a
+        // recency check again, it must not live inside this function.
+        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(true))
+        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(true))
+        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(true))
     }
 
-    @Test fun `a range event exactly at the active window boundary -- no longer range-driven`() {
-        // Strict less-than: nowMs - lastEventAtMs == activeWindowMs is expired, not still active.
-        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 5000L, nowMs = 5000L + 1000L, activeWindowMs = 1000L))
-    }
+    @Test fun `a fresh dispatch after completion again begins in fallback`() {
+        // Mirrors ScoutFaceView resetting speechRangeEstablished to false in
+        // setSpeaking(true) (a new dispatch starting), setSpeaking(false)/
+        // updateLife()'s !vSpeaking branch (natural completion, engine
+        // error, or user interruption -- all funnel through
+        // finishSpeechDispatch() -> setSpeaking(false)), and resetFace().
+        // The pure predicate must treat that reset identically to "never
+        // established," regardless of how established the PREVIOUS dispatch
+        // was.
+        val previousDispatchEstablished = true
+        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(previousDispatchEstablished))
 
-    @Test fun `a range event well beyond the active window -- falls back gracefully`() {
-        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 5000L, nowMs = 5000L + 5000L, activeWindowMs = 1000L))
-    }
-
-    @Test fun `a later event within the same dispatch re-establishes range-driven mode`() {
-        // Simulates: event, gap exceeding the window (falls back), then a fresh event (re-activates).
-        val firstEventAt = 1000L
-        val afterGap = firstEventAt + 5000L
-        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(firstEventAt, afterGap, activeWindowMs = 1000L))
-
-        val secondEventAt = afterGap // a fresh event arrives, resetting lastEventAtMs
-        assertTrue(ScoutSpeechRangeMouth.isRangeDriven(secondEventAt, secondEventAt + 200L, activeWindowMs = 1000L))
-    }
-
-    @Test fun `speech completion resets lastEventAtMs to 0 -- immediately not range-driven again`() {
-        // Mirrors ScoutFaceView resetting lastSpeechRangeEventAtMs to 0L in the
-        // !vSpeaking branch of updateLife() and in resetFace() -- the pure
-        // predicate must treat that reset identically to "never seen."
-        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(lastEventAtMs = 0L, nowMs = 999_999L, activeWindowMs = 1000L))
+        val nextDispatchEstablished = false // reset at the dispatch boundary
+        assertFalse(ScoutSpeechRangeMouth.isRangeDriven(nextDispatchEstablished))
     }
 }
