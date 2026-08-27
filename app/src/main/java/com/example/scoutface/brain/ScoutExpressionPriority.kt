@@ -40,22 +40,32 @@ object ScoutExpressionPriority {
     // ScoutFaceView call sites) -- but thinking and listening are also
     // checked directly here, as the second, structural line of defense: even
     // if a caller ever changed to offer a candidate unconditionally, thinking
-    // and listening still win outright, exactly as the investigation's
-    // ownership sketch (SPEAKING/THINKING/LISTENING > new expressions)
-    // requires. Speaking is intentionally NOT checked here for the brow --
-    // see resolveBrowOwner()'s own doc comment for why the brow/eye portion
-    // is allowed to remain visible while speaking.
+    // still wins outright, exactly as the investigation's ownership sketch
+    // (THINKING > new expressions) requires. Speaking is intentionally NOT
+    // checked here for the brow -- see resolveBrowOwner()'s own doc comment
+    // for why the brow/eye portion is allowed to remain visible while
+    // speaking.
     //
-    // Below thinking/listening: UNCERTAIN and PLEASED (the deliberate
-    // expressive beats) outrank PR #73's own arrival-notice pulse, which
-    // outranks the sustained ATTENTIVE cue -- exactly the tier order from
-    // the approved design ("UNCERTAIN/PLEASED > PR #73 arrival ack >
-    // ATTENTIVE > NEUTRAL"). UNCERTAIN is checked before PLEASED as the one
-    // arbitrary (but now fixed and tested) tie-break for the rare case both
-    // are simultaneously active -- e.g., "thank you" said while an
-    // UNCERTAIN beat from moments earlier hasn't finished decaying yet.
-    // Communicating a still-unresolved misunderstanding clearly takes
-    // priority over layering warmth on top of it.
+    // Expression Visibility v2: LISTENING no longer vetoes ATTENTIVE. The
+    // investigation's real-device finding was that ATTENTIVE -- the cue that
+    // exists specifically to communicate "I am focused on you / listening to
+    // you" -- was structurally impossible to ever see, because the one state
+    // it's meant to describe (listening) was exactly the state that hid it.
+    // Listening still vetoes UNCERTAIN/PLEASED/NOTICE unchanged -- those are
+    // deliberate reactive beats about something Scout just heard or
+    // concluded, not a sustained "I'm paying attention" cue, so it remains
+    // correct for a fresh listening state to take over from a still-decaying
+    // one of those. UNCERTAIN and PLEASED (the deliberate expressive beats)
+    // outrank PR #73's own arrival-notice pulse, which outranks the
+    // sustained ATTENTIVE cue -- exactly the tier order from the approved
+    // design ("UNCERTAIN/PLEASED > PR #73 arrival ack > ATTENTIVE >
+    // NEUTRAL"), preserved unchanged for the non-listening case. UNCERTAIN
+    // is checked before PLEASED as the one arbitrary (but now fixed and
+    // tested) tie-break for the rare case both are simultaneously active --
+    // e.g., "thank you" said while an UNCERTAIN beat from moments earlier
+    // hasn't finished decaying yet. Communicating a still-unresolved
+    // misunderstanding clearly takes priority over layering warmth on top of
+    // it.
 
     /**
      * Resolves which expression owns the brow/eye portion of the face this
@@ -63,6 +73,13 @@ object ScoutExpressionPriority {
      * pleased/uncertain beat's brow may remain visible while Scout is
      * mid-utterance (see the PLEASED/UNCERTAIN design notes: only the
      * *mouth* portion is exclusively owned by the speaking animation).
+     *
+     * Expression Visibility v2: [isListening] no longer suppresses
+     * [attentiveActive] (see this object's own class-level comment for why)
+     * -- it still suppresses [uncertainActive]/[pleasedActive]/[noticeActive]
+     * exactly as before. [isThinking] still suppresses every candidate,
+     * [attentiveActive] included, unchanged: THINKING keeps deterministic,
+     * exclusive ownership of the brow whenever it's true.
      */
     fun resolveBrowOwner(
         isThinking: Boolean,
@@ -72,13 +89,13 @@ object ScoutExpressionPriority {
         noticeActive: Boolean,
         attentiveActive: Boolean
     ): ScoutExpressionLayer {
-        if (isThinking || isListening) return ScoutExpressionLayer.NONE
+        if (isThinking) return ScoutExpressionLayer.NONE
         return when {
-            uncertainActive -> ScoutExpressionLayer.UNCERTAIN
-            pleasedActive   -> ScoutExpressionLayer.PLEASED
-            noticeActive    -> ScoutExpressionLayer.NOTICE
-            attentiveActive -> ScoutExpressionLayer.ATTENTIVE
-            else            -> ScoutExpressionLayer.NONE
+            uncertainActive && !isListening -> ScoutExpressionLayer.UNCERTAIN
+            pleasedActive && !isListening   -> ScoutExpressionLayer.PLEASED
+            noticeActive && !isListening    -> ScoutExpressionLayer.NOTICE
+            attentiveActive                 -> ScoutExpressionLayer.ATTENTIVE
+            else                            -> ScoutExpressionLayer.NONE
         }
     }
 

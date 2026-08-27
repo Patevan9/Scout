@@ -131,15 +131,99 @@ class ScoutExpressionPriorityTest {
         )
     }
 
-    @Test fun `listening suppresses the entire new expression layer regardless of any pulse`() {
+    @Test fun `listening suppresses uncertain, pleased, and notice -- unchanged by Expression Visibility v2`() {
         assertEquals(
             ScoutExpressionLayer.NONE,
             ScoutExpressionPriority.resolveBrowOwner(
                 isThinking = false, isListening = true,
                 uncertainActive = true, pleasedActive = true,
-                noticeActive = true, attentiveActive = true
+                noticeActive = true, attentiveActive = false
             )
         )
+    }
+
+    // --- Expression Visibility v2: ATTENTIVE and LISTENING coexist ---
+
+    @Test fun `attentive remains visible while listening -- the whole point of Expression Visibility v2`() {
+        // Real-device finding: ATTENTIVE exists to communicate "I am focused
+        // on you / listening to you," but the old absolute listening veto
+        // made it structurally impossible to ever see during the one state
+        // it's meant to describe. This is the core behavior this PR fixes.
+        assertEquals(
+            ScoutExpressionLayer.ATTENTIVE,
+            ScoutExpressionPriority.resolveBrowOwner(
+                isThinking = false, isListening = true,
+                uncertainActive = false, pleasedActive = false,
+                noticeActive = false, attentiveActive = true
+            )
+        )
+    }
+
+    @Test fun `attentive is NOT offered while listening if nothing is actually attentive`() {
+        // Confirms the fix is "listening no longer suppresses attentive,"
+        // not "listening now implies attentive" -- attentiveActive must
+        // still be true on its own merits.
+        assertEquals(
+            ScoutExpressionLayer.NONE,
+            ScoutExpressionPriority.resolveBrowOwner(
+                isThinking = false, isListening = true,
+                uncertainActive = false, pleasedActive = false,
+                noticeActive = false, attentiveActive = false
+            )
+        )
+    }
+
+    @Test fun `a still-decaying uncertain pulse does not block attentive while listening -- uncertain is suppressed, ownership falls through`() {
+        // uncertainActive is itself suppressed by listening (unchanged
+        // behavior) -- it never gets a chance to "outrank" attentive here,
+        // so with attentive also active, ownership falls through to
+        // attentive rather than landing on NONE or on the suppressed
+        // uncertain candidate.
+        assertEquals(
+            ScoutExpressionLayer.ATTENTIVE,
+            ScoutExpressionPriority.resolveBrowOwner(
+                isThinking = false, isListening = true,
+                uncertainActive = true, pleasedActive = false,
+                noticeActive = false, attentiveActive = true
+            )
+        )
+    }
+
+    @Test fun `thinking still suppresses attentive even though listening no longer does`() {
+        // THINKING keeps deterministic, exclusive ownership of the brow --
+        // Expression Visibility v2 deliberately narrows the fix to
+        // listening only, per the approved scope.
+        assertEquals(
+            ScoutExpressionLayer.NONE,
+            ScoutExpressionPriority.resolveBrowOwner(
+                isThinking = true, isListening = false,
+                uncertainActive = false, pleasedActive = false,
+                noticeActive = false, attentiveActive = true
+            )
+        )
+    }
+
+    @Test fun `thinking suppresses attentive even while also listening`() {
+        assertEquals(
+            ScoutExpressionLayer.NONE,
+            ScoutExpressionPriority.resolveBrowOwner(
+                isThinking = true, isListening = true,
+                uncertainActive = false, pleasedActive = false,
+                noticeActive = false, attentiveActive = true
+            )
+        )
+    }
+
+    @Test fun `no two owners stack -- listening plus every pulse active still resolves to exactly one owner`() {
+        val owner = ScoutExpressionPriority.resolveBrowOwner(
+            isThinking = false, isListening = true,
+            uncertainActive = true, pleasedActive = true,
+            noticeActive = true, attentiveActive = true
+        )
+        // uncertain/pleased/notice are all suppressed by listening; only
+        // attentive remains eligible -- exactly one deterministic owner,
+        // never a combination.
+        assertEquals(ScoutExpressionLayer.ATTENTIVE, owner)
     }
 
     @Test fun `speaking alone does NOT suppress the brow layer -- pleased brow remains visible while speaking`() {
