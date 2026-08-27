@@ -82,12 +82,33 @@ enum class CourtesyIntent { GREET, GOOD_MORNING, THANKS, GOOD_NIGHT, GOODBYE, AC
  *
  * No Android imports, no internal state -- pure function, unit-testable the
  * same way as ScoutIntentRouter.
+ *
+ * Composition with ScoutLanguagePack (Remodeling #1A): a recognized lead-in
+ * (above) followed by an acknowledgment word ScoutLanguagePack already knows
+ * bare (e.g. "gotcha", "understood", "makes sense") previously fell through
+ * both recognizers -- this class's own exactMatch() table doesn't contain
+ * that vocabulary, and ScoutLanguagePack.categoryFor() only ever matches a
+ * WHOLE utterance, never a lead-in-stripped remainder. "Okay, gotcha." was
+ * the real-device case that surfaced this: it reached Gemini/TinyLlama like
+ * an open-ended question. [isKnownAcknowledgment] closes exactly that gap --
+ * it is consulted ONLY on the same narrow, already-stripped remainder this
+ * class's own exactMatch() is tried against, and ONLY after that local check
+ * has already missed, so it can never affect the full-string match, never
+ * affect any category besides ACKNOWLEDGE, and never introduce a dependency
+ * on ScoutLanguagePack's type -- the caller (MainActivity) supplies the
+ * lookup, keeping this class unaware such a class exists. Defaults to a
+ * no-op so every existing call site and every existing test is unaffected
+ * unless it opts in.
  */
 object ScoutCourtesyMatcher {
 
     private val LEAD_INS = listOf("okay", "ok", "alright", "got it")
 
-    fun match(normalized: String, scoutName: String): CourtesyIntent? {
+    fun match(
+        normalized: String,
+        scoutName: String,
+        isKnownAcknowledgment: (String) -> Boolean = { false }
+    ): CourtesyIntent? {
         // Run the configured name through the exact same normalization the
         // incoming speech already went through -- a bare trim()/lowercase()
         // isn't enough, since a configured name containing punctuation or
@@ -102,6 +123,7 @@ object ScoutCourtesyMatcher {
             val remainder = stripLeadIn(normalized, leadIn) ?: continue
             if (remainder.isBlank()) continue
             exactMatch(remainder, name)?.let { return it }
+            if (isKnownAcknowledgment(remainder)) return CourtesyIntent.ACKNOWLEDGE
         }
 
         return null

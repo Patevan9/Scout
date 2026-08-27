@@ -444,4 +444,175 @@ class ScoutCourtesyMatcherTest {
         assertNull(ScoutCourtesyMatcher.match(
             TextNormalizer.normalizeUtterance("Am I right?"), scoutName))
     }
+
+    // --- Acknowledgment composition (Remodeling #1A): a recognized lead-in
+    // ("okay"/"ok"/"alright"/"got it") followed by a word ScoutLanguagePack
+    // already recognizes bare as ACKNOWLEDGE ("gotcha", "understood", "makes
+    // sense", ...) previously fell through both recognizers -- real-device
+    // finding: "Okay, gotcha." reached Gemini/TinyLlama like an open question.
+    // These tests stand in for MainActivity's real predicate
+    // (`languagePack.categoryFor(remainder) == "ACKNOWLEDGE"`) with the same
+    // small, fixed vocabulary language_pack.json bundles under ACKNOWLEDGE,
+    // without depending on ScoutLanguagePack/JSON loading from this pure
+    // unit-test file. ---
+
+    private val languagePackAcknowledgeVariants = setOf(
+        "gotcha", "no worries", "fair enough", "sounds great",
+        "makes sense", "roger that", "noted", "understood"
+    )
+
+    private fun isKnownAcknowledgment(remainder: String) = remainder in languagePackAcknowledgeVariants
+
+    @Test fun `default two-arg match is unaffected -- no predicate means no composition`() {
+        // Confirms the added parameter's default preserves every existing call site's
+        // behavior: without a predicate, "okay gotcha" still misses, exactly as before.
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, gotcha."), scoutName))
+    }
+
+    @Test fun `okay gotcha resolves to ACKNOWLEDGE when a language-pack lookup is supplied`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Okay, gotcha."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `ok gotcha resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Ok, gotcha."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `alright gotcha resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Alright, gotcha."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `okay understood resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Okay, understood."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `ok understood resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Ok, understood."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `okay makes sense resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Okay, makes sense."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `alright makes sense resolves to ACKNOWLEDGE`() {
+        assertEquals(
+            CourtesyIntent.ACKNOWLEDGE,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Alright, makes sense."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    // --- Preservation: existing exactMatch()-table lead-in composition must keep
+    // winning over the new predicate, even when a real predicate is supplied ---
+
+    @Test fun `okay comma thank you still resolves to THANKS with a predicate supplied`() {
+        assertEquals(
+            CourtesyIntent.THANKS,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("okay, thank you"), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `okay comma you are right still resolves to CONFIRM with a predicate supplied`() {
+        assertEquals(
+            CourtesyIntent.CONFIRM,
+            ScoutCourtesyMatcher.match(
+                TextNormalizer.normalizeUtterance("Okay, you are right."), scoutName, ::isKnownAcknowledgment
+            )
+        )
+    }
+
+    @Test fun `bare gotcha is still null from this class -- it is ScoutLanguagePack's own full-string hit, not this class's job`() {
+        assertNull(ScoutCourtesyMatcher.match("gotcha", scoutName, ::isKnownAcknowledgment))
+    }
+
+    // --- Adversarial: composition must not swallow real trailing content ---
+
+    @Test fun `okay tell me the weather is not matched -- real question survives composition`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, tell me the weather."), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay what time is it is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, what time is it?"), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay who is nicolas is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, who is Nicolas?"), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay where is diana is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, where is Diana?"), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay i need help is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, I need help."), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay i have a question is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, I have a question."), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay remind me what you said is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, remind me what you said."), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `alright what do you see is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Alright, what do you see?"), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `alright tell me about that is not matched`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Alright, tell me about that."), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `gotcha but what time is it is not matched -- gotcha is not a LEAD_IN, loop never starts`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Gotcha, but what time is it?"), scoutName, ::isKnownAcknowledgment))
+    }
+
+    @Test fun `okay gotcha but i have another question is not matched -- trailing content survives`() {
+        assertNull(ScoutCourtesyMatcher.match(
+            TextNormalizer.normalizeUtterance("Okay, gotcha, but I have another question."),
+            scoutName, ::isKnownAcknowledgment))
+    }
 }

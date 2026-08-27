@@ -3494,7 +3494,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // which forms are matched and why. Everything else in this function --
                 // the wake-name requirement, the conversation window, real questions --
                 // is completely unchanged.
-                ScoutCourtesyMatcher.match(normalized, scoutName)?.let { courtesy ->
+                //
+                // The trailing lambda closes the acknowledgment composition gap
+                // (Remodeling #1A): after ScoutCourtesyMatcher strips a recognized
+                // lead-in ("okay"/"ok"/"alright"/"got it") and its OWN table misses on
+                // the remainder, it asks languagePack whether that remainder is itself
+                // an already-known ACKNOWLEDGE word ("gotcha", "understood", "makes
+                // sense", ...) -- e.g. "okay gotcha". Only ever consulted on that
+                // narrow, already-stripped remainder, and only interpreted as
+                // ACKNOWLEDGE -- see ScoutCourtesyMatcher's class doc comment.
+                ScoutCourtesyMatcher.match(normalized, scoutName) { remainder ->
+                    languagePack.categoryFor(remainder) == "ACKNOWLEDGE"
+                }?.let { courtesy ->
                     convoDb.logTurn("user", normalized)
                     handleCourtesy(courtesy)
                     scheduleListenRestart()
