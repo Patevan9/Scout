@@ -7,6 +7,7 @@ import android.util.AttributeSet
 import android.view.View
 import com.example.scoutface.brain.ScoutExpressionLayer
 import com.example.scoutface.brain.ScoutExpressionPriority
+import com.example.scoutface.brain.ScoutSpeechRangeMouth
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
@@ -42,7 +43,20 @@ class ScoutFaceView @JvmOverloads constructor(
     private var vVergence    = 0f   // 0..1 — 0=neutral, 1=full near-focus
 
     fun setSpeaking(s: Boolean) = setOnUiThread {
-        if (vSpeaking != s) { vSpeaking = s; requestActiveFrame() }
+        if (vSpeaking != s) {
+            vSpeaking = s
+            if (s) {
+                // Speaking Mouth v1: each new speaking dispatch starts fresh
+                // in synthetic-fallback mode -- "has a real onRangeStart()
+                // event been seen yet" must be scoped per dispatch, never
+                // carried over from whatever the previous utterance's TTS
+                // engine did or didn't support. See speechRangePulse()'s own
+                // doc comment for the full reasoning.
+                speechRangeImpulse       = 0f
+                lastSpeechRangeEventAtMs = 0L
+            }
+            requestActiveFrame()
+        }
     }
     fun setListening(s: Boolean) = setOnUiThread {
         if (vListening != s) { vListening = s; requestActiveFrame() }
@@ -69,6 +83,47 @@ class ScoutFaceView @JvmOverloads constructor(
     fun setSpeechLevel(v: Float) = setOnUiThread {
         val nv = v.coerceIn(0f, 1f)
         if (abs(vSpeechLevel - nv) > 0.01f) { vSpeechLevel = nv; requestActiveFrame() }
+    }
+
+    /**
+     * Speaking Mouth v1 -- one real speech-timed impulse, reported by
+     * MainActivity's TTS `onRangeStart()` callback for the dispatch that
+     * currently owns Scout's global speaking state (dispatch-scoped
+     * ownership is already resolved by the caller before this is ever
+     * invoked -- see `ScoutSpeechDispatchGuard.ownsGlobalSpeakingState()` at
+     * that call site; this method has no dispatch-id awareness of its own,
+     * exactly like `setSpeaking()` itself never has).
+     *
+     * Deliberately NOT a reuse of `setSpeechLevel()`/`vSpeechLevel`: that
+     * existing path models a continuously-HELD level (a caller pushes the
+     * current value; nothing about it decays on its own), which is the
+     * right shape for a real amplitude stream but the wrong shape for a
+     * fire-and-forget per-word event -- there is no natural "back to zero"
+     * for a level that's only ever set, never re-driven between words. This
+     * method instead follows the exact same fire-and-forget pulse idiom this
+     * class already uses for noticePresence()/pleasedBeat()/uncertainBeat():
+     * the caller reports WHEN, this class -- and ScoutSpeechRangeMouth's pure
+     * helper functions -- own HOW it rises and decays, entirely in
+     * updateLife(). setSpeechLevel()/vSpeechLevel/speechSmooth are completely
+     * untouched by this feature and remain exactly as dormant as before.
+     *
+     * [rangeChars] is the onRangeStart(start, end, ...) span's character
+     * length -- a simple, deterministic timing/size heuristic (see
+     * ScoutSpeechRangeMouth.impulseMagnitude()), never a claim of real audio
+     * amplitude, which onRangeStart() does not provide. Safe to call as
+     * often as real range events arrive; each call boosts (never additively
+     * stacks past the bounded ceiling) the current impulse and marks
+     * range-driven mode active for SPEECH_RANGE_ACTIVE_WINDOW_MS -- see
+     * updateLife()'s own branch selection for exactly how that's used, and
+     * setSpeaking()/resetFace() for where this state is fully cleared.
+     */
+    fun speechRangePulse(rangeChars: Int) = setOnUiThread {
+        val magnitude = ScoutSpeechRangeMouth.impulseMagnitude(
+            rangeChars, SPEECH_RANGE_PULSE_MIN, SPEECH_RANGE_PULSE_MAX, SPEECH_RANGE_CHARS_NORMALIZER
+        )
+        speechRangeImpulse = max(speechRangeImpulse, magnitude)
+        lastSpeechRangeEventAtMs = System.currentTimeMillis()
+        requestActiveFrame()
     }
     fun setBatteryLevel(pct: Int) = setOnUiThread {
         val np = pct.coerceIn(0, 100)
@@ -193,6 +248,10 @@ class ScoutFaceView @JvmOverloads constructor(
         mouthOpen   = 0f
         speechPhase = 0f
         wavePhase   = 0f
+
+        // Speaking Mouth v1
+        speechRangeImpulse       = 0f
+        lastSpeechRangeEventAtMs = 0L
 
         lookX  = 0f; lookY  = 0f
         lookVX = 0f; lookVY = 0f
@@ -465,6 +524,51 @@ class ScoutFaceView @JvmOverloads constructor(
     private var speechPhase = 0f
     private var mouthOpen   = 0f
     private var wavePhase   = 0f
+
+    // Speaking Mouth v1 -- real speech-timed mouth impulses, driven by
+    // MainActivity's TTS onRangeStart() callback via speechRangePulse()
+    // above. speechRangeImpulse is the current decaying impulse magnitude
+    // (0..1, decayed every frame in updateLife() regardless of whether a new
+    // event arrived that frame -- see SPEECH_RANGE_DECAY_TAU_MS); it is
+    // never additively stacked, only boosted up to its own ceiling by each
+    // new event. lastSpeechRangeEventAtMs is the wall-clock time of the most
+    // recent real event for the CURRENT speaking dispatch, 0L meaning "none
+    // yet this dispatch" -- reset there by setSpeaking(true) and here by
+    // resetFace()/updateLife()'s !vSpeaking branch, so a new dispatch (or a
+    // TTS engine that never calls onRangeStart at all) always starts, and
+    // falls back to, the existing synthetic animation -- see
+    // ScoutSpeechRangeMouth.isRangeDriven()'s own doc comment for exactly
+    // how that decision is made.
+    private var speechRangeImpulse       = 0f
+    private var lastSpeechRangeEventAtMs = 0L
+    // Character-length-to-magnitude mapping range -- deliberately similar in
+    // overall scale to the existing synthetic fallback's own 0f..0.42f
+    // target ceiling (see updateLife()'s speaking else-branch below), so the
+    // two paths don't produce a visually jarring difference in how open the
+    // mouth generally looks -- this PR is a timing fix, not a mouth-shape
+    // redesign. SPEECH_RANGE_CHARS_NORMALIZER (~8 chars, roughly one short
+    // word) is the range length at which the mapping saturates to its max.
+    private val SPEECH_RANGE_PULSE_MIN       = 0.22f
+    private val SPEECH_RANGE_PULSE_MAX       = 0.55f
+    private val SPEECH_RANGE_CHARS_NORMALIZER = 8f
+    // Continuous per-frame decay tau for speechRangeImpulse -- fast enough
+    // that consecutive words/ranges visibly separate (typical spoken word
+    // duration is a few hundred ms at Scout's configured speech rate) rather
+    // than staying held open, producing a smooth fade between events instead
+    // of the old fixed-period cycling.
+    private val SPEECH_RANGE_DECAY_TAU_MS = 160f
+    // How quickly the RENDERED mouthOpen chases speechRangeImpulse's target
+    // -- deliberately close to the existing branches' own 38-42ms taus so
+    // the three speaking-mouth paths (range-driven, dormant real-level,
+    // synthetic fallback) all feel like the same mouth, just driven
+    // differently.
+    private val SPEECH_RANGE_MOUTH_TAU_MS = 45f
+    // How long after the last real range event the range-driven path keeps
+    // owning the mouth before falling back -- long enough to bridge an
+    // ordinary pause between words/clauses without flickering between the
+    // two animation styles mid-utterance, short enough to recover
+    // reasonably quickly if a dispatch's events genuinely stop arriving.
+    private val SPEECH_RANGE_ACTIVE_WINDOW_MS = 1000L
 
     private var breathPhase      = Random.nextFloat() * (2f * Math.PI).toFloat()
     private val BREATH_PERIOD_MS = 4200f
@@ -1748,11 +1852,41 @@ class ScoutFaceView @JvmOverloads constructor(
 
         if (vSpeaking) {
             speechPhase += dtMs / 85f
-            if (speechSmooth > 0.05f) {
+
+            // Speaking Mouth v1: decay the range-timed impulse every frame,
+            // unconditionally, regardless of whether a new onRangeStart()
+            // event arrived this frame -- this is what produces a smooth
+            // fade between events instead of the old fixed-period cycling.
+            // Never touches speechPhase/speechSmooth/mouthOpen directly;
+            // only feeds the branch selection and target below.
+            speechRangeImpulse += (0f - speechRangeImpulse) *
+                    smoothAlpha(dtMs, SPEECH_RANGE_DECAY_TAU_MS)
+
+            if (ScoutSpeechRangeMouth.isRangeDriven(lastSpeechRangeEventAtMs, now, SPEECH_RANGE_ACTIVE_WINDOW_MS)) {
+                // Real speech-timed path: at least one onRangeStart() event
+                // has been seen recently enough for the current dispatch to
+                // be trusted -- this path now owns the mouth exclusively
+                // (see the else-if/else below, both skipped whenever this is
+                // true), matching "once usable range callbacks are
+                // established for a dispatch, the speech-timed path should
+                // own the mouth."
+                val target = speechRangeImpulse.coerceIn(0f, 1f)
+                mouthOpen += (target - mouthOpen) * smoothAlpha(dtMs, SPEECH_RANGE_MOUTH_TAU_MS)
+            } else if (speechSmooth > 0.05f) {
+                // Unchanged, pre-existing branch -- dead in production today
+                // since nothing calls setSpeechLevel() (see that method's own
+                // doc comment for why this feature deliberately does not
+                // reuse it), left exactly as it was.
                 val jitter = Random.nextFloat() * 0.14f - 0.07f
                 val target = (speechSmooth * 0.85f + jitter + 0.10f).coerceIn(0f, 1f)
                 mouthOpen += (target - mouthOpen) * smoothAlpha(dtMs, 38f)
             } else {
+                // Unchanged, pre-existing synthetic fallback -- still exactly
+                // what runs whenever the current dispatch has not (yet, or
+                // ever) produced a usable onRangeStart() event. Required
+                // fail-safe: real-device onRangeStart() reliability on
+                // Samsung TTS is unproven, so Scout must never go motionless
+                // if no events arrive.
                 val wave   = (sin(speechPhase.toDouble()) * 0.5 + 0.5).toFloat()
                 val burst  = (sin(speechPhase.toDouble() * 2.618) * 0.5 + 0.5).toFloat()
                 val jitter = Random.nextFloat() * 0.08f
@@ -1762,6 +1896,15 @@ class ScoutFaceView @JvmOverloads constructor(
         } else {
             speechPhase  = 0f
             speechSmooth = 0f
+            // Speaking Mouth v1: unified with every other kind of speech
+            // completion via ScoutFaceView.setSpeaking(false), which
+            // MainActivity's finishSpeechDispatch() already calls for
+            // NATURAL/ENGINE_ERROR/USER_INTERRUPTED alike -- so tap-to-
+            // interrupt, a natural finish, and an engine error all return
+            // this state to rest through this exact same line, with no
+            // special-casing needed here.
+            speechRangeImpulse       = 0f
+            lastSpeechRangeEventAtMs = 0L
             mouthOpen   += (0f - mouthOpen) * smoothAlpha(dtMs, 120f)
         }
 

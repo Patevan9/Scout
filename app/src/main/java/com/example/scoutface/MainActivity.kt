@@ -4205,6 +4205,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 }
 
+                // Speaking Mouth v1. Additive to this existing listener --
+                // does not change onStart()/onDone()/onError()/onStop()'s
+                // own semantics, tap-to-interrupt's USER_INTERRUPTED
+                // classification, or any dispatch-lifecycle field below;
+                // tts.speak()/QUEUE_ADD/QUEUE_FLUSH call sites are untouched.
+                //
+                // Reuses the exact same dispatch-ownership check
+                // finishSpeechDispatch() already relies on
+                // (ScoutSpeechDispatchGuard.ownsGlobalSpeakingState()), so a
+                // stale/superseded dispatch's range events -- e.g. an older
+                // QUEUE_ADD utterance still finishing playback behind a
+                // newer one -- can never drive the mouth belonging to
+                // whichever dispatch actually owns Scout's global speaking
+                // state right now. Deliberately no new per-dispatch storage:
+                // only this range's own [start, end) length is used,
+                // immediately, never persisted -- there is nothing here that
+                // needs cleaning up on a dispatch's completion the way
+                // ttsDispatchSources is.
+                //
+                // Real-device reliability of onRangeStart() on Samsung TTS
+                // is unproven -- if it never fires for a dispatch,
+                // ScoutFaceView's own existing synthetic fallback keeps the
+                // mouth animated regardless; this override either drives the
+                // real path or (if unreachable/never called) changes
+                // nothing observable at all.
+                override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                    val (rangeDispatchId, _) = resolveTtsDispatch(utteranceId)
+                    if (!ScoutSpeechDispatchGuard.ownsGlobalSpeakingState(
+                            rangeDispatchId, audibleSpeechDispatchId, submittedSpeechDispatchId
+                        )) return
+                    faceView.speechRangePulse(end - start)
+                }
+
                 override fun onDone(utteranceId: String?) {
                     val (doneDispatchId, doneDispatchSource) = resolveTtsDispatch(utteranceId)
                     finishSpeechDispatch(doneDispatchId, doneDispatchSource, ScoutSpeechCompletionPolicy.Kind.NATURAL)
