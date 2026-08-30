@@ -114,9 +114,17 @@ static GenResult runGeneration(
     r.n_threads_batch = llama_n_threads_batch(sm->ctx);
     r.n_ctx           = (int)llama_n_ctx(sm->ctx);
 
-    int n_vocab = 32000;   // TinyLlama 1.1B — confirmed in model metadata
+    // Model-independent vocabulary size (native-model-agnostic-vocab-eos):
+    // read from the loaded model's own metadata via llama_vocab_n_tokens(),
+    // not assumed. Previously hardcoded to 32000 (TinyLlama 1.1B's exact
+    // vocab size) -- correct only for that one model; any other model's
+    // sampling loop below would have silently scanned just the first 32000
+    // of its logits, permanently blind to the rest of its real vocabulary.
+    // vocab is obtained first so n_vocab can be derived from it, instead of
+    // the reverse.
     std::vector<llama_token> prompt_tokens(nCtx);
     const struct llama_vocab* vocab = llama_model_get_vocab(sm->model);
+    const int n_vocab = (int)llama_vocab_n_tokens(vocab);
 
     int n_prompt = llama_tokenize(
             vocab, prompt.c_str(), (int32_t)prompt.size(),
@@ -172,9 +180,26 @@ static GenResult runGeneration(
 
     auto t_prefill_end = clock::now();
 
-    llama_token eos = 2;   // TinyLlama EOS = </s> — confirmed in model metadata
-    llama_token eot = 2;   // TinyLlama has no separate EOT, same as EOS
-
+    // Model-independent stop-token handling (native-model-agnostic-vocab-eos):
+    // previously hardcoded llama_token eos = 2; eot = 2; (TinyLlama's own
+    // </s> id, assumed to double as EOT too) and compared next_token against
+    // both by value. That assumed every model shares TinyLlama's exact
+    // token-id numbering AND its "no separate EOT" relationship between the
+    // two -- neither is a safe assumption for a different model (see the
+    // sampling loop below).
+    //
+    // llama_vocab_is_eog(vocab, token) is used instead of reading
+    // llama_vocab_eos()/llama_vocab_eot() ourselves and comparing by value.
+    // It is llama.cpp's own dedicated "should generation stop on this
+    // token" check: it already knows, per-model, which token(s) end
+    // generation (EOS, a separate EOT where one exists, or any other
+    // model-specific end marker) and returns false safely if a model
+    // defines no such token, rather than this code having to reason about
+    // an invalid/LLAMA_TOKEN_NULL (-1) special-token id itself. Because the
+    // check is "is this specific sampled token one of the model's real
+    // end-of-generation tokens," an ordinary vocabulary token can never be
+    // accidentally treated as a stop token -- there is no separate
+    // eos/eot local value here whose staleness or absence could cause that.
     std::string output;
     output.reserve(512);
     char piece[256];
@@ -209,7 +234,7 @@ static GenResult runGeneration(
             }
         }
 
-        if (next_token == eos || next_token == eot) break;
+        if (llama_vocab_is_eog(vocab, next_token)) break;
 
         int len = llama_token_to_piece(
                 vocab, next_token, piece, sizeof(piece)-1, 0, false);
