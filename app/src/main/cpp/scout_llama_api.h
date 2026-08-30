@@ -132,6 +132,18 @@ int32_t  llama_n_threads_batch(struct llama_context* ctx);
 uint32_t llama_n_ctx(const struct llama_context* ctx);
 struct llama_perf_context_data llama_perf_context(const struct llama_context* ctx);
 
+/* Model-agnostic vocab/stop-token additions (native-model-agnostic-vocab-eos).
+   Both confirmed present in the prebuilt libllama.so via `nm -D` before
+   adding these declarations, and signatures cross-checked against the full
+   vendored llama.h in this same directory (kept for reference; this file,
+   not llama.h, is what scout_llama_jni.cpp actually includes and compiles
+   against). llama_vocab_is_eog() is llama.cpp's own per-model "does this
+   token end generation" check -- see its call site in scout_llama_jni.cpp
+   for why it's used instead of comparing against llama_vocab_eos()/
+   llama_vocab_eot() by value. */
+int32_t llama_vocab_n_tokens(const struct llama_vocab* vocab);
+bool    llama_vocab_is_eog(const struct llama_vocab* vocab, llama_token token);
+
 #ifdef __cplusplus
 }
 #endif
