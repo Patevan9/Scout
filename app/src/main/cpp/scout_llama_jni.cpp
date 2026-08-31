@@ -310,6 +310,78 @@ static GenResult runGeneration(
     return r;
 }
 
+// ── Structured-chat template application (structured-chat-template-seam) ──
+// Serializes Scout's structured {role, content} messages using the loaded
+// GGUF's own embedded chat template, via llama.cpp's built-in (non-Jinja)
+// template matcher (llama_model_chat_template() + llama_chat_apply_template()
+// -- see scout_llama_api.h for why this is the correct API to use, and why
+// not the heavier libllama-common.so C++ jinja API). Returns true and fills
+// `out` with the formatted prompt on success; returns false (with an
+// explicit native log) on any failure. A caller must never fall back to
+// hand-constructing its own template text on failure -- doing so would
+// silently reintroduce exactly the per-model branching this change exists
+// to remove. This function never inspects which model is loaded, its
+// filename, or its architecture -- it only asks the model for its own
+// template and applies it.
+static bool applyModelChatTemplate(
+        ScoutModel* sm,
+        const std::vector<llama_chat_message>& messages,
+        std::string* out)
+{
+    if (messages.empty()) {
+        LOGE("applyModelChatTemplate: no messages to serialize");
+        return false;
+    }
+
+    const char* tmpl = llama_model_chat_template(sm->model, nullptr);
+    if (!tmpl || !tmpl[0]) {
+        LOGE("applyModelChatTemplate: loaded model has no usable embedded chat template");
+        return false;
+    }
+
+    // Starting allocation per llama_chat_apply_template()'s own doc comment:
+    // "recommended alloc size is 2 * (total number of characters of all
+    // messages)". Floored at 1024 so the fixed system/few-shot content is
+    // covered even when history+utterance are short.
+    size_t totalChars = 0;
+    for (const auto& m : messages) {
+        totalChars += (m.role ? strlen(m.role) : 0) + (m.content ? strlen(m.content) : 0);
+    }
+    int32_t bufLen = (int32_t)std::max<size_t>(totalChars * 2, 1024);
+
+    std::vector<char> buf(bufLen);
+    int32_t needed = llama_chat_apply_template(
+            tmpl, messages.data(), messages.size(), /*add_ass=*/true,
+            buf.data(), bufLen);
+
+    if (needed < 0) {
+        LOGE("applyModelChatTemplate: llama_chat_apply_template failed (rc=%d) -- "
+             "template not recognized by llama.cpp's built-in matcher", (int)needed);
+        return false;
+    }
+
+    if (needed > bufLen) {
+        // Buffer was too small -- resize to exactly what the API says it
+        // needs and apply once more, per the API's own documented contract.
+        // Not a retry loop: an inconsistent second result here is a real
+        // failure, not a sizing problem, so it's treated as one.
+        buf.assign((size_t)needed, '\0');
+        int32_t needed2 = llama_chat_apply_template(
+                tmpl, messages.data(), messages.size(), /*add_ass=*/true,
+                buf.data(), needed);
+        if (needed2 < 0 || needed2 > needed) {
+            LOGE("applyModelChatTemplate: retry after resize failed (first=%d, retry=%d)",
+                 (int)needed, (int)needed2);
+            return false;
+        }
+        out->assign(buf.data(), (size_t)needed2);
+        return true;
+    }
+
+    out->assign(buf.data(), (size_t)needed);
+    return true;
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_example_scoutface_LlamaEngine_nativeLoad(
         JNIEnv* env, jobject,
@@ -407,6 +479,83 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerate(
                                  /*nThreads=*/2, /*nThreadsBatchOverride=*/0);
 
     LOGI("nativeGenerate: DONE ok=%d output_len=%zu n_prompt=%d prefill_ms=%.0f "
+         "ttft_ms=%.0f n_gen=%d gen_ms=%.0f total_ms=%.0f threads=%d threads_batch=%d",
+         r.ok ? 1 : 0, r.text.size(), r.n_prompt, r.prefill_ms,
+         r.ttft_ms, r.n_generated, r.gen_ms, r.total_ms, r.n_threads, r.n_threads_batch);
+
+    return env->NewStringUTF(r.text.c_str());
+}
+
+// Structured-chat production entry point (structured-chat-template-seam /
+// Qwen migration Step 2A). Takes Scout's structured {role, content} messages
+// (parallel roles[]/contents[] arrays -- the simplest shape that survives
+// the JNI boundary) instead of one pre-formatted flat prompt string, applies
+// the loaded model's own embedded chat template via applyModelChatTemplate(),
+// and then calls the exact same, unchanged runGeneration() core as
+// nativeGenerate() above. runGeneration() itself has no idea this prompt
+// came from a template rather than a hand-built string, and never learns
+// about roles, TinyLlama, Qwen, ChatML, or Zephyr formatting -- its job
+// stays exactly "formatted text -> tokenize -> prefill -> generate -> EOG
+// stop", unchanged by this addition.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_scoutface_LlamaEngine_nativeGenerateChat(
+        JNIEnv* env, jobject,
+        jlong handle, jobjectArray jRoles, jobjectArray jContents,
+        jint nPredict, jfloat temp, jfloat)
+{
+    ScoutModel* sm = (ScoutModel*)(uintptr_t)handle;
+    if (!sm || !sm->model || !sm->ctx) {
+        LOGE("nativeGenerateChat: invalid handle"); return env->NewStringUTF("");
+    }
+
+    jsize nRoles = env->GetArrayLength(jRoles);
+    jsize nContents = env->GetArrayLength(jContents);
+    if (nRoles != nContents || nRoles <= 0) {
+        LOGE("nativeGenerateChat: mismatched or empty roles/contents arrays (roles=%d contents=%d)",
+             (int)nRoles, (int)nContents);
+        return env->NewStringUTF("");
+    }
+
+    // Keep the std::string backing storage alive for the whole call --
+    // llama_chat_message.role/.content are raw const char* pointers into it,
+    // so these strings must outlive the llama_chat_apply_template() call
+    // inside applyModelChatTemplate() below.
+    std::vector<std::string> roleStrings;
+    std::vector<std::string> contentStrings;
+    roleStrings.reserve((size_t)nRoles);
+    contentStrings.reserve((size_t)nRoles);
+    for (jsize i = 0; i < nRoles; i++) {
+        jstring jRole = (jstring)env->GetObjectArrayElement(jRoles, i);
+        jstring jContent = (jstring)env->GetObjectArrayElement(jContents, i);
+        roleStrings.push_back(jstringToStd(env, jRole));
+        contentStrings.push_back(jstringToStd(env, jContent));
+        if (jRole) env->DeleteLocalRef(jRole);
+        if (jContent) env->DeleteLocalRef(jContent);
+    }
+
+    std::vector<llama_chat_message> messages;
+    messages.reserve((size_t)nRoles);
+    for (jsize i = 0; i < nRoles; i++) {
+        messages.push_back(llama_chat_message{ roleStrings[i].c_str(), contentStrings[i].c_str() });
+    }
+
+    std::string prompt;
+    if (!applyModelChatTemplate(sm, messages, &prompt) || prompt.empty()) {
+        LOGE("nativeGenerateChat: chat-template application failed -- refusing to fall back "
+             "to a hand-written model-specific format");
+        return env->NewStringUTF("");
+    }
+
+    LOGI("nativeGenerateChat: START n_messages=%d formatted_prompt_len=%zu nPredict=%d temp=%.2f",
+         (int)nRoles, prompt.size(), (int)nPredict, (double)temp);
+
+    // Exact same literals nativeGenerate() has always used (n_ctx=2048,
+    // n_batch=512, n_threads=2) -- unchanged by this step.
+    GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
+                                 /*nCtx=*/2048, /*nBatch=*/512,
+                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0);
+
+    LOGI("nativeGenerateChat: DONE ok=%d output_len=%zu n_prompt=%d prefill_ms=%.0f "
          "ttft_ms=%.0f n_gen=%d gen_ms=%.0f total_ms=%.0f threads=%d threads_batch=%d",
          r.ok ? 1 : 0, r.text.size(), r.n_prompt, r.prefill_ms,
          r.ttft_ms, r.n_generated, r.gen_ms, r.total_ms, r.n_threads, r.n_threads_batch);
