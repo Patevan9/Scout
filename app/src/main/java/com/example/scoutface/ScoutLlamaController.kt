@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.example.scoutface.brain.ChatMessage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -116,6 +117,45 @@ object ScoutLlamaController {
                 LlamaEngine.generate(prompt, nPredict = nPredict)
             } catch (e: Throwable) {
                 Log.e(TAG, "generateAsync() threw", e)
+                null
+            }
+            mainHandler.post {
+                if (token != currentToken) {
+                    try {
+                        appDiagLog?.logLlama(DiagLog.LlamaEvent.GENERATION_DISCARDED)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "failed to log GENERATION_DISCARDED", e)
+                    }
+                    return@post
+                }
+                onResult(reply)
+            }
+        }
+    }
+
+    /**
+     * Structured-chat counterpart to generateAsync() (structured-chat-template-seam
+     * / Qwen migration Step 2A). Identical executor/token/callback contract --
+     * same process-wide single-thread executor, same token-staleness check
+     * before delivering onResult, same discard logging via appDiagLog -- the
+     * only difference is that [messages] (Scout's structured content) is
+     * passed to LlamaEngine.generateChat() instead of a pre-formatted flat
+     * [prompt] string being passed to LlamaEngine.generate(). See
+     * generateAsync()'s own doc comment above for the full reasoning behind
+     * this contract; kept as a separate function rather than an overload so
+     * neither call site's signature/behavior is disturbed by this addition.
+     */
+    fun generateChatAsync(
+        token: Long,
+        messages: List<ChatMessage>,
+        nPredict: Int = 150,
+        onResult: (String?) -> Unit
+    ) {
+        executor.execute {
+            val reply = try {
+                LlamaEngine.generateChat(messages, nPredict = nPredict)
+            } catch (e: Throwable) {
+                Log.e(TAG, "generateChatAsync() threw", e)
                 null
             }
             mainHandler.post {

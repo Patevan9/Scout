@@ -144,6 +144,39 @@ struct llama_perf_context_data llama_perf_context(const struct llama_context* ct
 int32_t llama_vocab_n_tokens(const struct llama_vocab* vocab);
 bool    llama_vocab_is_eog(const struct llama_vocab* vocab, llama_token token);
 
+/* Chat-template additions (structured-chat-template-seam / Qwen migration
+   Step 2A). Both functions and the struct below are confirmed present in
+   the prebuilt libllama.so via `nm -D` (both listed as strong `T` exported
+   symbols) before adding these declarations, and cross-checked field-for-
+   field against the full vendored llama.h in this same directory (kept for
+   reference; this file, not llama.h, is what scout_llama_jni.cpp actually
+   includes and compiles against -- see the note on the vocab/EOG additions
+   above, same reasoning applies here).
+
+   llama_model_chat_template() returns the loaded GGUF's own embedded chat
+   template (the Jinja source baked into the model file at conversion time;
+   name=nullptr selects the model's default template). llama_chat_apply_template()
+   serializes a list of {role, content} messages using that template --
+   llama.cpp's own built-in (non-Jinja) template matcher recognizes both
+   TinyLlama's zephyr-style format and Qwen's ChatML format by content-
+   sniffing the template string, so this stays model-agnostic without this
+   file ever branching on which model is loaded. See applyModelChatTemplate()
+   in scout_llama_jni.cpp for the call site and buffer-sizing handling. */
+typedef struct llama_chat_message {
+    const char* role;
+    const char* content;
+} llama_chat_message;
+
+const char* llama_model_chat_template(const struct llama_model* model, const char* name);
+
+int32_t llama_chat_apply_template(
+        const char* tmpl,
+        const struct llama_chat_message* chat,
+        size_t n_msg,
+        bool add_ass,
+        char* buf,
+        int32_t length);
+
 #ifdef __cplusplus
 }
 #endif

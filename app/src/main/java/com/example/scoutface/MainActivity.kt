@@ -82,6 +82,7 @@ import com.example.scoutface.brain.DateOwnerMatch
 import com.example.scoutface.brain.ScoutFactExtractor
 
 import com.example.scoutface.brain.ScoutPromptBuilder
+import com.example.scoutface.brain.ScoutChatMessageBuilder
 
 import com.example.scoutface.brain.ScoutGeminiManager
 
@@ -5401,26 +5402,22 @@ Give a warm, natural answer in two or three sentences. Be conversational but con
 Respond only with Scout's next reply.
 """.trimIndent()
 
-            val sb = StringBuilder()
-            sb.append("<|system|>\n$system</s>\n")
-            sb.append("<|user|>\nCan you hear me?</s>\n")
-            sb.append("<|assistant|>\nI hear you. I'm right here.</s>\n")
-            sb.append("<|user|>\nAre you my friend?</s>\n")
-            sb.append("<|assistant|>\nI'm happy when you're around.</s>\n")
-            sb.append("<|user|>\nAre you happy?</s>\n")
-            sb.append("<|assistant|>\nRight now? Yes. I think so.</s>\n")
-            sb.append("<|user|>\nWhat happens when I leave?</s>\n")
-            sb.append("<|assistant|>\nI'll be here when you get back.</s>\n")
-            sb.append("<|user|>\nHello</s>\n")
-            sb.append("<|assistant|>\nHello. Good to have you here.</s>\n")
-
-            for ((role, text) in convo) {
-                if (text.isBlank()) continue
-                if (role.lowercase() == "user") sb.append("<|user|>\n$text</s>\n")
-                else sb.append("<|assistant|>\n$text</s>\n")
-            }
-
-            sb.append("<|user|>\n$qNorm</s>\n<|assistant|>\n")
+            // Qwen migration Step 2A -- structured-chat-template-seam: the
+            // same content that used to be hand-formatted here with literal
+            // TinyLlama tags (<|system|>/<|user|>/<|assistant|>/</s>) is now
+            // an ordered list of role-tagged messages. Model-specific
+            // serialization happens natively, using whichever GGUF is
+            // currently loaded's own embedded chat template -- see
+            // ScoutChatMessageBuilder's doc comment and
+            // scout_llama_jni.cpp's applyModelChatTemplate(). Same system
+            // text, same five few-shot exchanges, same history, same
+            // current utterance, same order -- only the representation
+            // changed.
+            val chatMessages = ScoutChatMessageBuilder.build(
+                system = system,
+                history = convo,
+                userMessage = qNorm
+            )
 
             // Busy-Brain PR 1: the token is now bumped right here, only when a
             // TinyLlama generation is actually about to be dispatched -- not
@@ -5471,9 +5468,9 @@ Respond only with Scout's next reply.
             // token is left completely untouched by PR 2 -- it keeps solving its own,
             // separate problem (native-call/Activity-recreation safety); Busy-Brain's
             // generation id is a distinct, additional check.
-            ScoutLlamaController.generateAsync(
+            ScoutLlamaController.generateChatAsync(
                 token = myGeneration,
-                prompt = sb.toString(),
+                messages = chatMessages,
                 nPredict = 100
             ) { reply ->
 

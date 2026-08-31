@@ -1,6 +1,7 @@
 package com.example.scoutface
 
 import android.util.Log
+import com.example.scoutface.brain.ChatMessage
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
@@ -32,6 +33,23 @@ object LlamaEngine {
     private external fun nativeGenerate(
         handle: Long,
         prompt: String,
+        nPredict: Int,
+        temp: Float,
+        repeatPenalty: Float
+    ): String
+    // Structured-chat production entry point (structured-chat-template-seam /
+    // Qwen migration Step 2A). roles/contents are parallel arrays, same
+    // length and order -- the native side rebuilds them into
+    // llama_chat_message pairs and formats them with the loaded GGUF's own
+    // embedded chat template before generation, instead of Scout ever
+    // hand-typing role tags. Returns "" on any native-side failure
+    // (mismatched array lengths, no usable template, template-apply
+    // failure) -- generateChat() below treats that exactly like
+    // nativeGenerate() returning empty: a null result, never speakable text.
+    private external fun nativeGenerateChat(
+        handle: Long,
+        roles: Array<String>,
+        contents: Array<String>,
         nPredict: Int,
         temp: Float,
         repeatPenalty: Float
@@ -145,12 +163,7 @@ object LlamaEngine {
             isGenerating = true
             return try {
                 val raw = nativeGenerate(nativeHandle, prompt, nPredict, temp, repeatPenalty)
-                val cleaned = raw.trim()
-                    .removePrefix("<|eot_id|>")
-                    .removePrefix("<|end|>")
-                    .trim()
-                    .ifBlank { null }
-                cleaned
+                cleanNativeOutput(raw)
             } catch (e: Throwable) {
                 Log.e(TAG, "generate() threw exception", e)
                 null
@@ -159,6 +172,70 @@ object LlamaEngine {
             }
         }
     }
+
+    /**
+     * Structured-chat counterpart to generate() (structured-chat-template-seam
+     * / Qwen migration Step 2A). Same locking/readiness/isGenerating guard,
+     * same output cleanup, same nPredict/temp/repeatPenalty defaults --
+     * differs only in what crosses the JNI boundary: an ordered list of
+     * role-tagged ChatMessage entries instead of one pre-formatted flat
+     * string. Model-specific formatting (role tags, special tokens, chat
+     * template) happens natively, using whichever GGUF is currently
+     * loaded's own embedded chat template -- see
+     * scout_llama_jni.cpp's applyModelChatTemplate(). This function and its
+     * caller never know or care which model that is.
+     *
+     * Returns null if the native side reports a failure -- including the
+     * loaded model having no usable embedded chat template -- exactly the
+     * same "generation failed" contract generate() already has, never a
+     * hand-built fallback prompt.
+     */
+    fun generateChat(
+        messages: List<ChatMessage>,
+        nPredict: Int = 150,
+        temp: Float = 0.6f,
+        repeatPenalty: Float = 1.12f
+    ): String? {
+        if (messages.isEmpty()) {
+            Log.w(TAG, "generateChat() called with no messages.")
+            return null
+        }
+        nativeLock.withLock {
+            if (isGenerating) {
+                Log.w(TAG, "generateChat() blocked because another generation is already running.")
+                return null
+            }
+            if (!isReady || nativeHandle == 0L) {
+                Log.w(TAG, "generateChat() called but engine not ready.")
+                return null
+            }
+
+            isGenerating = true
+            return try {
+                val roles = Array(messages.size) { messages[it].role }
+                val contents = Array(messages.size) { messages[it].content }
+                val raw = nativeGenerateChat(nativeHandle, roles, contents, nPredict, temp, repeatPenalty)
+                cleanNativeOutput(raw)
+            } catch (e: Throwable) {
+                Log.e(TAG, "generateChat() threw exception", e)
+                null
+            } finally {
+                isGenerating = false
+            }
+        }
+    }
+
+    // Shared by generate() and generateChat() -- identical post-processing
+    // either way, since both ultimately return the same runGeneration()
+    // output shape from the native side. Extracted only to avoid duplicating
+    // this exact logic twice; behavior for generate()'s existing callers is
+    // unchanged.
+    private fun cleanNativeOutput(raw: String): String? =
+        raw.trim()
+            .removePrefix("<|eot_id|>")
+            .removePrefix("<|end|>")
+            .trim()
+            .ifBlank { null }
 
     /**
      * Dev-only performance benchmark. Runs the same generation core as
