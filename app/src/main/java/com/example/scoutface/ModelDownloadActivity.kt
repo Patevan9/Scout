@@ -49,6 +49,12 @@ class ModelDownloadActivity : AppCompatActivity() {
         // download (e.g. ~800MB) would reach, so an incomplete Qwen download
         // can no longer be mistaken for a complete one.
         const val MIN_MODEL_BYTES = 1_000_000_000L
+        // Real Qwen release asset size, independently verified -- used only to
+        // size the free-space preflight check below (startDownload()), not as
+        // the completeness floor above (MIN_MODEL_BYTES stays a bit more
+        // forgiving, in case a future re-upload's exact byte count differs
+        // slightly).
+        private const val EXPECTED_DOWNLOAD_BYTES = 1_117_320_736L
         // True only when a real network download actually happened this run -- lets
         // MainActivity distinguish "just downloaded" (speak the first-time/again line)
         // from an ordinary launch that only needed to load an already-present file.
@@ -232,16 +238,23 @@ class ModelDownloadActivity : AppCompatActivity() {
         }
         val stat = android.os.StatFs(dir.absolutePath)
         val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
-        // Qwen migration Step 3: the real download is 1,117,320,736 bytes, not
-        // TinyLlama's ~669MB -- was MIN_MODEL_BYTES + 50_000_000L (~550MB),
-        // sized for the old file. Headroom is kept generous (300MB) rather than
-        // the bare minimum: the download destination alone needs the full
-        // ~1.12GB, and this is only a pre-flight sanity check, not a guarantee
-        // -- DownloadManager's own STATUS_FAILED handling (see pollProgress())
-        // remains the real backstop if a device runs out of space mid-download.
-        if (freeBytes < MIN_MODEL_BYTES + 300_000_000L) {
-            android.util.Log.e("ScoutBrain", "Not enough storage: dir=${dir.absolutePath} freeBytes=$freeBytes")
-            sizeText.text = "Not enough storage — free up at least 1.3 GB and reopen Scout."
+        // Qwen migration Step 3 correction: a single EXPECTED_DOWNLOAD_BYTES
+        // headroom undercounts the real requirement. The download lands in
+        // the external-files destination (`dir` here) first; once complete,
+        // copyIntoFilesDirThenLoad() copies a SECOND full copy into filesDir
+        // and never deletes the external one -- both copies exist
+        // permanently side by side. filesDir (internal storage) and
+        // getExternalFilesDir(null) (app-specific external storage) are the
+        // same physical flash on the overwhelming majority of Android
+        // devices (no removable SD card), so the real peak/steady-state
+        // requirement on that volume is room for BOTH copies at once, not
+        // just one download. The displayed message is derived from the same
+        // computed value so it can't drift from the actual check again.
+        val requiredFreeBytes = 2 * EXPECTED_DOWNLOAD_BYTES + 300_000_000L
+        if (freeBytes < requiredFreeBytes) {
+            android.util.Log.e("ScoutBrain",
+                "Not enough storage: dir=${dir.absolutePath} freeBytes=$freeBytes required=$requiredFreeBytes")
+            sizeText.text = "Not enough storage — free up at least ${formatBytes(requiredFreeBytes)} and reopen Scout."
             percentText.text = ""
             return
         }
