@@ -1065,9 +1065,9 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage(
                 "OFFLINE AI\n\n" +
 
-                "TinyLlama 1.1B Chat v1.0\n" +
-                "Apache 2.0 · Copyright © Zhang Peiyuan et al., Singapore University of Technology and Design\n" +
-                "github.com/jzhang38/TinyLlama\n\n" +
+                "Qwen2.5 1.5B Instruct\n" +
+                "Apache 2.0 · Copyright © Alibaba Cloud, Qwen Team\n" +
+                "github.com/QwenLM/Qwen2.5\n\n" +
 
                 "llama.cpp\n" +
                 "MIT License · Copyright © Georgi Gerganov and contributors\n" +

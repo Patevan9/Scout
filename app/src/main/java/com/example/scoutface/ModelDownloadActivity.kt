@@ -23,21 +23,32 @@ import java.io.File
 
 // The one gate MainActivity waits on before it appears, asks permissions, or does
 // anything else -- covers three phases in order: Downloading (only if the model file
-// isn't present anywhere locally), Loading (TinyLlama into memory, triggered from here
-// since that's the only reliable way to avoid a deadlock with MainActivity's own boot),
-// and a brief Preparing beat before handing control back. Never finishes with RESULT_OK
-// until LlamaEngine.isReady is actually true.
+// isn't present anywhere locally), Loading (the offline brain into memory, triggered
+// from here since that's the only reliable way to avoid a deadlock with MainActivity's
+// own boot), and a brief Preparing beat before handing control back. Never finishes
+// with RESULT_OK until LlamaEngine.isReady is actually true.
 class ModelDownloadActivity : AppCompatActivity() {
 
     companion object {
-        const val MODEL_FILENAME    = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+        // Qwen migration Step 3 -- active local model. Was
+        // "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"; MainActivity.MODEL_FILENAME
+        // references this constant directly (see MainActivity.kt) rather than
+        // carrying its own copy, so there is exactly one source of truth for
+        // this filename across the app.
+        const val MODEL_FILENAME    = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
         // Hosted as a GitHub Release asset on this repo. Re-upload and update this URL
         // if the model file ever changes or the release is deleted.
         const val MODEL_DOWNLOAD_URL =
             "https://github.com/Patevan9/Scout/releases/download/model-v1/$MODEL_FILENAME"
         private const val PREF_DOWNLOAD_ID = "model_download_id"
-        // Minimum byte size for a valid Q4_K_M download — anything below this is truncated.
-        const val MIN_MODEL_BYTES = 500_000_000L
+        // Minimum byte size for a valid Q4_K_M download — anything below this is
+        // truncated. Qwen migration Step 3: the real release asset is
+        // 1,117,320,736 bytes (independently verified). Was 500_000_000L, sized
+        // for TinyLlama's ~669MB file; raised to a conservative floor still well
+        // below Qwen's true size but well above what a truncated/partial
+        // download (e.g. ~800MB) would reach, so an incomplete Qwen download
+        // can no longer be mistaken for a complete one.
+        const val MIN_MODEL_BYTES = 1_000_000_000L
         // True only when a real network download actually happened this run -- lets
         // MainActivity distinguish "just downloaded" (speak the first-time/again line)
         // from an ordinary launch that only needed to load an already-present file.
@@ -221,9 +232,16 @@ class ModelDownloadActivity : AppCompatActivity() {
         }
         val stat = android.os.StatFs(dir.absolutePath)
         val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
-        if (freeBytes < MIN_MODEL_BYTES + 50_000_000L) {
+        // Qwen migration Step 3: the real download is 1,117,320,736 bytes, not
+        // TinyLlama's ~669MB -- was MIN_MODEL_BYTES + 50_000_000L (~550MB),
+        // sized for the old file. Headroom is kept generous (300MB) rather than
+        // the bare minimum: the download destination alone needs the full
+        // ~1.12GB, and this is only a pre-flight sanity check, not a guarantee
+        // -- DownloadManager's own STATUS_FAILED handling (see pollProgress())
+        // remains the real backstop if a device runs out of space mid-download.
+        if (freeBytes < MIN_MODEL_BYTES + 300_000_000L) {
             android.util.Log.e("ScoutBrain", "Not enough storage: dir=${dir.absolutePath} freeBytes=$freeBytes")
-            sizeText.text = "Not enough storage — free up at least 700 MB and reopen Scout."
+            sizeText.text = "Not enough storage — free up at least 1.3 GB and reopen Scout."
             percentText.text = ""
             return
         }

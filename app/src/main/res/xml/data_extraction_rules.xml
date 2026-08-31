@@ -4,9 +4,11 @@
     face-recognition embedding, or a conversation/diagnostic record should ever
     leave this device via Android's Auto Backup to Google Drive, since that
     would contradict Scout's own privacy promise that this data stays local.
-    The TinyLlama model file, crash log, and diagnostic report are excluded
-    too, purely because they're large/regenerable, not because they're
-    sensitive.
+    The offline-brain model file, crash log, and diagnostic report are
+    excluded too, purely because they're large/regenerable, not because
+    they're sensitive. Qwen migration Step 3: Qwen is now the active model
+    (~1.12GB); the old TinyLlama filename is kept excluded too since an
+    upgraded installation may still have that file present on disk.
 
     Device-transfer (moving to a new phone the same user owns) is deliberately
     less strict: personal facts and conversation/journal history are allowed to
@@ -24,6 +26,7 @@
         <exclude domain="database" path="scout_convo.db"/>
         <exclude domain="database" path="scout_journal.db"/>
         <exclude domain="database" path="scout_diagnostic.db"/>
+        <exclude domain="file" path="qwen2.5-1.5b-instruct-q4_k_m.gguf"/>
         <exclude domain="file" path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"/>
         <exclude domain="file" path="scout_crash.txt"/>
         <exclude domain="file" path="diag/diag_report.txt"/>
@@ -32,6 +35,7 @@
         <exclude domain="sharedpref" path="scout_prefs.xml"/>
         <exclude domain="database" path="scout_people.db"/>
         <exclude domain="database" path="scout_diagnostic.db"/>
+        <exclude domain="file" path="qwen2.5-1.5b-instruct-q4_k_m.gguf"/>
         <exclude domain="file" path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"/>
         <exclude domain="file" path="scout_crash.txt"/>
         <exclude domain="file" path="diag/diag_report.txt"/>
