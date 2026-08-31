@@ -5493,7 +5493,7 @@ Respond only with Scout's next reply.
                     }
                     busyBrainState.complete(myBusyBrainGenerationId)
                     refreshThinkingFaceState()
-                    return@generateAsync
+                    return@generateChatAsync
                 }
 
                 // Busy-Brain PR 2: deliverAiResult() marks the question
