@@ -11,6 +11,10 @@
     <exclude domain="database" path="scout_convo.db"/>
     <exclude domain="database" path="scout_journal.db"/>
     <exclude domain="database" path="scout_diagnostic.db"/>
+    <!-- Qwen migration Step 3: Qwen is now the active local model
+         (~1.12GB); the TinyLlama exclusion is kept too since an upgraded
+         installation may still have that old file present on disk. -->
+    <exclude domain="file" path="qwen2.5-1.5b-instruct-q4_k_m.gguf"/>
     <exclude domain="file" path="tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"/>
     <exclude domain="file" path="scout_crash.txt"/>
     <exclude domain="file" path="diag/diag_report.txt"/>

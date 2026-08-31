@@ -1840,10 +1840,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }, 8_000L)
     }
 
-    private val MODEL_FILENAME = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    // Qwen migration Step 3: was its own separate literal copy of the
+    // filename ("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"), independently of
+    // ModelDownloadActivity's own MODEL_FILENAME constant -- two sources of
+    // truth for the same string that had to be kept in sync by hand. Now
+    // references ModelDownloadActivity's constant directly instead, so
+    // there is exactly one place this filename is defined.
+    private val MODEL_FILENAME = ModelDownloadActivity.MODEL_FILENAME
 
     /**
-     * Copies the TinyLlama model from external storage into filesDir if it isn't there yet.
+     * Copies the offline brain model from external storage into filesDir if it isn't there yet.
      * Checks two source locations:
      *   1. App-specific external dir (/sdcard/Android/data/<pkg>/files/) — no permission needed
      *   2. Root external storage (/sdcard/) — requires READ_EXTERNAL_STORAGE (Android ≤12 only)
@@ -1897,10 +1903,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun startOfflineBrain() {
 
         // Delay 90 seconds so startup memory spike (camera, ML Kit, Gemini) settles
-        // before we add ~800MB for TinyLlama. Immediate load was killing Scout on A32.
+        // before we add the offline brain's own memory footprint (was sized for
+        // TinyLlama's ~800MB -- Qwen migration Step 3 does not re-tune this value,
+        // only its wording; see the freeMb<800L check below).
         // NOTE: this delay/value is untouched by the A32 startup-stagger work -- not
-        // being re-tuned here, per explicit instruction not to touch TinyLlama loading.
-        logStartupTiming("tinyllama_load_scheduled delay=90000ms")
+        // being re-tuned here, per explicit instruction not to touch offline-brain
+        // loading behavior in this step.
+        logStartupTiming("offline_brain_load_scheduled delay=90000ms")
         handler.postDelayed({ tryLoadOfflineBrain() }, 90_000L)
         android.util.Log.i("ScoutBrain", "Offline brain load scheduled for 90s after startup")
 
@@ -1914,24 +1923,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val memInfo = android.app.ActivityManager.MemoryInfo()
         actMgr.getMemoryInfo(memInfo)
         val freeMb = memInfo.availMem / 1_048_576L
-        android.util.Log.i("ScoutBrain", "Free RAM before TinyLlama load: ${freeMb}MB")
+        android.util.Log.i("ScoutBrain", "Free RAM before offline brain load: ${freeMb}MB")
 
+        // Qwen migration Step 3: this 800MB floor was sized for TinyLlama and is
+        // deliberately NOT re-tuned here -- Qwen's real GGUF is larger (~1.06GiB
+        // on disk) and its resident memory footprint while loaded has not been
+        // measured yet. Left unchanged per explicit instruction not to tune
+        // parameters preemptively; flagged in this PR's report for a real-device
+        // check rather than guessed at here.
         if (freeMb < 800L) {
-            android.util.Log.e("ScoutBrain", "Skipping TinyLlama — only ${freeMb}MB free (need 800MB)")
+            android.util.Log.e("ScoutBrain", "Skipping offline brain load — only ${freeMb}MB free (need 800MB)")
             return
         }
 
         val candidates = listOf(
-            java.io.File(filesDir, "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),
-            java.io.File("/data/data/com.example.scoutface/files/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
+            java.io.File(filesDir, MODEL_FILENAME),
+            java.io.File("/data/data/com.example.scoutface/files/$MODEL_FILENAME")
         )
         val modelFile = candidates.firstOrNull { it.exists() && it.length() >= ModelDownloadActivity.MIN_MODEL_BYTES }
         if (modelFile == null) {
-            android.util.Log.e("ScoutBrain", "TinyLlama model file not found or is incomplete")
+            android.util.Log.e("ScoutBrain", "Offline brain model file not found or is incomplete")
             return
         }
 
-        android.util.Log.i("ScoutBrain", "Loading TinyLlama: ${modelFile.name} (${freeMb}MB free)")
+        android.util.Log.i("ScoutBrain", "Loading offline brain: ${modelFile.name} (${freeMb}MB free)")
 
         val llamaLoadStart = System.currentTimeMillis()
         // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
@@ -1940,7 +1955,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val loadMs = System.currentTimeMillis() - llamaLoadStart
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
-            logStartupTiming("tinyllama_load_done success=$success ms=$loadMs")
+            logStartupTiming("offline_brain_load_done success=$success ms=$loadMs")
 
             // The first-time/again announcement now lives in modelDownloadLauncher's
             // callback, which is the only place that reliably knows a real download
