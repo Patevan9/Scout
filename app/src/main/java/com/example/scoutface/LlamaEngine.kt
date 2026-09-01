@@ -1,6 +1,8 @@
 package com.example.scoutface
 
 import android.util.Log
+import com.example.scoutface.brain.ChatDiagnosticParser
+import com.example.scoutface.brain.ChatDiagnosticSummary
 import com.example.scoutface.brain.ChatMessage
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -17,6 +19,16 @@ object LlamaEngine {
         private set
 
     @Volatile var isLoading: Boolean = false
+        private set
+
+    // Fold 7 Qwen investigation, diagnostic-only: the absolute path of the
+    // model file that actually succeeded in loading (set only on a real
+    // successful nativeLoad(), never on an attempted-but-failed one). Exists
+    // purely so the hidden developer diagnostic screen can show the exact
+    // loaded model without inferring it from a filename constant or a stale
+    // diagnostic label -- read-only from outside this object, no effect on
+    // loading itself.
+    @Volatile var loadedModelPath: String? = null
         private set
 
     @Volatile private var isGenerating: Boolean = false
@@ -63,6 +75,14 @@ object LlamaEngine {
         nThreadsBatch: Int
     ): String
     private external fun nativeFree(handle: Long)
+
+    // Fold 7 Qwen investigation, diagnostic-only reads. Never called from any
+    // production generation path -- see getLastChatDiagnostics() below, reached
+    // only from the hidden developer diagnostic screen. Read-only: neither
+    // function takes any input, and nothing on the native side branches on
+    // whether/when these are called (see scout_llama_jni.cpp's g_chatDiag).
+    private external fun nativeGetLastChatDiagnosticsSummary(): String
+    private external fun nativeGetLastChatDiagnosticPrompt(): String
 
     /**
      * One benchmark run's measured performance -- never includes the generated
@@ -131,6 +151,7 @@ object LlamaEngine {
                 if (handle != 0L) {
                     nativeHandle = handle
                     isReady = true
+                    loadedModelPath = modelFile.absolutePath
                     Log.i(TAG, "Offline brain ready.")
                     true
                 } else {
@@ -347,5 +368,44 @@ object LlamaEngine {
         isReady -> "Offline brain: ready"
         isLoading -> "Offline brain: loading"
         else -> "Offline brain: not loaded"
+    }
+
+    /**
+     * Fold 7 Qwen investigation, diagnostic-only. Reads the most recent
+     * production chat-template generation's numeric/boolean details, as
+     * captured natively by nativeGenerateChat() itself (see
+     * scout_llama_jni.cpp's g_chatDiag) -- does not trigger a generation,
+     * does not touch nativeLock/isGenerating, and cannot race with or affect
+     * an in-flight generateChat() call. Returns null only if the native
+     * summary string is malformed/unreadable (see ChatDiagnosticParser);
+     * `valid=false` inside a successfully-parsed result means no production
+     * chat generation has completed yet this process lifetime, which is a
+     * normal state, not a parse failure.
+     */
+    fun getLastChatDiagnosticsSummary(): ChatDiagnosticSummary? {
+        return try {
+            ChatDiagnosticParser.parse(nativeGetLastChatDiagnosticsSummary())
+        } catch (e: Throwable) {
+            Log.e(TAG, "getLastChatDiagnosticsSummary() threw", e)
+            null
+        }
+    }
+
+    /**
+     * Fold 7 Qwen investigation, diagnostic-only. The exact rendered prompt
+     * string from the most recent production chat-template generation --
+     * empty if none has completed yet this process lifetime. Same
+     * no-generation-side-effect guarantee as getLastChatDiagnosticsSummary()
+     * above. Never logged, never written to DiagnosticDb or any file by this
+     * function -- callers (the hidden developer diagnostic screen) are
+     * responsible for keeping it that way.
+     */
+    fun getLastChatDiagnosticPrompt(): String {
+        return try {
+            nativeGetLastChatDiagnosticPrompt()
+        } catch (e: Throwable) {
+            Log.e(TAG, "getLastChatDiagnosticPrompt() threw", e)
+            ""
+        }
     }
 }

@@ -482,6 +482,11 @@ class SettingsActivity : AppCompatActivity() {
             diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run TinyLlama thread-count benchmarks") {
                 startActivity(Intent(this, LlamaBenchmarkActivity::class.java))
             })
+            // Fold 7 Qwen investigation diagnostic -- same hidden-unlock gate as
+            // the row above, deliberately not a separate unlock of its own.
+            diagRows.add(navRow("Chat Template Diagnostic (Dev)", "", "Inspect the rendered prompt from the last real reply") {
+                startActivity(Intent(this, ChatDiagnosticActivity::class.java))
+            })
         }
         body.addView(cardGroup(*diagRows.toTypedArray()))
 

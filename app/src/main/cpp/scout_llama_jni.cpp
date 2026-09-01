@@ -12,6 +12,7 @@
 #include <dlfcn.h>
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 
 #include "scout_llama_api.h"
 
@@ -23,6 +24,30 @@ struct ScoutModel {
     llama_model*   model = nullptr;
     llama_context* ctx   = nullptr;
 };
+
+// ── Dev-only chat-template diagnostic snapshot (Fold 7 Qwen investigation) ──
+// Populated as a side effect at the end of every nativeGenerateChat() call
+// that reaches a successful template render -- purely additive: nothing
+// here is read by, or has any influence on, generation itself. Every field
+// is a COPY taken from values already fully computed for the real call;
+// nothing here can alter what's passed to runGeneration() (see the capture
+// sites in nativeGenerateChat() below). In-memory only, process-lifetime
+// only, overwritten by the next chat generation -- never written to
+// DiagnosticDb, scout_crash.txt, or any file. The mutex only protects this
+// struct's own read (from the dev diagnostic screen's UI thread) against
+// its write (from LlamaEngine's background executor thread); it has no
+// bearing on and does not participate in generation's own existing
+// nativeLock/isGenerating serialization on the Kotlin side.
+struct ChatDiagnosticSnapshot {
+    bool        valid = false;
+    std::string renderedPrompt;
+    int         nMessages = 0;
+    int         nPromptTokens = 0;
+    int         nGeneratedTokens = 0;
+    bool        stoppedByEog = false;
+};
+static std::mutex g_chatDiagMutex;
+static ChatDiagnosticSnapshot g_chatDiag;
 
 static std::string getLibDir() {
     Dl_info info;
@@ -79,6 +104,13 @@ struct GenResult {
     // report it, rather than instrumentation having to be added at the
     // same time as the reuse logic itself.
     bool   ctx_reused = false;
+    // Fold 7 Qwen investigation, diagnostic-only field: true iff the
+    // generation loop below stopped because llama_vocab_is_eog() fired,
+    // false if it instead ran to nPredict steps. Recorded at exactly the
+    // same break point that already existed -- does not change stopping
+    // behavior, only reports which of the two ways the loop already exits
+    // actually happened.
+    bool   stopped_by_eog = false;
     bool   ok = false;
 };
 
@@ -234,7 +266,7 @@ static GenResult runGeneration(
             }
         }
 
-        if (llama_vocab_is_eog(vocab, next_token)) break;
+        if (llama_vocab_is_eog(vocab, next_token)) { r.stopped_by_eog = true; break; }
 
         int len = llama_token_to_piece(
                 vocab, next_token, piece, sizeof(piece)-1, 0, false);
@@ -546,6 +578,35 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerateChat(
         return env->NewStringUTF("");
     }
 
+    // Fold 7 Qwen investigation, diagnostic-only capture: a COPY of the
+    // already-fully-rendered `prompt` string, taken here purely because
+    // this is the earliest point after llama_chat_apply_template() has
+    // succeeded. `prompt` itself is never modified by this block, and the
+    // exact same `prompt` local is what's passed to runGeneration() two
+    // statements below -- this cannot alter what generation receives.
+    //
+    // Review correction: also reset valid/nPromptTokens/nGeneratedTokens/
+    // stoppedByEog to their "no completed result yet" values in this same
+    // locked block. Without this, a reader (ChatDiagnosticActivity) could
+    // observe a torn snapshot during generation -- this turn's new
+    // renderedPrompt/nMessages paired with the PREVIOUS turn's still-stale
+    // valid/token/EOG fields, since those aren't overwritten until
+    // runGeneration() returns below. The mutex only ever prevented a
+    // concurrent read from tearing a single field's memory; it never made
+    // the two capture blocks together logically atomic as one snapshot.
+    // Resetting valid=false here means a reader mid-generation now
+    // correctly sees "no completed result for this turn yet" instead of a
+    // mismatched prompt/result pairing.
+    {
+        std::lock_guard<std::mutex> lock(g_chatDiagMutex);
+        g_chatDiag.valid = false;
+        g_chatDiag.renderedPrompt = prompt;
+        g_chatDiag.nMessages = (int)nRoles;
+        g_chatDiag.nPromptTokens = 0;
+        g_chatDiag.nGeneratedTokens = 0;
+        g_chatDiag.stoppedByEog = false;
+    }
+
     LOGI("nativeGenerateChat: START n_messages=%d formatted_prompt_len=%zu nPredict=%d temp=%.2f",
          (int)nRoles, prompt.size(), (int)nPredict, (double)temp);
 
@@ -560,7 +621,50 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerateChat(
          r.ok ? 1 : 0, r.text.size(), r.n_prompt, r.prefill_ms,
          r.ttft_ms, r.n_generated, r.gen_ms, r.total_ms, r.n_threads, r.n_threads_batch);
 
+    // Fold 7 Qwen investigation, diagnostic-only capture (continued): the
+    // generation-side fields only exist once runGeneration() has returned.
+    // Read-only w.r.t. `r` -- nothing here changes r.text, which is what
+    // gets returned to Kotlin immediately below, unchanged from before this
+    // diagnostic instrumentation existed.
+    {
+        std::lock_guard<std::mutex> lock(g_chatDiagMutex);
+        g_chatDiag.valid = r.ok;
+        g_chatDiag.nPromptTokens = r.n_prompt;
+        g_chatDiag.nGeneratedTokens = r.n_generated;
+        g_chatDiag.stoppedByEog = r.stopped_by_eog;
+    }
+
     return env->NewStringUTF(r.text.c_str());
+}
+
+// ── Dev-only chat-template diagnostic readers (Fold 7 Qwen investigation) ──
+// Read-only accessors for g_chatDiag, reached only from the hidden
+// developer diagnostic screen (see ChatDiagnosticActivity.kt) -- never
+// called from any production code path, never influence generation. Two
+// separate calls rather than one combined string: the rendered prompt is
+// arbitrary free text (may contain '=', ';', newlines -- anything a real
+// conversation can contain) and must not be packed into the same
+// delimited "key=value;..." line the numeric summary uses, or it could
+// corrupt/be corrupted by that format.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_scoutface_LlamaEngine_nativeGetLastChatDiagnosticsSummary(
+        JNIEnv* env, jobject)
+{
+    std::lock_guard<std::mutex> lock(g_chatDiagMutex);
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "valid=%d;n_messages=%d;prompt_len=%zu;n_prompt_tokens=%d;n_generated=%d;stopped_eog=%d",
+             g_chatDiag.valid ? 1 : 0, g_chatDiag.nMessages, g_chatDiag.renderedPrompt.size(),
+             g_chatDiag.nPromptTokens, g_chatDiag.nGeneratedTokens, g_chatDiag.stoppedByEog ? 1 : 0);
+    return env->NewStringUTF(buf);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_scoutface_LlamaEngine_nativeGetLastChatDiagnosticPrompt(
+        JNIEnv* env, jobject)
+{
+    std::lock_guard<std::mutex> lock(g_chatDiagMutex);
+    return env->NewStringUTF(g_chatDiag.renderedPrompt.c_str());
 }
 
 // Dev-only benchmark entry point -- gated behind a hidden developer unlock in
