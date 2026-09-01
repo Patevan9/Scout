@@ -123,8 +123,17 @@ class ChatDiagnosticActivity : AppCompatActivity() {
         summaryView.text = if (summary == null) {
             "Model path: $modelPath\n\nCould not read diagnostic summary (malformed native response)."
         } else if (!summary.valid) {
-            "Model path: $modelPath\n\nNo production chat generation has completed yet " +
-                "this session -- ask Scout something, then tap Refresh."
+            // valid=false covers two states that look the same from here and are
+            // deliberately not distinguished: no production reply has completed
+            // yet this session, OR one is currently in progress (the native side
+            // resets valid to false as soon as a new turn starts rendering its
+            // prompt, specifically so this screen never shows a completed-looking
+            // result that's actually left over from the PREVIOUS turn while a new
+            // one is still running).
+            "Model path: $modelPath\n\nNo completed reply to show yet -- either Scout " +
+                "hasn't answered anything this session, or it's still generating a " +
+                "reply right now. Ask Scout something (or wait for it to finish), " +
+                "then tap Refresh."
         } else {
             "Model path: $modelPath\n" +
                 "Messages sent: ${summary.nMessages}\n" +

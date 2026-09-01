@@ -584,10 +584,27 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerateChat(
     // succeeded. `prompt` itself is never modified by this block, and the
     // exact same `prompt` local is what's passed to runGeneration() two
     // statements below -- this cannot alter what generation receives.
+    //
+    // Review correction: also reset valid/nPromptTokens/nGeneratedTokens/
+    // stoppedByEog to their "no completed result yet" values in this same
+    // locked block. Without this, a reader (ChatDiagnosticActivity) could
+    // observe a torn snapshot during generation -- this turn's new
+    // renderedPrompt/nMessages paired with the PREVIOUS turn's still-stale
+    // valid/token/EOG fields, since those aren't overwritten until
+    // runGeneration() returns below. The mutex only ever prevented a
+    // concurrent read from tearing a single field's memory; it never made
+    // the two capture blocks together logically atomic as one snapshot.
+    // Resetting valid=false here means a reader mid-generation now
+    // correctly sees "no completed result for this turn yet" instead of a
+    // mismatched prompt/result pairing.
     {
         std::lock_guard<std::mutex> lock(g_chatDiagMutex);
+        g_chatDiag.valid = false;
         g_chatDiag.renderedPrompt = prompt;
         g_chatDiag.nMessages = (int)nRoles;
+        g_chatDiag.nPromptTokens = 0;
+        g_chatDiag.nGeneratedTokens = 0;
+        g_chatDiag.stoppedByEog = false;
     }
 
     LOGI("nativeGenerateChat: START n_messages=%d formatted_prompt_len=%zu nPredict=%d temp=%.2f",
