@@ -49,6 +49,145 @@ struct ChatDiagnosticSnapshot {
 static std::mutex g_chatDiagMutex;
 static ChatDiagnosticSnapshot g_chatDiag;
 
+// ── Dev-only per-step sampling diagnostic (Fold 7 Qwen investigation, round 2) ──
+// Captures the first few generation steps' sampling internals -- enough to
+// distinguish "the model's own logits are already garbage" from "the logits
+// are sane but the sampler picks the wrong token." Populated only for the
+// PRODUCTION chat path: runGeneration() takes a new captureSampleDiagnostics
+// parameter, true only from nativeGenerateChat()'s call site, false from
+// nativeGenerate()'s and nativeGenerateBenchmark()'s -- this is the same
+// "Chat Template Diagnostic" scope PR #86 already established, extended
+// rather than widened to the benchmark path.
+//
+// Every value captured here is a COPY of something the EXISTING, UNCHANGED
+// sampling code already computed, or a read-only re-query of it (e.g.
+// llama_vocab_is_eog()/llama_token_to_piece() on the already-selected
+// token, or one extra read-only scan over the same `logits` pointer to find
+// the top candidates and the selected token's rank). Nothing here calls
+// rand(), and nothing here is read by or written back into next_token, sum,
+// rnd, or acc -- see the capture sites inside runGeneration() below for the
+// exact non-interference argument at each point. In-memory only, reset at
+// the start of each capturing runGeneration() call, overwritten by the next
+// one -- never written to DiagnosticDb, scout_crash.txt, or any file.
+static constexpr int kMaxSampleDiagSteps = 5;
+static constexpr int kMaxTopCandidates = 5;
+
+struct SampleTopCandidate {
+    int32_t     tokenId = -1;
+    std::string piece;   // already escaped for safe display -- see escapeForDiagDisplay()
+    float       logit = 0.0f;
+};
+
+struct SampleStepDiagnostic {
+    int32_t             tokenId = -1;
+    std::string         piece;
+    float               logit = 0.0f;
+    int                 rank = -1;   // 1-indexed count of tokens with a strictly higher logit, plus 1
+    bool                isEog = false;
+    bool                usedGreedySampling = false;
+    float               softmaxSum = 0.0f;
+    float               rnd = 0.0f;
+    float               accAtSelection = 0.0f;
+    bool                accReachedRnd = false;
+    SampleTopCandidate  top[kMaxTopCandidates];
+};
+
+struct SamplingDiagnosticSnapshot {
+    bool                  valid = false;
+    float                 temperature = 0.0f;
+    int                   nSteps = 0;
+    SampleStepDiagnostic  steps[kMaxSampleDiagSteps];
+};
+static std::mutex g_sampleDiagMutex;
+static SamplingDiagnosticSnapshot g_sampleDiag;
+
+// Escapes a raw token-piece byte string for safe on-screen display: control
+// bytes (embedded NUL, newlines, tabs, other C0 controls) become \xNN / \n /
+// \t; a literal quote or backslash is backslash-escaped; everything else --
+// including valid multi-byte UTF-8 sequences for any script -- passes
+// through completely unmodified, since seeing exactly what script/text the
+// model actually produced is the entire point of this diagnostic. Returns a
+// quoted string.
+static std::string escapeForDiagDisplay(const char* data, size_t len) {
+    std::string out;
+    out.reserve(len + 8);
+    out += '"';
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)data[i];
+        if (c == '"' || c == '\\') { out += '\\'; out += (char)c; }
+        else if (c == '\n') { out += "\\n"; }
+        else if (c == '\r') { out += "\\r"; }
+        else if (c == '\t') { out += "\\t"; }
+        else if (c < 0x20 || c == 0x7f) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "\\x%02X", c);
+            out += buf;
+        } else {
+            out += (char)c;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+static std::string tokenPieceForDiag(const struct llama_vocab* vocab, llama_token tok) {
+    char buf[256];
+    int len = llama_token_to_piece(vocab, tok, buf, sizeof(buf) - 1, 0, false);
+    if (len <= 0) return "\"\"";
+    return escapeForDiagDisplay(buf, (size_t)len);
+}
+
+// Diagnostic-only: records one step's already-final sampling result, plus a
+// read-only top-N/rank scan over the SAME `logits` pointer the real sampler
+// just finished using. Reads next_token/sum/rnd/acc's already-computed
+// values only to copy them; never writes back into any of them, and never
+// calls rand() -- cannot affect this or any later step's actual sampling.
+static void captureSampleDiagnosticStep(
+        const struct llama_vocab* vocab, const float* logits, int n_vocab,
+        int step, llama_token sampledToken, bool usedGreedy,
+        float softmaxSum, float rnd, float accAtSelection, bool accReachedRnd)
+{
+    SampleStepDiagnostic d;
+    d.tokenId = sampledToken;
+    d.piece = tokenPieceForDiag(vocab, sampledToken);
+    d.logit = (sampledToken >= 0 && sampledToken < n_vocab) ? logits[sampledToken] : 0.0f;
+    d.isEog = llama_vocab_is_eog(vocab, sampledToken);
+    d.usedGreedySampling = usedGreedy;
+    d.softmaxSum = softmaxSum;
+    d.rnd = rnd;
+    d.accAtSelection = accAtSelection;
+    d.accReachedRnd = accReachedRnd;
+
+    int rankCount = 0;
+    int topIdx[kMaxTopCandidates];
+    for (int i = 0; i < kMaxTopCandidates; i++) topIdx[i] = -1;
+    for (int v = 0; v < n_vocab; v++) {
+        float lv = logits[v];
+        if (lv > d.logit) rankCount++;
+        int insertAt = -1;
+        for (int i = 0; i < kMaxTopCandidates; i++) {
+            if (topIdx[i] == -1 || lv > logits[topIdx[i]]) { insertAt = i; break; }
+        }
+        if (insertAt >= 0) {
+            for (int i = kMaxTopCandidates - 1; i > insertAt; i--) topIdx[i] = topIdx[i - 1];
+            topIdx[insertAt] = v;
+        }
+    }
+    d.rank = rankCount + 1;
+    for (int i = 0; i < kMaxTopCandidates; i++) {
+        if (topIdx[i] < 0) continue;
+        d.top[i].tokenId = topIdx[i];
+        d.top[i].logit = logits[topIdx[i]];
+        d.top[i].piece = tokenPieceForDiag(vocab, topIdx[i]);
+    }
+
+    std::lock_guard<std::mutex> lock(g_sampleDiagMutex);
+    if (step >= 0 && step < kMaxSampleDiagSteps && step == g_sampleDiag.nSteps) {
+        g_sampleDiag.steps[step] = d;
+        g_sampleDiag.nSteps = step + 1;
+    }
+}
+
 static std::string getLibDir() {
     Dl_info info;
     memset(&info, 0, sizeof(info));
@@ -117,7 +256,13 @@ struct GenResult {
 static GenResult runGeneration(
         ScoutModel* sm, const std::string& prompt,
         int nPredict, float temp,
-        int nCtx, int nBatch, int nThreads, int nThreadsBatchOverride)
+        int nCtx, int nBatch, int nThreads, int nThreadsBatchOverride,
+        // Fold 7 Qwen investigation, round 2: true only from
+        // nativeGenerateChat()'s call site (see g_sampleDiag's own comment
+        // for why this stays scoped to the chat path, not widened to the
+        // benchmark). Purely gates whether the per-step diagnostic capture
+        // below runs at all -- when false, none of that code executes.
+        bool captureSampleDiagnostics = false)
 {
     using clock = std::chrono::steady_clock;
     GenResult r;
@@ -238,12 +383,39 @@ static GenResult runGeneration(
     int  cur_pos = n_prompt;
     bool haveFirstToken = false;
 
+    // Fold 7 Qwen investigation, round 2: reset the per-step sampling
+    // snapshot once, at the start of this call, only when this call is the
+    // one being diagnosed (the chat production path). Nothing about the
+    // generation loop below is affected by this reset -- it only zeroes a
+    // separate static struct nothing else reads.
+    if (captureSampleDiagnostics) {
+        std::lock_guard<std::mutex> lock(g_sampleDiagMutex);
+        g_sampleDiag = SamplingDiagnosticSnapshot{};
+        g_sampleDiag.valid = true;
+        g_sampleDiag.temperature = temp;
+    }
+
     for (int step = 0; step < nPredict; step++) {
         int logits_idx = (step == 0) ? lastPromptLogitsIdx : 0;
         float* logits = llama_get_logits_ith(sm->ctx, logits_idx);
         if (!logits) { LOGE("runGeneration: null logits step %d", step); break; }
 
         llama_token next_token = 0;
+        // Fold 7 Qwen investigation, round 2 -- diagnostic-only bookkeeping,
+        // hoisted to this scope purely so the capture call below (after the
+        // if/else) can see them. Every one of these is either a plain
+        // read/copy of a value the branch below already computes for its
+        // own purposes (sum/rnd/acc), or a single new bool
+        // (accReached, set alongside the existing break -- same iteration,
+        // same next_token value, same break timing, nothing else changed)
+        // recording something the existing code already decided but never
+        // remembered. None of this changes next_token, temp, or which
+        // branch runs.
+        bool  usedGreedySampling = (temp <= 0.0f);
+        float diagSoftmaxSum = 0.0f;
+        float diagRnd = 0.0f;
+        float diagAccAtSelection = 0.0f;
+        bool  diagAccReachedRnd = false;
         if (temp <= 0.0f) {
             float best = logits[0];
             for (int v = 1; v < n_vocab; v++)
@@ -260,10 +432,29 @@ static GenResult runGeneration(
             }
             float rnd = ((float)rand() / (float)RAND_MAX) * sum;
             float acc = 0.0f;
+            bool accReached = false;
             for (int v = 0; v < n_vocab; v++) {
                 acc += probs[v];
-                if (acc >= rnd) { next_token = v; break; }
+                if (acc >= rnd) { next_token = v; accReached = true; break; }
             }
+            diagSoftmaxSum = sum;
+            diagRnd = rnd;
+            diagAccAtSelection = acc;
+            diagAccReachedRnd = accReached;
+        }
+
+        // Fold 7 Qwen investigation, round 2: read-only observation of what
+        // the unmodified sampling code directly above already decided.
+        // Calls llama_vocab_is_eog()/llama_token_to_piece() again (both
+        // pure, side-effect-free vocab queries) and does one extra
+        // read-only scan over the same `logits` pointer for the top
+        // candidates/rank -- never touches next_token, never calls rand(),
+        // cannot change this or any later step's actual sampling. See
+        // captureSampleDiagnosticStep()'s own comment for detail.
+        if (captureSampleDiagnostics && step < kMaxSampleDiagSteps) {
+            captureSampleDiagnosticStep(vocab, logits, n_vocab, step, next_token,
+                                         usedGreedySampling, diagSoftmaxSum, diagRnd,
+                                         diagAccAtSelection, diagAccReachedRnd);
         }
 
         if (llama_vocab_is_eog(vocab, next_token)) { r.stopped_by_eog = true; break; }
@@ -508,7 +699,8 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerate(
     // matching prior behavior exactly -- only the benchmark path below overrides it.
     GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
                                  /*nCtx=*/2048, /*nBatch=*/512,
-                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0);
+                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0,
+                                 /*captureSampleDiagnostics=*/false);
 
     LOGI("nativeGenerate: DONE ok=%d output_len=%zu n_prompt=%d prefill_ms=%.0f "
          "ttft_ms=%.0f n_gen=%d gen_ms=%.0f total_ms=%.0f threads=%d threads_batch=%d",
@@ -611,10 +803,13 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerateChat(
          (int)nRoles, prompt.size(), (int)nPredict, (double)temp);
 
     // Exact same literals nativeGenerate() has always used (n_ctx=2048,
-    // n_batch=512, n_threads=2) -- unchanged by this step.
+    // n_batch=512, n_threads=2) -- unchanged by this step. captureSampleDiagnostics
+    // is true only here, at the real production call site (Fold 7 Qwen
+    // investigation, round 2) -- see g_sampleDiag's own comment.
     GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
                                  /*nCtx=*/2048, /*nBatch=*/512,
-                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0);
+                                 /*nThreads=*/2, /*nThreadsBatchOverride=*/0,
+                                 /*captureSampleDiagnostics=*/true);
 
     LOGI("nativeGenerateChat: DONE ok=%d output_len=%zu n_prompt=%d prefill_ms=%.0f "
          "ttft_ms=%.0f n_gen=%d gen_ms=%.0f total_ms=%.0f threads=%d threads_batch=%d",
@@ -667,6 +862,59 @@ Java_com_example_scoutface_LlamaEngine_nativeGetLastChatDiagnosticPrompt(
     return env->NewStringUTF(g_chatDiag.renderedPrompt.c_str());
 }
 
+// Fold 7 Qwen investigation, round 2 -- dev-only reader for the per-step
+// sampling diagnostic. Builds one human-readable, already-formatted report
+// natively (no delimited format for Kotlin to parse -- this data nests too
+// much for that to stay simple/safe, and it only ever needs to be displayed,
+// never manipulated programmatically). Read-only against g_sampleDiag;
+// never triggers a generation, never touches LlamaEngine's own
+// nativeLock/isGenerating.
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_example_scoutface_LlamaEngine_nativeGetLastSampleDiagnosticsText(
+        JNIEnv* env, jobject)
+{
+    std::lock_guard<std::mutex> lock(g_sampleDiagMutex);
+    if (!g_sampleDiag.valid || g_sampleDiag.nSteps == 0) {
+        return env->NewStringUTF(
+            "(no sampling steps captured yet -- ask Scout something, then tap Refresh)");
+    }
+
+    std::string out;
+    char line[192];
+    snprintf(line, sizeof(line), "temperature=%.4f\ncaptured_steps=%d\n\n",
+             (double)g_sampleDiag.temperature, g_sampleDiag.nSteps);
+    out += line;
+
+    for (int i = 0; i < g_sampleDiag.nSteps; i++) {
+        const SampleStepDiagnostic& d = g_sampleDiag.steps[i];
+        snprintf(line, sizeof(line),
+                 "step %d: sampled_id=%d rank=%s eog=%d greedy=%d\n",
+                 i, d.tokenId, d.rank > 0 ? std::to_string(d.rank).c_str() : "?",
+                 d.isEog ? 1 : 0, d.usedGreedySampling ? 1 : 0);
+        out += line;
+        out += "  piece=" + d.piece + "\n";
+        snprintf(line, sizeof(line), "  logit=%.4f\n", (double)d.logit);
+        out += line;
+        if (!d.usedGreedySampling) {
+            snprintf(line, sizeof(line),
+                     "  sum=%.6g rnd=%.6g acc=%.6g acc_reached_rnd=%d\n",
+                     (double)d.softmaxSum, (double)d.rnd, (double)d.accAtSelection,
+                     d.accReachedRnd ? 1 : 0);
+            out += line;
+        }
+        out += "  top candidates:\n";
+        for (int t = 0; t < kMaxTopCandidates; t++) {
+            if (d.top[t].tokenId < 0) continue;
+            snprintf(line, sizeof(line), "    #%d id=%d logit=%.4f piece=",
+                     t + 1, d.top[t].tokenId, (double)d.top[t].logit);
+            out += line;
+            out += d.top[t].piece + "\n";
+        }
+        out += "\n";
+    }
+    return env->NewStringUTF(out.c_str());
+}
+
 // Dev-only benchmark entry point -- gated behind a hidden developer unlock in
 // SettingsActivity, never reachable by ordinary users. Runs the exact same
 // runGeneration() core as production (so results are representative of real
@@ -697,9 +945,12 @@ Java_com_example_scoutface_LlamaEngine_nativeGenerateBenchmark(
 
     // Same n_ctx/n_batch as production (2048/512) -- only thread counts vary --
     // so these numbers reflect the context size Scout actually runs with today.
+    // captureSampleDiagnostics stays false here -- this diagnostic is scoped
+    // to the chat production path only (see g_sampleDiag's own comment).
     GenResult r = runGeneration(sm, prompt, (int)nPredict, temp,
                                  /*nCtx=*/2048, /*nBatch=*/512,
-                                 (int)nThreads, (int)nThreadsBatch);
+                                 (int)nThreads, (int)nThreadsBatch,
+                                 /*captureSampleDiagnostics=*/false);
 
     if (!r.ok) {
         LOGE("nativeGenerateBenchmark: generation failed");

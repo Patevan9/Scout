@@ -25,18 +25,28 @@ import androidx.appcompat.app.AppCompatActivity
  * screen only ever READS that snapshot (LlamaEngine.getLastChatDiagnostics*());
  * it never triggers a generation itself and has no way to influence one.
  *
- * Privacy: the rendered prompt can contain real conversation content and
- * personal facts. This screen is intentionally NOT part of Scout's ordinary
- * Diagnostic Report, is never written to DiagnosticDb or any file, and holds
- * nothing beyond this Activity's own lifecycle -- closing it and reopening
- * re-reads the (still in-memory-only, native-side) snapshot fresh. The
- * prompt text is shown in a selectable TextView so a developer can copy it
- * on-device if needed, rather than this screen writing it anywhere itself.
+ * Round 2 (also Fold 7 Qwen investigation): also shows the first few
+ * generated steps' sampling internals -- sampled token, its logit and rank,
+ * the top-5 candidate logits, and the softmax sum/rnd/acc values the
+ * (unmodified) sampler already computed -- to distinguish "the model's own
+ * logits are already garbage" from "the logits are sane but the sampler
+ * picks the wrong token." See LlamaEngine.getLastSampleDiagnosticsText() /
+ * scout_llama_jni.cpp's g_sampleDiag.
+ *
+ * Privacy: both the rendered prompt and the sampled-token pieces can
+ * contain real conversation content and personal facts. This screen is
+ * intentionally NOT part of Scout's ordinary Diagnostic Report, is never
+ * written to DiagnosticDb or any file, and holds nothing beyond this
+ * Activity's own lifecycle -- closing it and reopening re-reads the (still
+ * in-memory-only, native-side) snapshots fresh. Text is shown in selectable
+ * TextViews so a developer can copy it on-device if needed, rather than
+ * this screen writing it anywhere itself.
  */
 class ChatDiagnosticActivity : AppCompatActivity() {
 
     private lateinit var summaryView: TextView
     private lateinit var promptView: TextView
+    private lateinit var sampleDiagView: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,6 +112,24 @@ class ChatDiagnosticActivity : AppCompatActivity() {
         }
         root.addView(promptView)
 
+        root.addView(TextView(this).apply {
+            text = "First few sampling steps (round 2 -- distinguishes bad logits from a " +
+                "bad sampler; selectable -- long-press to copy):"
+            textSize = 13f
+            setTextColor(txtSec)
+            setPadding(0, dp(16), 0, dp(4))
+            setLineSpacing(0f, 1.3f)
+        })
+
+        sampleDiagView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(accent)
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        root.addView(sampleDiagView)
+
         val scroll = ScrollView(this).apply {
             addView(root)
         }
@@ -145,6 +173,9 @@ class ChatDiagnosticActivity : AppCompatActivity() {
         }
 
         promptView.text = LlamaEngine.getLastChatDiagnosticPrompt()
+            .ifBlank { "(none captured yet)" }
+
+        sampleDiagView.text = LlamaEngine.getLastSampleDiagnosticsText()
             .ifBlank { "(none captured yet)" }
     }
 
