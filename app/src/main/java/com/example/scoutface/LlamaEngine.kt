@@ -83,6 +83,11 @@ object LlamaEngine {
     // whether/when these are called (see scout_llama_jni.cpp's g_chatDiag).
     private external fun nativeGetLastChatDiagnosticsSummary(): String
     private external fun nativeGetLastChatDiagnosticPrompt(): String
+    // Fold 7 Qwen investigation, round 2: dev-only read of the first few
+    // production sampling steps' internals -- see
+    // getLastSampleDiagnosticsText() below and scout_llama_jni.cpp's
+    // g_sampleDiag. Same no-side-effect guarantee as the two readers above.
+    private external fun nativeGetLastSampleDiagnosticsText(): String
 
     /**
      * One benchmark run's measured performance -- never includes the generated
@@ -405,6 +410,27 @@ object LlamaEngine {
             nativeGetLastChatDiagnosticPrompt()
         } catch (e: Throwable) {
             Log.e(TAG, "getLastChatDiagnosticPrompt() threw", e)
+            ""
+        }
+    }
+
+    /**
+     * Fold 7 Qwen investigation, round 2, dev-only. A pre-formatted,
+     * human-readable report of the first few sampling steps of the most
+     * recent production chat generation -- sampled token, its logit and
+     * rank, the top-5 candidate logits, and the softmax sum/rnd/acc values
+     * the (unmodified) sampler already computed. Built entirely natively;
+     * this function is a plain passthrough with no parsing on the Kotlin
+     * side, since the data only ever needs to be displayed, never
+     * manipulated programmatically. Same no-generation-side-effect
+     * guarantee as the two functions above: read-only, never touches
+     * nativeLock/isGenerating, cannot influence sampling.
+     */
+    fun getLastSampleDiagnosticsText(): String {
+        return try {
+            nativeGetLastSampleDiagnosticsText()
+        } catch (e: Throwable) {
+            Log.e(TAG, "getLastSampleDiagnosticsText() threw", e)
             ""
         }
     }
