@@ -101,13 +101,27 @@ struct SamplingDiagnosticSnapshot {
 static std::mutex g_sampleDiagMutex;
 static SamplingDiagnosticSnapshot g_sampleDiag;
 
-// Escapes a raw token-piece byte string for safe on-screen display: control
-// bytes (embedded NUL, newlines, tabs, other C0 controls) become \xNN / \n /
-// \t; a literal quote or backslash is backslash-escaped; everything else --
-// including valid multi-byte UTF-8 sequences for any script -- passes
-// through completely unmodified, since seeing exactly what script/text the
-// model actually produced is the entire point of this diagnostic. Returns a
-// quoted string.
+// Escapes a raw token-piece byte string for safe on-screen display, as
+// pure ASCII: control bytes (embedded NUL, newlines, tabs, other C0
+// controls) become \xNN / \n / \t; a literal quote or backslash is
+// backslash-escaped; printable ASCII (0x20-0x7E, excluding the quote/
+// backslash handled above) passes through readable. Every byte >= 0x80
+// also becomes \xNN.
+//
+// Review correction: this previously passed bytes >= 0x80 through
+// unmodified so multi-byte UTF-8 text stayed human-readable, but the
+// caller hands the assembled report to env->NewStringUTF(), which
+// requires *Modified* UTF-8 -- not standard UTF-8. Multi-byte sequences
+// for large swaths of real Qwen output (many emoji in particular, which
+// need a standard 4-byte UTF-8 sequence with no Modified-UTF-8
+// equivalent) are not valid Modified UTF-8, so passing them through
+// risked corrupting the JVM string for exactly the multilingual/emoji
+// content this diagnostic exists to inspect -- silently defeating its
+// own purpose. Hex-escaping every byte >= 0x80 instead guarantees the
+// string handed to NewStringUTF() is always plain ASCII (a strict
+// subset of Modified UTF-8), while the exact underlying byte values --
+// what actually matters for diagnosing this -- are still fully visible,
+// just as hex instead of a rendered glyph.
 static std::string escapeForDiagDisplay(const char* data, size_t len) {
     std::string out;
     out.reserve(len + 8);
@@ -118,7 +132,7 @@ static std::string escapeForDiagDisplay(const char* data, size_t len) {
         else if (c == '\n') { out += "\\n"; }
         else if (c == '\r') { out += "\\r"; }
         else if (c == '\t') { out += "\\t"; }
-        else if (c < 0x20 || c == 0x7f) {
+        else if (c < 0x20 || c == 0x7f || c >= 0x80) {
             char buf[8];
             snprintf(buf, sizeof(buf), "\\x%02X", c);
             out += buf;
