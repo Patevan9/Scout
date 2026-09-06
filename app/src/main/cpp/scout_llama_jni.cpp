@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <limits>
 
 #include "scout_llama_api.h"
 
@@ -200,6 +201,63 @@ static void captureSampleDiagnosticStep(
         g_sampleDiag.steps[step] = d;
         g_sampleDiag.nSteps = step + 1;
     }
+}
+
+// Fold 7 Qwen investigation, round 7 -- raw-logits boundary diagnostic.
+// Observational only: reads the SAME `logits` pointer the production
+// sampling loop is about to use, at the exact existing llama_get_logits_ith()
+// call site, before any sampling math (greedy max-scan / softmax) touches a
+// single value. Classifies every one of the n_vocab entries by its raw
+// IEEE-754 bit pattern -- not by "%.4f"-rounded value, which cannot tell an
+// exact 0.0 apart from a uniform near-zero value -- into: exact +0.0
+// (0x00000000), exact -0.0 (0x80000000), other finite (incl. nonzero),
+// NaN, +Inf, -Inf. Also reports the finite min/max, the row sum in double
+// precision, and the raw hex of the first 8 entries. Read-only over
+// `logits`; writes nothing back, calls nothing that could affect sampling.
+// Gated at the call site to fire only once per nativeGenerateChat() call
+// (captureSampleDiagnostics == true, step == 0) -- never every step.
+static void logRawLogitsBoundaryDiagnostic(const float* logits, int n_vocab) {
+    int64_t posZeroCount = 0, negZeroCount = 0, otherFiniteCount = 0;
+    int64_t nanCount = 0, posInfCount = 0, negInfCount = 0;
+    float minFinite = std::numeric_limits<float>::infinity();
+    float maxFinite  = -std::numeric_limits<float>::infinity();
+    double sum = 0.0;
+
+    for (int v = 0; v < n_vocab; v++) {
+        float f = logits[v];
+        uint32_t bits;
+        memcpy(&bits, &f, sizeof(bits));
+
+        if (bits == 0x00000000u)      { posZeroCount++; }
+        else if (bits == 0x80000000u) { negZeroCount++; }
+
+        if (std::isnan(f)) {
+            nanCount++;
+        } else if (std::isinf(f)) {
+            if (f > 0.0f) posInfCount++; else negInfCount++;
+        } else {
+            // finite -- includes the +0.0/-0.0 cases counted above
+            if (bits != 0x00000000u && bits != 0x80000000u) otherFiniteCount++;
+            if (f < minFinite) minFinite = f;
+            if (f > maxFinite) maxFinite = f;
+        }
+        sum += (double)f;
+    }
+
+    uint32_t rawBits[8] = {0,0,0,0,0,0,0,0};
+    int nRaw = std::min(8, n_vocab);
+    for (int v = 0; v < nRaw; v++) memcpy(&rawBits[v], &logits[v], sizeof(uint32_t));
+
+    LOGI("zero_logits_diag(round7a): n_vocab=%d pos_zero=%lld neg_zero=%lld "
+         "other_finite=%lld nan=%lld pos_inf=%lld neg_inf=%lld "
+         "min_finite=%.9g max_finite=%.9g sum=%.9g "
+         "raw0_7=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X",
+         n_vocab,
+         (long long)posZeroCount, (long long)negZeroCount, (long long)otherFiniteCount,
+         (long long)nanCount, (long long)posInfCount, (long long)negInfCount,
+         (double)minFinite, (double)maxFinite, sum,
+         rawBits[0], rawBits[1], rawBits[2], rawBits[3],
+         rawBits[4], rawBits[5], rawBits[6], rawBits[7]);
 }
 
 static std::string getLibDir() {
@@ -413,6 +471,15 @@ static GenResult runGeneration(
         int logits_idx = (step == 0) ? lastPromptLogitsIdx : 0;
         float* logits = llama_get_logits_ith(sm->ctx, logits_idx);
         if (!logits) { LOGE("runGeneration: null logits step %d", step); break; }
+
+        // Fold 7 Qwen investigation, round 7 -- fires once per
+        // nativeGenerateChat() call (captureSampleDiagnostics is only ever
+        // true from that call site), for the first sampled row only (step
+        // == 0). Runs before any sampling math below reads `logits` --
+        // read-only, cannot affect next_token or anything after it.
+        if (captureSampleDiagnostics && step == 0) {
+            logRawLogitsBoundaryDiagnostic(logits, n_vocab);
+        }
 
         llama_token next_token = 0;
         // Fold 7 Qwen investigation, round 2 -- diagnostic-only bookkeeping,
