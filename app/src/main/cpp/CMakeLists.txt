@@ -20,7 +20,7 @@ target_link_libraries(
         -lllama-common
         -lggml
         -lggml-base
-        -lggml-cpu-android_armv8.2_2
+        -lggml-cpu-android_armv8.0_1
         android
         log
 )

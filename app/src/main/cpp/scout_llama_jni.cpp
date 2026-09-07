@@ -702,7 +702,7 @@ Java_com_example_scoutface_LlamaEngine_nativeLoad(
         backendsLoaded = ggml_backend_load_all_from_path(libDir.c_str());
         LOGI("nativeLoad: path load result: %d backend(s)", backendsLoaded);
         if (backendsLoaded == 0) {
-            std::string cpuPath = libDir + "/libggml-cpu-android_armv8.2_2.so";
+            std::string cpuPath = libDir + "/libggml-cpu-android_armv8.0_1.so";
             int r = ggml_backend_load(cpuPath.c_str());
             LOGI("nativeLoad: direct CPU load result: %d", r);
         }
