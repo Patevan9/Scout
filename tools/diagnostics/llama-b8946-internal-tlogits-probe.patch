@@ -1,0 +1,106 @@
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 8126249..7ce4e62 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -15,6 +15,7 @@
+ #include <cmath>
+ #include <cstring>
+ #include <limits>
++#include <atomic>
+ #include <stdexcept>
+ 
+ //
+@@ -1728,6 +1729,93 @@ int llama_context::decode(const llama_batch & batch_inp) {
+         //}
+ 
+         auto * t_logits = res->get_logits();
++
++        // ── Patevan Qwen zero-logits investigation: internal t_logits probe ──
++        // Diagnostic only, one-shot for the lifetime of the process. Observes
++        // the final logits tensor produced by the compute graph BEFORE the
++        // raw-logits extraction below copies it into the host `logits`
++        // buffer. A zero row seen here therefore originates at or before the
++        // graph output, rather than in llama.cpp's extraction/copy path.
++        //
++        // Deliberately does NOT read t_logits->data directly: the graph is
++        // dispatched with ggml_backend_sched_graph_compute_async(), so the
++        // scheduler is synchronized first, and the tensor is then read with
++        // ggml_backend_tensor_get(), which resolves views, honours the
++        // owning buffer's accessor and bounds-checks the read.
++        //
++        // Uses ggml_backend_sched_synchronize() and NOT
++        // llama_context::synchronize(): the latter mutates t_eval_us /
++        // t_p_eval_us / n_eval / n_p_eval and resets n_queued_tokens /
++        // t_compute_start_us, which would corrupt the perf counters the
++        // caller reads back via llama_perf_context(). At this point
++        // sched->is_alloc is still true, so sched_synchronize() cannot touch
++        // sched->next_copy either -- it only waits.
++        //
++        // Read-only throughout: nothing is written back into t_logits, the
++        // ubatch, or any context state, and the extraction below is
++        // untouched.
++        {
++            static std::atomic<bool> t_logits_diag_done{false};
++            bool t_logits_diag_expected = false;
++            if (t_logits && n_outputs > 0 &&
++                t_logits_diag_done.compare_exchange_strong(t_logits_diag_expected, true)) {
++                if (t_logits->type != GGML_TYPE_F32) {
++                    LLAMA_LOG_INFO("internal_t_logits_diag: unexpected tensor type %s -- not scanned\n",
++                            ggml_type_name(t_logits->type));
++                } else {
++                    ggml_backend_sched_synchronize(sched.get());
++
++                    const int64_t n_elem  = ggml_nelements(t_logits);
++                    const size_t  n_bytes = ggml_nbytes(t_logits);
++
++                    std::vector<float> tmp((size_t) n_elem);
++                    ggml_backend_tensor_get(t_logits, tmp.data(), 0, n_bytes);
++
++                    int64_t pos_zero = 0, neg_zero = 0, other_finite = 0;
++                    int64_t n_nan = 0, n_pos_inf = 0, n_neg_inf = 0;
++                    float   min_finite =  std::numeric_limits<float>::infinity();
++                    float   max_finite = -std::numeric_limits<float>::infinity();
++                    double  sum = 0.0;
++
++                    for (int64_t i = 0; i < n_elem; i++) {
++                        const float f = tmp[(size_t) i];
++                        uint32_t bits;
++                        memcpy(&bits, &f, sizeof(bits));
++
++                        if      (bits == 0x00000000u) { pos_zero++; }
++                        else if (bits == 0x80000000u) { neg_zero++; }
++
++                        if (std::isnan(f)) {
++                            n_nan++;
++                        } else if (std::isinf(f)) {
++                            if (f > 0.0f) { n_pos_inf++; } else { n_neg_inf++; }
++                        } else {
++                            // finite -- the +0.0/-0.0 cases are counted above
++                            if (bits != 0x00000000u && bits != 0x80000000u) { other_finite++; }
++                            if (f < min_finite) { min_finite = f; }
++                            if (f > max_finite) { max_finite = f; }
++                        }
++                        sum += (double) f;
++                    }
++
++                    uint32_t raw[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
++                    const int64_t n_raw = n_elem < 8 ? n_elem : 8;
++                    for (int64_t i = 0; i < n_raw; i++) {
++                        memcpy(&raw[i], &tmp[(size_t) i], sizeof(uint32_t));
++                    }
++
++                    LLAMA_LOG_INFO("internal_t_logits_diag: n_elem=%" PRId64 " ne0=%" PRId64 " ne1=%" PRId64
++                            " n_outputs=%d bytes=%zu pos_zero=%" PRId64 " neg_zero=%" PRId64
++                            " other_finite=%" PRId64 " nan=%" PRId64 " pos_inf=%" PRId64 " neg_inf=%" PRId64
++                            " min_finite=%.9g max_finite=%.9g sum=%.9g"
++                            " raw0_7=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X\n",
++                            n_elem, t_logits->ne[0], t_logits->ne[1], (int) n_outputs, n_bytes,
++                            pos_zero, neg_zero, other_finite, n_nan, n_pos_inf, n_neg_inf,
++                            (double) min_finite, (double) max_finite, sum,
++                            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
++                }
++            }
++        }
+         auto * t_embd   = cparams.embeddings ? res->get_embd() : nullptr;
+ 
+         if (t_embd && res->get_embd_pooled()) {
