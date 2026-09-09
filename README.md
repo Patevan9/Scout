@@ -1,5 +1,5 @@
-# Scout
-Scout — A private, local-first AI companion that lives on your device, not in the cloud.
+# Patevan
+Patevan — A private, local-first AI companion that lives on your device, not in the cloud.
 Scout
 A private, local-first AI companion for Android.
 Scout is designed to be a helpful companion that runs primarily on your device, respecting privacy while providing voice interaction, memory, and intelligent assistance.
@@ -33,7 +33,7 @@ Created by Patrick Lippy through Lippy Robotics Lab.
 
 ## Development with OpenAI
 
-Scout was developed with assistance from OpenAI tools throughout the project.
+Patevan was developed with assistance from OpenAI tools throughout the project.
 
 ### GPT-5
 GPT-5 was used as a development assistant to:
