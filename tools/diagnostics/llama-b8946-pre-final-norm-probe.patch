@@ -1,0 +1,119 @@
+diff --git a/src/models/qwen2.cpp b/src/models/qwen2.cpp
+--- a/src/models/qwen2.cpp
++++ b/src/models/qwen2.cpp
+@@ -84,6 +84,8 @@
+     }
+     cur = inpL;
+ 
++    cb(cur, "pre_final_norm", -1);
++
+     cur = build_norm(cur,
+             model.output_norm, NULL,
+             LLM_NORM_RMS, -1);
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1816,6 +1816,103 @@
+                 }
+             }
+         }
++
++        // ── Patevan Qwen zero-logits investigation: pre-final-norm probe ──
++        // Diagnostic only, one-shot for the lifetime of the process. Observes
++        // `inpL` -- the transformer stack's final hidden state -- at the
++        // exact point in src/models/qwen2.cpp where it is about to feed the
++        // final RMSNorm (`build_norm(cur, model.output_norm, ...)`).
++        // Retrieved by name via ggml_graph_get_tensor(), matching the marker
++        // `cb(cur, "pre_final_norm", -1)` inserted immediately after
++        // `cur = inpL;` in qwen2.cpp -- a naming call on an existing node,
++        // not a new graph node.
++        //
++        // Round 9B/10 showed t_logits and result_norm both entirely zero.
++        // This answers whether that zero already exists in inpL (failure is
++        // upstream, inside the 28-layer stack) or whether inpL is healthy
++        // and final RMSNorm/output_norm destroys it.
++        //
++        // Same safety discipline as Round 9B/10: scheduler is synchronized
++        // with ggml_backend_sched_synchronize() (never
++        // llama_context::synchronize(), which would corrupt the perf
++        // counters read via llama_perf_context()); read via
++        // ggml_backend_tensor_get(), never ->data; one-shot atomic guard;
++        // owning backend and F32 type both checked before scanning;
++        // read-only throughout.
++        {
++            static std::atomic<bool> pre_final_norm_diag_done{false};
++            bool pre_final_norm_diag_expected = false;
++            if (n_outputs > 0 &&
++                pre_final_norm_diag_done.compare_exchange_strong(pre_final_norm_diag_expected, true)) {
++                ggml_tensor * t_pre_norm = ggml_graph_get_tensor(res->get_gf(), "pre_final_norm");
++
++                if (t_pre_norm == nullptr) {
++                    LLAMA_LOG_INFO("internal_pre_final_norm_diag: tensor \"pre_final_norm\" not found in graph -- not scanned\n");
++                } else {
++                    ggml_backend_t backend_pre_norm = ggml_backend_sched_get_tensor_backend(sched.get(), t_pre_norm);
++
++                    if (backend_pre_norm == nullptr) {
++                        LLAMA_LOG_INFO("internal_pre_final_norm_diag: no owning backend for tensor -- not scanned (ne0=%" PRId64 " ne1=%" PRId64 " type=%s)\n",
++                                t_pre_norm->ne[0], t_pre_norm->ne[1], ggml_type_name(t_pre_norm->type));
++                    } else if (t_pre_norm->type != GGML_TYPE_F32) {
++                        LLAMA_LOG_INFO("internal_pre_final_norm_diag: unexpected tensor type %s -- not scanned\n",
++                                ggml_type_name(t_pre_norm->type));
++                    } else {
++                        ggml_backend_sched_synchronize(sched.get());
++
++                        const int64_t n_elem  = ggml_nelements(t_pre_norm);
++                        const size_t  n_bytes = ggml_nbytes(t_pre_norm);
++
++                        std::vector<float> tmp((size_t) n_elem);
++                        ggml_backend_tensor_get(t_pre_norm, tmp.data(), 0, n_bytes);
++
++                        int64_t pos_zero = 0, neg_zero = 0, other_finite = 0;
++                        int64_t n_nan = 0, n_pos_inf = 0, n_neg_inf = 0;
++                        float   min_finite =  std::numeric_limits<float>::infinity();
++                        float   max_finite = -std::numeric_limits<float>::infinity();
++                        double  sum = 0.0;
++
++                        for (int64_t i = 0; i < n_elem; i++) {
++                            const float f = tmp[(size_t) i];
++                            uint32_t bits;
++                            memcpy(&bits, &f, sizeof(bits));
++
++                            if      (bits == 0x00000000u) { pos_zero++; }
++                            else if (bits == 0x80000000u) { neg_zero++; }
++
++                            if (std::isnan(f)) {
++                                n_nan++;
++                            } else if (std::isinf(f)) {
++                                if (f > 0.0f) { n_pos_inf++; } else { n_neg_inf++; }
++                            } else {
++                                if (bits != 0x00000000u && bits != 0x80000000u) { other_finite++; }
++                                if (f < min_finite) { min_finite = f; }
++                                if (f > max_finite) { max_finite = f; }
++                            }
++                            sum += (double) f;
++                        }
++
++                        uint32_t raw[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
++                        const int64_t n_raw = n_elem < 8 ? n_elem : 8;
++                        for (int64_t i = 0; i < n_raw; i++) {
++                            memcpy(&raw[i], &tmp[(size_t) i], sizeof(uint32_t));
++                        }
++
++                        LLAMA_LOG_INFO("internal_pre_final_norm_diag: n_elem=%" PRId64 " ne0=%" PRId64 " ne1=%" PRId64
++                                " type=%s backend=%s bytes=%zu pos_zero=%" PRId64 " neg_zero=%" PRId64
++                                " other_finite=%" PRId64 " nan=%" PRId64 " pos_inf=%" PRId64 " neg_inf=%" PRId64
++                                " min_finite=%.9g max_finite=%.9g sum=%.9g"
++                                " raw0_7=%08X,%08X,%08X,%08X,%08X,%08X,%08X,%08X\n",
++                                n_elem, t_pre_norm->ne[0], t_pre_norm->ne[1],
++                                ggml_type_name(t_pre_norm->type),
++                                ggml_backend_name(backend_pre_norm),
++                                n_bytes, pos_zero, neg_zero, other_finite, n_nan, n_pos_inf, n_neg_inf,
++                                (double) min_finite, (double) max_finite, sum,
++                                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
++                    }
++                }
++            }
++        }
+         auto * t_embd   = cparams.embeddings ? res->get_embd() : nullptr;
+ 
+         if (t_embd && res->get_embd_pooled()) {
