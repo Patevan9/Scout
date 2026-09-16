@@ -62,13 +62,35 @@ class ModelDownloadActivity : AppCompatActivity() {
         // on-device failure to a same-size, wrong-hash local GGUF that slipped past
         // the MIN_MODEL_BYTES-only check below: output_norm.weight was zero in that
         // file, which zeroed every logit and produced token-salad generation. This
-        // hash is the fix -- see verifyModelHash()/sha256Hex() and enterLoadingPhase().
-        private const val MODEL_SHA256 =
+        // hash is the fix -- see sha256Hex()/verifyModelHash() and enterLoadingPhase().
+        // Not private: MainActivity's own offline-brain load path
+        // (LlamaEngine.loadAsyncVerified(), see MainActivity.tryLoadOfflineBrain())
+        // reuses this exact constant rather than carrying a second copy.
+        const val MODEL_SHA256 =
             "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
         // True only when a real network download actually happened this run -- lets
         // MainActivity distinguish "just downloaded" (speak the first-time/again line)
         // from an ordinary launch that only needed to load an already-present file.
         const val EXTRA_DID_DOWNLOAD = "did_download"
+
+        // Streams `file` through SHA-256 and returns the lowercase hex digest. Lives
+        // in the companion object (not as an instance method) specifically so
+        // LlamaEngine.loadAsyncVerified() -- a plain object with no
+        // ModelDownloadActivity instance to call -- can reuse this exact
+        // implementation instead of carrying a second copy of the digest loop.
+        // Touches only its `file` parameter; no Activity/instance state.
+        fun sha256Hex(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 20) // 1MB read buffer
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
     }
 
     private val messages = mutableListOf(
@@ -417,19 +439,6 @@ class ModelDownloadActivity : AppCompatActivity() {
             }
             runOnUiThread { onResult(matches) }
         }.start()
-    }
-
-    private fun sha256Hex(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(1 shl 20) // 1MB read buffer
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun enterLoadingPhase() {
