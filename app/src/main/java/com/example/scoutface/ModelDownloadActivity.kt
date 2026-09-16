@@ -20,6 +20,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.security.MessageDigest
 
 // The one gate MainActivity waits on before it appears, asks permissions, or does
 // anything else -- covers three phases in order: Downloading (only if the model file
@@ -55,10 +56,41 @@ class ModelDownloadActivity : AppCompatActivity() {
         // forgiving, in case a future re-upload's exact byte count differs
         // slightly).
         private const val EXPECTED_DOWNLOAD_BYTES = 1_117_320_736L
+        // Expected SHA-256 of the release asset above (lowercase hex). Independently
+        // verified against the GitHub release asset and a known-good backup copy.
+        // The Qwen zero-logits investigation (2026-09, Rounds 9B-11) traced a real
+        // on-device failure to a same-size, wrong-hash local GGUF that slipped past
+        // the MIN_MODEL_BYTES-only check below: output_norm.weight was zero in that
+        // file, which zeroed every logit and produced token-salad generation. This
+        // hash is the fix -- see sha256Hex()/verifyModelHash() and enterLoadingPhase().
+        // Not private: MainActivity's own offline-brain load path
+        // (LlamaEngine.loadAsyncVerified(), see MainActivity.tryLoadOfflineBrain())
+        // reuses this exact constant rather than carrying a second copy.
+        const val MODEL_SHA256 =
+            "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
         // True only when a real network download actually happened this run -- lets
         // MainActivity distinguish "just downloaded" (speak the first-time/again line)
         // from an ordinary launch that only needed to load an already-present file.
         const val EXTRA_DID_DOWNLOAD = "did_download"
+
+        // Streams `file` through SHA-256 and returns the lowercase hex digest. Lives
+        // in the companion object (not as an instance method) specifically so
+        // LlamaEngine.loadAsyncVerified() -- a plain object with no
+        // ModelDownloadActivity instance to call -- can reuse this exact
+        // implementation instead of carrying a second copy of the digest loop.
+        // Touches only its `file` parameter; no Activity/instance state.
+        fun sha256Hex(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 20) // 1MB read buffer
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
     }
 
     private val messages = mutableListOf(
@@ -393,6 +425,22 @@ class ModelDownloadActivity : AppCompatActivity() {
 
     // ── Phase 2: Loading into memory ──────────────────────────────
 
+    // Hashes `file` off the UI thread -- a ~1.12GB file takes real time to read and
+    // digest -- and reports whether it matches MODEL_SHA256 back via runOnUiThread.
+    // Same Thread + runOnUiThread shape as copyIntoFilesDirThenLoad() above, so this
+    // stays consistent with how the rest of this file already does background work.
+    private fun verifyModelHash(file: File, onResult: (Boolean) -> Unit) {
+        Thread {
+            val matches = try {
+                sha256Hex(file).equals(MODEL_SHA256, ignoreCase = true)
+            } catch (e: Exception) {
+                android.util.Log.e("ScoutBrain", "SHA-256 verification could not read model file", e)
+                false
+            }
+            runOnUiThread { onResult(matches) }
+        }.start()
+    }
+
     private fun enterLoadingPhase() {
         val dest = File(filesDir, MODEL_FILENAME)
         if (!dest.exists() || dest.length() < MIN_MODEL_BYTES) {
@@ -417,13 +465,34 @@ class ModelDownloadActivity : AppCompatActivity() {
         tipText.text = tips[tipIndex]
         handler.postDelayed({ cycleTip() }, TIP_HOLD_MS)
 
-        LlamaEngine.loadAsync(modelFile = dest, nCtx = 512, nThreads = 2) { success ->
-            runOnUiThread {
-                if (success) {
-                    enterPreparingPhase()
-                } else {
-                    showRetry("The offline brain failed to load — tap here to try again.") {
-                        enterLoadingPhase()
+        // The size floor above only catches a truncated download -- it does not catch a
+        // complete-but-wrong file (wrong model, corrupted bytes, tampered copy) of the
+        // same or larger size. That gap is exactly how a bad local Qwen GGUF reached
+        // LlamaEngine and produced the all-zero-logits failure traced in the Round
+        // 9B/10/11 investigation (output_norm.weight was zero in that file). This hash
+        // check is the real gate: every path into this function -- pre-existing internal
+        // model, a copied external/local candidate, or a fresh download -- passes through
+        // here, and nothing below this point reaches LlamaEngine.loadAsync() without
+        // matching MODEL_SHA256.
+        verifyModelHash(dest) { verified ->
+            if (!verified) {
+                android.util.Log.e("ScoutBrain",
+                    "Model file failed SHA-256 verification, rejecting: ${dest.absolutePath}")
+                dest.delete()
+                showRetry("The offline brain file didn't check out — tap here to try again.") {
+                    startDownload()
+                }
+                return@verifyModelHash
+            }
+
+            LlamaEngine.loadAsync(modelFile = dest, nCtx = 512, nThreads = 2) { success ->
+                runOnUiThread {
+                    if (success) {
+                        enterPreparingPhase()
+                    } else {
+                        showRetry("The offline brain failed to load — tap here to try again.") {
+                            enterLoadingPhase()
+                        }
                     }
                 }
             }
