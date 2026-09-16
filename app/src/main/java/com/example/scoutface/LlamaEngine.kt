@@ -143,6 +143,67 @@ object LlamaEngine {
         }.start()
     }
 
+    // MainActivity.tryLoadOfflineBrain() companion to loadAsync() above -- same
+    // guard/state shape (isReady short-circuits, isLoading is set synchronously
+    // before the background Thread starts, and is reset unconditionally before
+    // onReady fires), with one inserted step: the model file's SHA-256 is checked
+    // on that same background thread, before the existing load() is ever called,
+    // so a wrong-hash file can never reach nativeLoad(). Reuses
+    // ModelDownloadActivity.sha256Hex()/MODEL_SHA256 rather than a second copy of
+    // the digest loop.
+    //
+    // isLoading flips synchronously, on the calling thread, exactly like
+    // loadAsync() -- this matters beyond consistency: MainActivity's own on-demand
+    // caller checks LlamaEngine.isLoading immediately after calling
+    // tryLoadOfflineBrain() to decide whether to say "warming up." Hashing before
+    // this flip (e.g. in MainActivity, ahead of a plain loadAsync() call) would
+    // delay it past that check and silently change that response during every
+    // multi-second hash -- this function exists specifically so that does not
+    // happen.
+    //
+    // onReady's second parameter is true only when the file was rejected by the
+    // hash check specifically (wrong hash, or unreadable) -- false for every other
+    // outcome, success or failure alike -- so a caller can tell "this exact file is
+    // known-bad" apart from a transient/other load failure worth retrying. This
+    // function does not delete the file or trigger any recovery itself: verifying
+    // and refusing to load is as far as LlamaEngine's responsibility goes here:
+    // file deletion and re-download decisions belong to the Activity/download
+    // layer that already owns them (see ModelDownloadActivity).
+    fun loadAsyncVerified(
+        modelFile: File,
+        expectedSha256: String,
+        nCtx: Int = 2048,
+        nThreads: Int = 4,
+        onReady: (success: Boolean, verificationFailed: Boolean) -> Unit = { _, _ -> }
+    ) {
+        if (isReady) {
+            onReady(true, false)
+            return
+        }
+        if (isLoading) {
+            Log.w(TAG, "loadAsyncVerified called while already loading — ignored.")
+            return
+        }
+        isLoading = true
+        Thread {
+            val verified = try {
+                ModelDownloadActivity.sha256Hex(modelFile).equals(expectedSha256, ignoreCase = true)
+            } catch (e: Exception) {
+                Log.e(TAG, "loadAsyncVerified: could not hash model file", e)
+                false
+            }
+            if (!verified) {
+                Log.e(TAG, "loadAsyncVerified: model failed SHA-256 verification: ${modelFile.absolutePath}")
+                isLoading = false
+                onReady(false, true)
+                return@Thread
+            }
+            val success = load(modelFile, nCtx, nThreads)
+            isLoading = false
+            onReady(success, false)
+        }.start()
+    }
+
     fun load(modelFile: File, nCtx: Int = 2048, nThreads: Int = 4): Boolean {
         nativeLock.withLock {
             if (isReady) return true

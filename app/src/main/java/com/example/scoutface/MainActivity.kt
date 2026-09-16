@@ -1915,6 +1915,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
+    // The absolute path + byte length of the most recent local model candidate
+    // that LlamaEngine.loadAsyncVerified() rejected on SHA-256 verification.
+    // tryLoadOfflineBrain() can be called many times per session (the 90s timer,
+    // once, plus once per user turn on-demand whenever neither Gemini nor the
+    // local brain is ready) -- without this, a known-bad ~1.12GB file would be
+    // re-hashed from scratch on every single one of those calls, forever.
+    // @Volatile because the write happens inside loadAsyncVerified()'s callback,
+    // which fires from its background thread (same as loadAsync() already does
+    // today -- neither hops to the UI thread internally), while the read below
+    // always happens on the UI thread that calls tryLoadOfflineBrain().
+    // Deliberately in-memory only, matching LlamaEngine's own isReady/isLoading
+    // persistence model -- resets on process restart, and is cleared implicitly
+    // the moment a candidate with a different path or length appears (e.g. after
+    // the file is corrected on disk), so a stale entry can't outlive the file it
+    // describes. Deliberately does NOT delete the file or trigger a re-download:
+    // that decision belongs to the Activity/download layer that already owns it
+    // (ModelDownloadActivity), not to this offline-brain load path.
+    @Volatile private var lastVerificationFailure: Pair<String, Long>? = null
+
     private fun tryLoadOfflineBrain() {
 
         if (LlamaEngine.isReady || LlamaEngine.isLoading) return
@@ -1946,12 +1965,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        val candidateKey = modelFile.absolutePath to modelFile.length()
+        if (lastVerificationFailure == candidateKey) {
+            android.util.Log.w("ScoutBrain",
+                "Skipping offline brain load — ${modelFile.name} already failed SHA-256 verification this session")
+            return
+        }
+
         android.util.Log.i("ScoutBrain", "Loading offline brain: ${modelFile.name} (${freeMb}MB free)")
 
         val llamaLoadStart = System.currentTimeMillis()
         // nCtx=512 keeps KV-cache small (~100MB vs ~500MB at 2048). Scout only
         // uses 2 conversation turns, so 512 tokens is more than enough.
-        LlamaEngine.loadAsync(modelFile = modelFile, nCtx = 512, nThreads = 2) { success ->
+        LlamaEngine.loadAsyncVerified(
+            modelFile = modelFile,
+            expectedSha256 = ModelDownloadActivity.MODEL_SHA256,
+            nCtx = 512,
+            nThreads = 2
+        ) { success, verificationFailed ->
+            if (verificationFailed) {
+                lastVerificationFailure = candidateKey
+            }
             val loadMs = System.currentTimeMillis() - llamaLoadStart
             android.util.Log.i("ScoutBrain",
                 if (success) "Offline brain ready in ${loadMs}ms" else "Offline brain load failed")
@@ -1968,7 +2002,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     }
 
-    // Called once, exactly when LlamaEngine.loadAsync's callback reports success (from a
+    // Called once, exactly when LlamaEngine.loadAsyncVerified's callback reports success (from a
     // background thread -- must stay on the UI thread from here). Re-runs resumeSystems(),
     // which was a no-op every time it fired before now because of its own isReady guard;
     // this is what actually lets camera and mic come alive for the first time.
