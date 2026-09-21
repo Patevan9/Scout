@@ -5375,6 +5375,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     //     structurally matching, both fail this and fall through
     //     unchanged; existing resolveEntity()/buildAliasMap() are never
     //     trusted alone for this resolution
+    //   - no SECOND distinct entity is mentioned anywhere else in the
+    //     question either (e.g. buried inside what would otherwise become
+    //     the property phrase, as in "diana's job and nicolas's breed") --
+    //     every known name/alias token found anywhere in qNorm is
+    //     independently resolved via findMatchingEntities(), and the union
+    //     of resolved entities across all of them must be exactly one;
+    //     multiple aliases that all resolve to that same single entity are
+    //     fine and do not create ambiguity
     //   - the literal property phrase runs to the END of the normalized
     //     utterance (never a short lazy capture) and normalizes, via the
     //     same FactKey.custom() teaching already uses, to exactly one
@@ -5411,9 +5419,37 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val token = matchedToken ?: return false
         val phrase = propertyPhrase?.takeIf { it.isNotBlank() } ?: return false
 
+        // A second known entity referenced anywhere in the question -- not
+        // just the possessive lead token -- makes this ambiguous, even
+        // when it's buried inside what would otherwise become the
+        // property phrase (e.g. "what is diana's job and nicolas's
+        // breed" must not silently treat "and nicolas's breed" as part of
+        // diana's property phrase). Scan every known name/alias token for
+        // a safe whole-word occurrence anywhere in qNorm, resolve each one
+        // independently via findMatchingEntities() (never buildAliasMap()'s
+        // collapsed values), and require the union of resolved entities to
+        // be a single entity. Multiple aliases resolving to that same one
+        // entity are not ambiguity.
+        val mentionedEntities = mutableSetOf<String>()
+        for (candidate in candidateTokens) {
+            if (candidate.isBlank()) continue
+            val mentionPattern = Regex("\\b${Regex.escape(candidate)}\\b")
+            if (!mentionPattern.containsMatchIn(qNorm)) continue
+
+            val resolvedForMention = ScoutEntityResolver.findMatchingEntities(candidate, truthDb, ENTITY_USER_PRIMARY)
+            if (resolvedForMention.size > 1) {
+                // This mentioned token alone is ambiguous across entities
+                // -- do not guess.
+                return false
+            }
+            mentionedEntities.addAll(resolvedForMention)
+        }
+        if (mentionedEntities.size != 1) return false
+
         val resolvedEntities = ScoutEntityResolver.findMatchingEntities(token, truthDb, ENTITY_USER_PRIMARY)
         if (resolvedEntities.size != 1) return false
         val resolvedEntity = resolvedEntities[0]
+        if (resolvedEntity !in mentionedEntities) return false
 
         val exactKey = FactKey.custom(phrase)
         val value = truthDb.getFactValue(resolvedEntity, exactKey)
