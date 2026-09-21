@@ -5325,6 +5325,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // Named-entity fact recall -- "what is diana's job", "tell me
+        // nick's birthday". A real, direct answer may already have been
+        // given by the time this returns; see tryNamedEntityFactRecall()'s
+        // own doc comment for the full deterministic contract.
+        if (tryNamedEntityFactRecall(qNorm)) return
+
         // Busy-Brain PR 1: this is a second, genuinely new dispatch point
         // into the AI backends (distinct from handleUnknownIntent()'s own
         // check above -- reached only when the direct-lookup fast paths
@@ -5336,6 +5342,93 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tryTinyLlamaOrFallback(qNorm)
 
+    }
+
+    // Named-entity fact recall -- a narrow, deterministic fast path for a
+    // question that names exactly one already-known person/pet by name or
+    // alias and asks for exactly one of their stored TruthDb facts, e.g.
+    // "what is diana's job" / "tell me nick's birthday". Runs before the
+    // generic TinyLlama/Gemini fallback so it never depends on
+    // getAllKnownFacts()'s ordering or .take(12) cap -- a fact excluded
+    // from that generic 12-fact window is still reliably answerable here.
+    //
+    // Retrieval relevance is not disclosure authorization: this only
+    // determines which stored fact the question is asking about, never
+    // who is entitled to hear it -- there is no speaker-identity or
+    // household-disclosure mechanism in this app today, and this method
+    // does not add one. Because it bypasses the generic 12-fact cap, it
+    // can make a stored third-person fact reliably answerable even when
+    // that fact would not have been included in the generic model
+    // context -- this is a real change in what becomes deterministically
+    // reachable, not a no-op.
+    //
+    // Fires only when ALL of these hold, established purely
+    // deterministically:
+    //   - a supported recall-lead phrase is present ("what is"/"what
+    //     was"/"do you know"/"tell me" -- "what's" is never present in
+    //     qNorm, since TextNormalizer.normalizeUtterance() already
+    //     rewrites it to "what is")
+    //   - exactly one already-known name/alias is named, possessively,
+    //     and resolves to exactly one entity via
+    //     ScoutEntityResolver.findMatchingEntities() -- an alias/name
+    //     shared by two entities, or more than one candidate token
+    //     structurally matching, both fail this and fall through
+    //     unchanged; existing resolveEntity()/buildAliasMap() are never
+    //     trusted alone for this resolution
+    //   - the literal property phrase runs to the END of the normalized
+    //     utterance (never a short lazy capture) and normalizes, via the
+    //     same FactKey.custom() teaching already uses, to exactly one
+    //     stored-key shape -- no favorite_/_name guessing, no synonym
+    //     resolution, no semantic interpretation
+    //
+    // Once all of the above hold, a miss (the exact key isn't stored) is
+    // still deterministic and grounded -- e.g. a fact taught as
+    // "occupation" is a genuine miss when asked as "job", not something
+    // handed to a generative model to guess at. Returns false, leaving
+    // existing behavior completely unchanged, whenever any prerequisite
+    // above isn't cleanly established.
+    private fun tryNamedEntityFactRecall(qNorm: String): Boolean {
+
+        val leadPhraseGroup = "(?:what is|what was|do you know|tell me)"
+        val candidateTokens = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY).keys
+
+        var matchedToken: String? = null
+        var propertyPhrase: String? = null
+
+        for (token in candidateTokens) {
+            if (token.isBlank()) continue
+            val pattern = Regex("^$leadPhraseGroup\\s+${Regex.escape(token)}'s\\s+(.+)$")
+            val m = pattern.find(qNorm) ?: continue
+            if (matchedToken != null) {
+                // More than one candidate token structurally matches --
+                // ambiguous grammar, do not guess.
+                return false
+            }
+            matchedToken = token
+            propertyPhrase = m.groupValues[1].trim()
+        }
+
+        val token = matchedToken ?: return false
+        val phrase = propertyPhrase?.takeIf { it.isNotBlank() } ?: return false
+
+        val resolvedEntities = ScoutEntityResolver.findMatchingEntities(token, truthDb, ENTITY_USER_PRIMARY)
+        if (resolvedEntities.size != 1) return false
+        val resolvedEntity = resolvedEntities[0]
+
+        val exactKey = FactKey.custom(phrase)
+        val value = truthDb.getFactValue(resolvedEntity, exactKey)
+        val displayEntity = ScoutEntityResolver.displayName(resolvedEntity)
+
+        // Generation-ownership fix (PR 2): same reasoning as the other
+        // direct-lookup fast paths above -- a real, immediate answer
+        // (hit or grounded miss) is about to be given.
+        supersedeAnyPendingGeneration()
+        if (value != null) {
+            respond("$displayEntity's $phrase is $value.")
+        } else {
+            respond("I don't think I know $displayEntity's $phrase yet.")
+        }
+        return true
     }
 
     // Reverse lookup: does this name (or one of its aliases) belong to the wife,
