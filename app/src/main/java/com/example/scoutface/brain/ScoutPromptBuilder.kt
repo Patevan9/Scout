@@ -33,16 +33,21 @@ object ScoutPromptBuilder {
     // with no data attached could just as easily hallucinate a fake scene
     // description as deny having eyes at all -- this line heads off both
     // failure modes, not just the one originally reported.
-    const val GEMINI_VISION_CAPABILITY_LINE =
-        "Scout has a real camera and local vision system. Do not claim Scout has no camera or no vision capability. " +
+    // Was a fixed const val -- now takes the companion's own name so this line can
+    // never say a different name than the "You are $scoutName" line above it in
+    // the same system instruction. Single call site (buildSystemInstruction()
+    // below), which already has that name in scope, so this stayed a narrow,
+    // single-file change rather than a broader refactor.
+    fun geminiVisionCapabilityLine(companionName: String): String =
+        "$companionName has a real camera and local vision system. Do not claim $companionName has no camera or no vision capability. " +
         "You do not receive the live camera view in this request, so never invent or claim current visual observations unless they were explicitly provided to you."
 
     fun buildSystemInstruction(
         truthDb: TruthDb,
         habitLayer: HabitLayer
     ): String {
-        val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
-        val habitContext = habitLayer.getSummaryForGemini()
+        val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
+        val habitContext = habitLayer.getSummaryForGemini(scoutName)
 
         return """
 You are $scoutName, a calm, friendly family companion robot.
@@ -51,7 +56,7 @@ Be concise, safe, and helpful. If you don't know, say you don't know.
 
 Do not claim abilities you don't have.
 
-$GEMINI_VISION_CAPABILITY_LINE
+${geminiVisionCapabilityLine(scoutName)}
 
 Keep responses short (1–3 sentences) unless asked for more. Always end on a complete sentence — never stop mid-sentence.
 

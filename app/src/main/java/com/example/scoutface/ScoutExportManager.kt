@@ -88,8 +88,8 @@ class ScoutExportManager(
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/json"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Scout Memory Export")
-                putExtra(Intent.EXTRA_TEXT, "Scout memory export JSON file.")
+                putExtra(Intent.EXTRA_SUBJECT, "Tolliver Memory Export")
+                putExtra(Intent.EXTRA_TEXT, "Tolliver memory export JSON file.")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
@@ -108,7 +108,7 @@ class ScoutExportManager(
             }
 
             shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(Intent.createChooser(shareIntent, "Share Scout Memory").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent.createChooser(shareIntent, "Share Tolliver Memory").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             true
         } catch (_: Exception) {
             false

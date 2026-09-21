@@ -126,9 +126,9 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
             text = "Developer diagnostic tool. Runs 4 fixed test prompts across " +
                 "${threadCombos.size} thread-count combinations (${fixedPromptCountLabel()} " +
                 "runs total, in a rotating order so no combo is unfairly favored by " +
-                "device temperature) and logs measured performance to Scout's diagnostic " +
+                "device temperature) and logs measured performance to Tolliver's diagnostic " +
                 "log. Camera and voice keep running normally during the test -- nothing " +
-                "about Scout's normal settings is changed. When finished, use Settings > " +
+                "about Tolliver's normal settings is changed. When finished, use Settings > " +
                 "Advanced & Support > Diagnostic Report to send the results."
             textSize = 13f
             setTextColor(txtSec)
@@ -136,10 +136,10 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
             setLineSpacing(0f, 1.3f)
         })
         root.addView(TextView(this).apply {
-            text = "Note: these 4 prompts are fixed test strings modeled on Scout's real " +
+            text = "Note: these 4 prompts are fixed test strings modeled on Tolliver's real " +
                 "prompt shape, not copies of the actual production prompt. This tool can " +
                 "tell you which thread settings perform best on these controlled prompts -- " +
-                "it cannot by itself prove how much of Scout's real-world delay comes from " +
+                "it cannot by itself prove how much of Tolliver's real-world delay comes from " +
                 "the full production prompt."
             textSize = 12f
             setTextColor(Color.parseColor("#F0B84A"))
@@ -296,7 +296,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
                 lines.add("")
                 lines.add("Done. Reminder: these are 4 fixed test prompts, not the actual production " +
                     "prompt -- use these results to compare thread settings against each other, not " +
-                    "as an absolute measure of Scout's real reply latency.")
+                    "as an absolute measure of Tolliver's real reply latency.")
                 lines.add("Share via Settings > Advanced & Support > Diagnostic Report.")
                 resultsView.text = lines.joinToString("\n")
                 running = false

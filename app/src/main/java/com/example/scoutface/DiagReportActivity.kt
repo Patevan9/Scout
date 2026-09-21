@@ -73,7 +73,7 @@ class DiagReportActivity : AppCompatActivity() {
             appendLine()
             appendLine("=== System Information ===")
             appendLine("Generated:       ${fmt.format(Date())}")
-            appendLine("Scout Version:   $appVersion")
+            appendLine("Tolliver Version: $appVersion")
             appendLine("Android Version: ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
             appendLine("Device:          ${android.os.Build.MODEL}")
             appendLine()
@@ -170,10 +170,10 @@ class DiagReportActivity : AppCompatActivity() {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_EMAIL,   arrayOf(SUPPORT_EMAIL))
-            putExtra(Intent.EXTRA_SUBJECT, "Scout Diagnostic Report")
-            putExtra(Intent.EXTRA_TEXT,    "Scout diagnostic report — see attached file.")
+            putExtra(Intent.EXTRA_SUBJECT, "Tolliver Diagnostic Report")
+            putExtra(Intent.EXTRA_TEXT,    "Tolliver diagnostic report — see attached file.")
             putExtra(Intent.EXTRA_STREAM,  uri)
-            clipData = android.content.ClipData.newRawUri("Scout Diagnostic Report", uri)
+            clipData = android.content.ClipData.newRawUri("Tolliver Diagnostic Report", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 

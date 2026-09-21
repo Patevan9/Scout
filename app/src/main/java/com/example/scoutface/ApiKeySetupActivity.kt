@@ -61,7 +61,7 @@ private enum class Provider(
                 title = "Open Google AI Studio",
                 body = "Tap the button below. Sign in with any Google account — Gmail, YouTube, the same one you already use.\n\n" +
                        "When you get there, a box will pop up. Here is what to do:\n\n" +
-                       "• \"Name your key\" — just type Scout, or leave it as-is\n" +
+                       "• \"Name your key\" — just type Tolliver, or leave it as-is\n" +
                        "• \"Choose an imported project\" — leave this alone, skip it\n\n" +
                        "Then tap \"Create key\".",
                 actionLabel = "Open Google AI Studio →",
@@ -76,7 +76,7 @@ private enum class Provider(
             ),
             SetupStep(
                 title = "Paste your key",
-                body = "Paste it below. Scout saves it safely on your device only.",
+                body = "Paste it below. Tolliver saves it safely on your device only.",
                 hasInput = true,
                 actionLabel = "Connect Gemini!"
             )
@@ -102,13 +102,13 @@ private enum class Provider(
             ),
             SetupStep(
                 title = "Create your key",
-                body = "In the API Keys section, tap \"Create new secret key\". Give it a name like \"Scout\" then tap Copy — you won't be able to see it again!",
+                body = "In the API Keys section, tap \"Create new secret key\". Give it a name like \"Tolliver\" then tap Copy — you won't be able to see it again!",
                 hint = "Looks like: sk-proj-abc123...",
                 actionLabel = "I've copied my key ✓"
             ),
             SetupStep(
                 title = "Paste your key",
-                body = "Paste it below. Scout saves it safely on your device only.",
+                body = "Paste it below. Tolliver saves it safely on your device only.",
                 hasInput = true,
                 actionLabel = "Connect OpenAI!"
             )
@@ -122,8 +122,8 @@ private enum class Provider(
         steps = listOf(
             SetupStep(
                 title = "Important heads-up first",
-                body = "If you already pay for Claude Pro on claude.ai — that's for the chat website only.\n\nThe API that Scout needs is completely separate and lives at console.anthropic.com. You'll need to set up a separate account and billing there.",
-                warning = "⚠ Claude Pro (claude.ai) does NOT include API access for Scout.",
+                body = "If you already pay for Claude Pro on claude.ai — that's for the chat website only.\n\nThe API that Tolliver needs is completely separate and lives at console.anthropic.com. You'll need to set up a separate account and billing there.",
+                warning = "⚠ Claude Pro (claude.ai) does NOT include API access for Tolliver.",
                 actionLabel = "Open Anthropic Console →",
                 isLink = true,
                 link = "https://console.anthropic.com/settings/keys"
@@ -135,19 +135,19 @@ private enum class Provider(
             ),
             SetupStep(
                 title = "Add billing credits",
-                body = "Go to Settings → Billing and add some credits. Even \$5 goes a very long way for normal Scout conversations.",
-                hint = "💡 Most families spend under \$1/month using Claude via Scout.",
+                body = "Go to Settings → Billing and add some credits. Even \$5 goes a very long way for normal Tolliver conversations.",
+                hint = "💡 Most families spend under \$1/month using Claude via Tolliver.",
                 actionLabel = "I've added billing ✓"
             ),
             SetupStep(
                 title = "Create your key",
-                body = "Tap \"Create Key\", give it a name like \"Scout\", then copy it. Store it somewhere safe — you can't view it again after closing.",
+                body = "Tap \"Create Key\", give it a name like \"Tolliver\", then copy it. Store it somewhere safe — you can't view it again after closing.",
                 hint = "Looks like: sk-ant-api03-abc123...",
                 actionLabel = "I've copied my key ✓"
             ),
             SetupStep(
                 title = "Paste your key",
-                body = "Paste it below. Scout saves it safely on your device only.",
+                body = "Paste it below. Tolliver saves it safely on your device only.",
                 hasInput = true,
                 actionLabel = "Connect Claude!"
             )
@@ -224,7 +224,12 @@ class ApiKeySetupActivity : AppCompatActivity() {
     }
 
     private fun renderIntro() {
-        phaseTitle.text = "Hi! I'm Scout."
+        // Same no-value fallback as MainActivity.ensureScoutIdentityDefaults() /
+        // SettingsActivity / OnboardingActivity -- "Tolliver" only when nothing is
+        // stored yet, never overriding an existing custom name.
+        val companionName = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+            .getString("robot_name", "Tolliver") ?: "Tolliver"
+        phaseTitle.text = "Hi! I'm $companionName."
         phaseSubtitle.text = "I'm already ready to talk!"
         phaseBody.text =
             "I have my own built-in brain called TinyLlama. You can chat with me right now — " +
@@ -367,11 +372,11 @@ class ApiKeySetupActivity : AppCompatActivity() {
         phaseTitle.text = if (provider != null) "We're connected!" else "All set!"
         phaseSubtitle.text = if (provider != null) "${provider.displayName} is ready." else "TinyLlama is ready to chat."
         phaseBody.text = if (provider != null)
-            "Scout will now use ${provider.displayName} for richer conversations. You can always change this in Settings."
+            "Tolliver will now use ${provider.displayName} for richer conversations. You can always change this in Settings."
         else
             "You can always connect an AI service later in Settings if you change your mind."
 
-        primaryButton.text = "Start chatting with Scout"
+        primaryButton.text = "Start chatting with Tolliver"
         primaryButton.setOnClickListener { finish() }
         primaryButton.visibility = View.VISIBLE
 
@@ -599,7 +604,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
             text =
                 "* Google, OpenAI, and Anthropic are independent third-party services.\n" +
                 "Usage costs depend entirely on the provider you choose —\n" +
-                "Scout and its developer are not responsible for any charges.\n" +
+                "Tolliver and its developer are not responsible for any charges.\n" +
                 "Free tiers, including Google Gemini's, may be reduced,\n" +
                 "restricted, or removed entirely at any time without notice."
             textSize = 10f

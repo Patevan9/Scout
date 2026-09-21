@@ -213,7 +213,12 @@ class HabitLayer(private val context: Context) {
             .sortedByDescending { it.decayedScore }
     }
 
-    fun getSummaryForGemini(): String {
+    // companionName: the same name ScoutPromptBuilder.buildSystemInstruction()
+    // already puts in "You are $scoutName..." right above where this summary is
+    // interpolated into the same system prompt -- passed in (single call site)
+    // rather than hardcoded here so the two can never name the companion
+    // differently in one prompt.
+    fun getSummaryForGemini(companionName: String): String {
         val slot = currentTimeSlot()
         val slotTopics = getTopicsForSlot(slot, 4).map { it.first }
         val globalTopics = getTopTopics(5).map { it.first }
@@ -223,7 +228,7 @@ class HabitLayer(private val context: Context) {
         sb.append("It is currently ${slot.label}. ")
 
         if (slotTopics.isNotEmpty()) {
-            sb.append("In the ${slot.label}, Scout typically discusses: ")
+            sb.append("In the ${slot.label}, $companionName typically discusses: ")
             sb.append(slotTopics.joinToString(", "))
             sb.append(". ")
         }

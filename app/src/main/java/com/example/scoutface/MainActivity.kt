@@ -1206,8 +1206,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun showLoadingGateFailure() {
         if (isFinishing || isDestroyed) return
         android.app.AlertDialog.Builder(this)
-            .setTitle("Scout couldn't start setup")
-            .setMessage("Something went wrong starting Scout's setup screen. Please try again.")
+            .setTitle("Tolliver couldn't start setup")
+            .setMessage("Something went wrong starting Tolliver's setup screen. Please try again.")
             .setCancelable(false)
             .setPositiveButton("Try Again") { _, _ -> launchLoadingGate() }
             .show()
@@ -2292,7 +2292,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (existing.isNullOrBlank()) {
 
-            truthDb.upsertFact(ENTITY_SCOUT, FactKey.NAME, "Scout", 1.0f, "system_default")
+            truthDb.upsertFact(ENTITY_SCOUT, FactKey.NAME, "Tolliver", 1.0f, "system_default")
 
         }
 
@@ -3124,7 +3124,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                             }
                                     } else null
 
-                                    val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+                                    val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
                                     val greeting = if (greetName != null) "I see $greetName." else "Hello. I am $myName."
 
                                     // Tagged so onDone()/onError() can recognize this exact
@@ -3532,7 +3532,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 val words = normalized.split(" ").filter { it.isNotBlank() }
 
-                val scoutName = truthDb.getFactValue("scout", "name") ?: "Scout"
+                val scoutName = truthDb.getFactValue("scout", "name") ?: "Tolliver"
                 val nameLower = scoutName.lowercase()
 
                 // Courtesy layer (Phase 1) -- checked before both the one-word filter
@@ -4381,7 +4381,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             runOnUiThread {
                 android.widget.Toast.makeText(
                     this,
-                    "Scout's voice isn't working. Please restart the app. If this keeps happening, check Text-to-Speech in your device settings.",
+                    "Tolliver's voice isn't working. Please restart the app. If this keeps happening, check Text-to-Speech in your device settings.",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             }
@@ -5382,7 +5382,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val convo = convoDb.getLastTurns(limit = 2)
 
-            val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+            val scoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
 
             // Every fact TruthDb holds -- the user's own, plus anyone/anything
             // named Scout knows about (Diana, Nicolas, ...) -- not just a
@@ -6191,7 +6191,7 @@ Respond only with Scout's next reply.
 
     private fun handleIdentityIntent(qNorm: String) {
 
-        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
 
         val response = when {
 
@@ -6556,7 +6556,7 @@ Respond only with Scout's next reply.
 
     private fun handleAskScoutNameIntent() {
 
-        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+        val myName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
 
         val out = "My name is $myName."
 
@@ -6659,7 +6659,7 @@ Respond only with Scout's next reply.
             return
         }
 
-        val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout"
+        val currentScoutName = truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver"
         if (!presenceDecider.shouldRespondToInput(qNorm, currentScoutName)) return
 
         // Busy-Brain PR 1: ScoutLlamaController.newGeneration() used to be
@@ -6886,7 +6886,7 @@ Respond only with Scout's next reply.
                 // not a separate copy -- if Scout's renamed to Charlie, this hears
                 // "Charlie" too. "gal"/"scott" stay as STT-mishearing tolerance only
                 // when the configured name is actually still "Scout".
-                val currentName = (truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Scout").lowercase()
+                val currentName = (truthDb.getFactValue(ENTITY_SCOUT, FactKey.NAME) ?: "Tolliver").lowercase()
                 val hearsScout = qNorm.contains(currentName) ||
                         (currentName == "scout" && (qNorm.contains("gal") || qNorm.contains("scott")))
                 if (!isExplicitPhrase && !hearsScout && lastFaceCount == 0) {
