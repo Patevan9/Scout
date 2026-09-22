@@ -5452,9 +5452,39 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         for (alternate in lastRecognitionAlternates) {
             val altNormalized = TextNormalizer.normalizeUtterance(alternate.trim())
             if (altNormalized.isBlank() || altNormalized == qNorm) continue
+            // Correction: satisfying the grammar on its own is not enough --
+            // an alternate must additionally PROVE it is the first result
+            // with exactly one possessive "'s" restored, nothing else
+            // different, before the grammar is even consulted. See
+            // isSolePossessiveRestoration()'s own doc comment.
+            if (!isSolePossessiveRestoration(altNormalized, qNorm)) continue
             if (tryNamedEntityFactRecallForUtterance(altNormalized)) return true
         }
         return false
+    }
+
+    // True only if altNormalized equals qNorm with exactly one literal "'s"
+    // (2 characters) inserted somewhere and nothing else different --
+    // i.e. deleting that one "'s" from altNormalized reproduces qNorm
+    // character-for-character. Pure string comparison against the
+    // already-computed qNorm; does not parse, tokenize, or interpret
+    // either string, does not know what a "known name" is, and does not
+    // care whether the result is grammatically sensible on its own --
+    // that is what tryNamedEntityFactRecallForUtterance() checks
+    // separately, afterward. Deliberately stricter than "the alternate
+    // also happens to satisfy the possessive grammar": that alone is not
+    // proof the alternate is a possessive-loss repair of THIS utterance
+    // rather than a materially different recognition hypothesis that
+    // coincidentally parses.
+    private fun isSolePossessiveRestoration(altNormalized: String, qNorm: String): Boolean {
+        if (altNormalized.length != qNorm.length + 2) return false
+        var searchFrom = 0
+        while (true) {
+            val idx = altNormalized.indexOf("'s", searchFrom)
+            if (idx < 0) return false
+            if (altNormalized.removeRange(idx, idx + 2) == qNorm) return true
+            searchFrom = idx + 1
+        }
     }
 
     private fun tryNamedEntityFactRecallForUtterance(qNorm: String): Boolean {
