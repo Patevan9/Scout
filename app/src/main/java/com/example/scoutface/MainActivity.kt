@@ -5458,7 +5458,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // different, before the grammar is even consulted. See
             // isSolePossessiveRestoration()'s own doc comment.
             if (!isSolePossessiveRestoration(altNormalized, qNorm)) continue
-            if (tryNamedEntityFactRecallForUtterance(altNormalized)) return true
+            if (tryNamedEntityFactRecallForUtterance(altNormalized, requireHit = true)) return true
         }
         return false
     }
@@ -5487,7 +5487,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun tryNamedEntityFactRecallForUtterance(qNorm: String): Boolean {
+    private fun tryNamedEntityFactRecallForUtterance(qNorm: String, requireHit: Boolean = false): Boolean {
 
         val leadPhraseGroup = "(?:what is|what was|do you know|tell me)"
         val candidateTokens = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY).keys
@@ -5546,6 +5546,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val exactKey = FactKey.custom(phrase)
         val value = truthDb.getFactValue(resolvedEntity, exactKey)
         val displayEntity = ScoutEntityResolver.displayName(resolvedEntity)
+
+        // Recovery-path safety gate: the alternate-hypothesis caller passes
+        // requireHit = true because it cannot tell a real property phrase
+        // ("spaceship serial number") from an ordinary verb continuation
+        // ("doing") by shape alone -- both fit "'s" + (.+) identically. A
+        // grounded miss here would mean answering from an unverified guess
+        // at what the speaker actually said, so it is rejected before
+        // anything is spoken, before supersedeAnyPendingGeneration() runs,
+        // as if the grammar had never matched. The authoritative call site
+        // never sets requireHit, so its grounded-miss behavior is unchanged.
+        if (requireHit && value == null) return false
 
         // Generation-ownership fix (PR 2): same reasoning as the other
         // direct-lookup fast paths above -- a real, immediate answer
