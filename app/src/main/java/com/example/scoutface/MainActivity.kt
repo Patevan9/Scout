@@ -323,6 +323,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
+    // PR #92 STT possessive-loss recovery, narrow: the full ordered list of
+    // recognition hypotheses Android supplied for the CURRENT utterance
+    // (most-confident first, per RESULTS_RECOGNITION's documented ordering),
+    // captured in onResults() alongside -- never instead of -- the
+    // .firstOrNull() value that stays authoritative everywhere else in this
+    // class (wake-name, courtesy, conversation state, routing, logging,
+    // model fallback). Read only by tryNamedEntityFactRecall()'s own
+    // narrow recovery loop below. Always reassigned synchronously at the
+    // top of onResults() before any of those other reads happen, so it can
+    // never carry a stale value from a previous utterance into this one.
+    private var lastRecognitionAlternates: List<String> = emptyList()
+
     // Better Conversation State -- Phase 1. Wraps CONVO_WINDOW_MS/
     // PRESENCE_REPLY_WINDOW_MS (both unchanged, still the real timing source)
     // with an explicit "closed on purpose" signal neither timer alone can
@@ -3510,6 +3522,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 }
 
+                // PR #92 STT possessive-loss recovery, narrow: captured here,
+                // alongside `raw` below, not instead of it -- `raw`'s own
+                // derivation (the very next statement) is completely
+                // unchanged, still .firstOrNull() and still what every other
+                // read in this function and everything it calls actually
+                // uses. Only tryNamedEntityFactRecall()'s own recovery loop
+                // ever reads lastRecognitionAlternates.
+                lastRecognitionAlternates = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    .orEmpty()
+
                 val raw = results
 
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -5395,7 +5418,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // handed to a generative model to guess at. Returns false, leaving
     // existing behavior completely unchanged, whenever any prerequisite
     // above isn't cleanly established.
+    // Entry point called from handlePersonalMemoryQuery() -- unchanged call
+    // site, unchanged signature. Tries the first (authoritative) recognition
+    // result exactly as before via tryNamedEntityFactRecallForUtterance();
+    // only if that misses does it fall into the narrow PR #92
+    // possessive-loss recovery below.
+    //
+    // Real-device finding: Android STT sometimes drops the "'s" ("diana
+    // spaceship serial number" instead of "diana's spaceship serial
+    // number"), which fails the possessive grammar below exactly as
+    // designed -- that grammar is deliberately NOT loosened to accept a
+    // missing "'s" or a bare "<known person> <property>" shape (the latter
+    // would wrongly intercept ordinary third-person language like "What is
+    // Diana doing?"). Instead: if the FIRST result's normalized form
+    // (qNorm, same as always) doesn't satisfy the grammar, and Android
+    // itself supplied other recognition hypotheses for this same utterance
+    // (lastRecognitionAlternates, set in onResults() -- see its own doc
+    // comment), each one is normalized the same way qNorm always is and
+    // tried through the exact same unmodified grammar function. Nothing here
+    // inserts, infers, or synthesizes a possessive -- an alternate only ever
+    // qualifies because Android's own recognizer already produced the
+    // literal "'s" form as one of its hypotheses. No qualifying alternate ->
+    // returns false, identical to today's behavior; the caller falls through
+    // to the generic model exactly as it always has.
+    //
+    // This is the ONLY place in MainActivity that ever reads
+    // lastRecognitionAlternates. The first result remains authoritative for
+    // every other existing behavior (wake-name, courtesy, conversation
+    // state, routing, logging, model fallback) -- none of that is touched.
     private fun tryNamedEntityFactRecall(qNorm: String): Boolean {
+        if (tryNamedEntityFactRecallForUtterance(qNorm)) return true
+
+        for (alternate in lastRecognitionAlternates) {
+            val altNormalized = TextNormalizer.normalizeUtterance(alternate.trim())
+            if (altNormalized.isBlank() || altNormalized == qNorm) continue
+            if (tryNamedEntityFactRecallForUtterance(altNormalized)) return true
+        }
+        return false
+    }
+
+    private fun tryNamedEntityFactRecallForUtterance(qNorm: String): Boolean {
 
         val leadPhraseGroup = "(?:what is|what was|do you know|tell me)"
         val candidateTokens = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY).keys
