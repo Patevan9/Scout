@@ -232,7 +232,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         phaseTitle.text = "Hi! I'm $companionName."
         phaseSubtitle.text = "I'm already ready to talk!"
         phaseBody.text =
-            "I have my own built-in brain called TinyLlama. You can chat with me right now — " +
+            "I have my own built-in brain, Qwen2.5. You can chat with me right now — " +
             "completely free, no accounts or sign-ups needed.\n\n" +
             "Want smarter, deeper conversations? You can optionally connect one of these AI " +
             "services. It's totally your choice, and you can always do it later in Settings."
@@ -248,7 +248,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         primaryButton.text = "Connect an AI service (optional)"
         primaryButton.setOnClickListener { phase = Phase.PICK; renderPhase() }
 
-        secondaryButton.text = "No thanks — let's just chat with TinyLlama!"
+        secondaryButton.text = "No thanks — let's just chat now!"
         secondaryButton.visibility = View.VISIBLE
         secondaryButton.setOnClickListener { phase = Phase.DONE; renderPhase() }
     }
@@ -370,7 +370,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         inputField.visibility = View.GONE
 
         phaseTitle.text = if (provider != null) "We're connected!" else "All set!"
-        phaseSubtitle.text = if (provider != null) "${provider.displayName} is ready." else "TinyLlama is ready to chat."
+        phaseSubtitle.text = if (provider != null) "${provider.displayName} is ready." else "Your local AI is ready to chat."
         phaseBody.text = if (provider != null)
             "Tolliver will now use ${provider.displayName} for richer conversations. You can always change this in Settings."
         else
@@ -472,7 +472,7 @@ class ApiKeySetupActivity : AppCompatActivity() {
         root.addView(progressBar)
 
         tinyllamaBadge = TextView(this).apply {
-            text = "✅ TinyLlama built-in — works right now, no setup needed"
+            text = "✅ Local AI built-in — works right now, no setup needed"
             textSize = 11f
             setTextColor(0xFF68D391.toInt())
             setPadding(dp(12), dp(6), dp(12), dp(6))

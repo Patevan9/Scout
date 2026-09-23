@@ -117,7 +117,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
         }
 
         root.addView(TextView(this).apply {
-            text = "TinyLlama Performance Benchmark"
+            text = "Qwen2.5 Performance Benchmark"
             textSize = 20f
             setTextColor(txt)
             typeface = Typeface.DEFAULT_BOLD
@@ -228,7 +228,7 @@ class LlamaBenchmarkActivity : AppCompatActivity() {
     private fun startBenchmark() {
         if (running) return
         if (!LlamaEngine.isReady) {
-            Toast.makeText(this, "TinyLlama isn't loaded yet -- go back and wait for the offline brain to finish loading.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Qwen2.5 isn't loaded yet -- go back and wait for the offline brain to finish loading.", Toast.LENGTH_LONG).show()
             return
         }
 

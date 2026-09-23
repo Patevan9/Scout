@@ -5554,7 +5554,7 @@ Respond only with Scout's next reply.
                 val genMs = System.currentTimeMillis() - llamaGenStart
                 if (!reply.isNullOrBlank()) {
                     diagLog.logLlama(DiagLog.LlamaEvent.GENERATION_DONE, genMs)
-                    pendingBrainSource = "TinyLlama (offline)"
+                    pendingBrainSource = "Local AI (offline)"
                     // Capability-integrity backstop -- same reasoning as the
                     // Gemini deliverResult above, applied after the existing
                     // identity-leak cleanup rather than instead of it.

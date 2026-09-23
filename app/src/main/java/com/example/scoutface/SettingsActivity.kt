@@ -479,7 +479,7 @@ class SettingsActivity : AppCompatActivity() {
         // Hidden until unlocked via 7 taps on "About Scout" -- see onAboutScoutTapped().
         // Ordinary users never see this row.
         if (scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
-            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run TinyLlama thread-count benchmarks") {
+            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run Qwen2.5 thread-count benchmarks") {
                 startActivity(Intent(this, LlamaBenchmarkActivity::class.java))
             })
             // Fold 7 Qwen investigation diagnostic -- same hidden-unlock gate as
