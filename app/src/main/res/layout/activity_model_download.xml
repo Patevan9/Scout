@@ -25,7 +25,7 @@
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-black"
             android:letterSpacing="0.15"
-            android:text="SCOUT"
+            android:text="TOLLIVER"
             android:textColor="#FFFFFF"
             android:textSize="30sp"
             android:textStyle="bold" />
