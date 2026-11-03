@@ -323,6 +323,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastScoutUtteranceNormalized = ""
     private val CONVO_WINDOW_MS = 30_000L
 
+    // PR #92 STT possessive-loss recovery, narrow: the full ordered list of
+    // recognition hypotheses Android supplied for the CURRENT utterance
+    // (most-confident first, per RESULTS_RECOGNITION's documented ordering),
+    // captured in onResults() alongside -- never instead of -- the
+    // .firstOrNull() value that stays authoritative everywhere else in this
+    // class (wake-name, courtesy, conversation state, routing, logging,
+    // model fallback). Read only by tryNamedEntityFactRecall()'s own
+    // narrow recovery loop below. Always reassigned synchronously at the
+    // top of onResults() before any of those other reads happen, so it can
+    // never carry a stale value from a previous utterance into this one.
+    private var lastRecognitionAlternates: List<String> = emptyList()
+
     // Better Conversation State -- Phase 1. Wraps CONVO_WINDOW_MS/
     // PRESENCE_REPLY_WINDOW_MS (both unchanged, still the real timing source)
     // with an explicit "closed on purpose" signal neither timer alone can
@@ -3510,6 +3522,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 }
 
+                // PR #92 STT possessive-loss recovery, narrow: captured here,
+                // alongside `raw` below, not instead of it -- `raw`'s own
+                // derivation (the very next statement) is completely
+                // unchanged, still .firstOrNull() and still what every other
+                // read in this function and everything it calls actually
+                // uses. Only tryNamedEntityFactRecall()'s own recovery loop
+                // ever reads lastRecognitionAlternates.
+                lastRecognitionAlternates = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    .orEmpty()
+
                 val raw = results
 
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -5325,6 +5348,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // Named-entity fact recall -- "what is diana's job", "tell me
+        // nick's birthday". A real, direct answer may already have been
+        // given by the time this returns; see tryNamedEntityFactRecall()'s
+        // own doc comment for the full deterministic contract.
+        if (tryNamedEntityFactRecall(qNorm)) return
+
         // Busy-Brain PR 1: this is a second, genuinely new dispatch point
         // into the AI backends (distinct from handleUnknownIntent()'s own
         // check above -- reached only when the direct-lookup fast paths
@@ -5336,6 +5365,209 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tryTinyLlamaOrFallback(qNorm)
 
+    }
+
+    // Named-entity fact recall -- a narrow, deterministic fast path for a
+    // question that names exactly one already-known person/pet by name or
+    // alias and asks for exactly one of their stored TruthDb facts, e.g.
+    // "what is diana's job" / "tell me nick's birthday". Runs before the
+    // generic TinyLlama/Gemini fallback so it never depends on
+    // getAllKnownFacts()'s ordering or .take(12) cap -- a fact excluded
+    // from that generic 12-fact window is still reliably answerable here.
+    //
+    // Retrieval relevance is not disclosure authorization: this only
+    // determines which stored fact the question is asking about, never
+    // who is entitled to hear it -- there is no speaker-identity or
+    // household-disclosure mechanism in this app today, and this method
+    // does not add one. Because it bypasses the generic 12-fact cap, it
+    // can make a stored third-person fact reliably answerable even when
+    // that fact would not have been included in the generic model
+    // context -- this is a real change in what becomes deterministically
+    // reachable, not a no-op.
+    //
+    // Fires only when ALL of these hold, established purely
+    // deterministically:
+    //   - a supported recall-lead phrase is present ("what is"/"what
+    //     was"/"do you know"/"tell me" -- "what's" is never present in
+    //     qNorm, since TextNormalizer.normalizeUtterance() already
+    //     rewrites it to "what is")
+    //   - exactly one already-known name/alias is named, possessively,
+    //     and resolves to exactly one entity via
+    //     ScoutEntityResolver.findMatchingEntities() -- an alias/name
+    //     shared by two entities, or more than one candidate token
+    //     structurally matching, both fail this and fall through
+    //     unchanged; existing resolveEntity()/buildAliasMap() are never
+    //     trusted alone for this resolution
+    //   - no SECOND distinct entity is mentioned anywhere else in the
+    //     question either (e.g. buried inside what would otherwise become
+    //     the property phrase, as in "diana's job and nicolas's breed") --
+    //     every known name/alias token found anywhere in qNorm is
+    //     independently resolved via findMatchingEntities(), and the union
+    //     of resolved entities across all of them must be exactly one;
+    //     multiple aliases that all resolve to that same single entity are
+    //     fine and do not create ambiguity
+    //   - the literal property phrase runs to the END of the normalized
+    //     utterance (never a short lazy capture) and normalizes, via the
+    //     same FactKey.custom() teaching already uses, to exactly one
+    //     stored-key shape -- no favorite_/_name guessing, no synonym
+    //     resolution, no semantic interpretation
+    //
+    // Once all of the above hold, a miss (the exact key isn't stored) is
+    // still deterministic and grounded -- e.g. a fact taught as
+    // "occupation" is a genuine miss when asked as "job", not something
+    // handed to a generative model to guess at. Returns false, leaving
+    // existing behavior completely unchanged, whenever any prerequisite
+    // above isn't cleanly established.
+    // Entry point called from handlePersonalMemoryQuery() -- unchanged call
+    // site, unchanged signature. Tries the first (authoritative) recognition
+    // result exactly as before via tryNamedEntityFactRecallForUtterance();
+    // only if that misses does it fall into the narrow PR #92
+    // possessive-loss recovery below.
+    //
+    // Real-device finding: Android STT sometimes drops the "'s" ("diana
+    // spaceship serial number" instead of "diana's spaceship serial
+    // number"), which fails the possessive grammar below exactly as
+    // designed -- that grammar is deliberately NOT loosened to accept a
+    // missing "'s" or a bare "<known person> <property>" shape (the latter
+    // would wrongly intercept ordinary third-person language like "What is
+    // Diana doing?"). Instead: if the FIRST result's normalized form
+    // (qNorm, same as always) doesn't satisfy the grammar, and Android
+    // itself supplied other recognition hypotheses for this same utterance
+    // (lastRecognitionAlternates, set in onResults() -- see its own doc
+    // comment), each one is normalized the same way qNorm always is and
+    // tried through the exact same unmodified grammar function. Nothing here
+    // inserts, infers, or synthesizes a possessive -- an alternate only ever
+    // qualifies because Android's own recognizer already produced the
+    // literal "'s" form as one of its hypotheses. No qualifying alternate ->
+    // returns false, identical to today's behavior; the caller falls through
+    // to the generic model exactly as it always has.
+    //
+    // This is the ONLY place in MainActivity that ever reads
+    // lastRecognitionAlternates. The first result remains authoritative for
+    // every other existing behavior (wake-name, courtesy, conversation
+    // state, routing, logging, model fallback) -- none of that is touched.
+    private fun tryNamedEntityFactRecall(qNorm: String): Boolean {
+        if (tryNamedEntityFactRecallForUtterance(qNorm)) return true
+
+        for (alternate in lastRecognitionAlternates) {
+            val altNormalized = TextNormalizer.normalizeUtterance(alternate.trim())
+            if (altNormalized.isBlank() || altNormalized == qNorm) continue
+            // Correction: satisfying the grammar on its own is not enough --
+            // an alternate must additionally PROVE it is the first result
+            // with exactly one possessive "'s" restored, nothing else
+            // different, before the grammar is even consulted. See
+            // isSolePossessiveRestoration()'s own doc comment.
+            if (!isSolePossessiveRestoration(altNormalized, qNorm)) continue
+            if (tryNamedEntityFactRecallForUtterance(altNormalized, requireHit = true)) return true
+        }
+        return false
+    }
+
+    // True only if altNormalized equals qNorm with exactly one literal "'s"
+    // (2 characters) inserted somewhere and nothing else different --
+    // i.e. deleting that one "'s" from altNormalized reproduces qNorm
+    // character-for-character. Pure string comparison against the
+    // already-computed qNorm; does not parse, tokenize, or interpret
+    // either string, does not know what a "known name" is, and does not
+    // care whether the result is grammatically sensible on its own --
+    // that is what tryNamedEntityFactRecallForUtterance() checks
+    // separately, afterward. Deliberately stricter than "the alternate
+    // also happens to satisfy the possessive grammar": that alone is not
+    // proof the alternate is a possessive-loss repair of THIS utterance
+    // rather than a materially different recognition hypothesis that
+    // coincidentally parses.
+    private fun isSolePossessiveRestoration(altNormalized: String, qNorm: String): Boolean {
+        if (altNormalized.length != qNorm.length + 2) return false
+        var searchFrom = 0
+        while (true) {
+            val idx = altNormalized.indexOf("'s", searchFrom)
+            if (idx < 0) return false
+            if (altNormalized.removeRange(idx, idx + 2) == qNorm) return true
+            searchFrom = idx + 1
+        }
+    }
+
+    private fun tryNamedEntityFactRecallForUtterance(qNorm: String, requireHit: Boolean = false): Boolean {
+
+        val leadPhraseGroup = "(?:what is|what was|do you know|tell me)"
+        val candidateTokens = ScoutEntityResolver.buildAliasMap(truthDb, ENTITY_USER_PRIMARY).keys
+
+        var matchedToken: String? = null
+        var propertyPhrase: String? = null
+
+        for (token in candidateTokens) {
+            if (token.isBlank()) continue
+            val pattern = Regex("^$leadPhraseGroup\\s+${Regex.escape(token)}'s\\s+(.+)$")
+            val m = pattern.find(qNorm) ?: continue
+            if (matchedToken != null) {
+                // More than one candidate token structurally matches --
+                // ambiguous grammar, do not guess.
+                return false
+            }
+            matchedToken = token
+            propertyPhrase = m.groupValues[1].trim()
+        }
+
+        val token = matchedToken ?: return false
+        val phrase = propertyPhrase?.takeIf { it.isNotBlank() } ?: return false
+
+        // A second known entity referenced anywhere in the question -- not
+        // just the possessive lead token -- makes this ambiguous, even
+        // when it's buried inside what would otherwise become the
+        // property phrase (e.g. "what is diana's job and nicolas's
+        // breed" must not silently treat "and nicolas's breed" as part of
+        // diana's property phrase). Scan every known name/alias token for
+        // a safe whole-word occurrence anywhere in qNorm, resolve each one
+        // independently via findMatchingEntities() (never buildAliasMap()'s
+        // collapsed values), and require the union of resolved entities to
+        // be a single entity. Multiple aliases resolving to that same one
+        // entity are not ambiguity.
+        val mentionedEntities = mutableSetOf<String>()
+        for (candidate in candidateTokens) {
+            if (candidate.isBlank()) continue
+            val mentionPattern = Regex("\\b${Regex.escape(candidate)}\\b")
+            if (!mentionPattern.containsMatchIn(qNorm)) continue
+
+            val resolvedForMention = ScoutEntityResolver.findMatchingEntities(candidate, truthDb, ENTITY_USER_PRIMARY)
+            if (resolvedForMention.size > 1) {
+                // This mentioned token alone is ambiguous across entities
+                // -- do not guess.
+                return false
+            }
+            mentionedEntities.addAll(resolvedForMention)
+        }
+        if (mentionedEntities.size != 1) return false
+
+        val resolvedEntities = ScoutEntityResolver.findMatchingEntities(token, truthDb, ENTITY_USER_PRIMARY)
+        if (resolvedEntities.size != 1) return false
+        val resolvedEntity = resolvedEntities[0]
+        if (resolvedEntity !in mentionedEntities) return false
+
+        val exactKey = FactKey.custom(phrase)
+        val value = truthDb.getFactValue(resolvedEntity, exactKey)
+        val displayEntity = ScoutEntityResolver.displayName(resolvedEntity)
+
+        // Recovery-path safety gate: the alternate-hypothesis caller passes
+        // requireHit = true because it cannot tell a real property phrase
+        // ("spaceship serial number") from an ordinary verb continuation
+        // ("doing") by shape alone -- both fit "'s" + (.+) identically. A
+        // grounded miss here would mean answering from an unverified guess
+        // at what the speaker actually said, so it is rejected before
+        // anything is spoken, before supersedeAnyPendingGeneration() runs,
+        // as if the grammar had never matched. The authoritative call site
+        // never sets requireHit, so its grounded-miss behavior is unchanged.
+        if (requireHit && value == null) return false
+
+        // Generation-ownership fix (PR 2): same reasoning as the other
+        // direct-lookup fast paths above -- a real, immediate answer
+        // (hit or grounded miss) is about to be given.
+        supersedeAnyPendingGeneration()
+        if (value != null) {
+            respond("$displayEntity's $phrase is $value.")
+        } else {
+            respond("I don't think I know $displayEntity's $phrase yet.")
+        }
+        return true
     }
 
     // Reverse lookup: does this name (or one of its aliases) belong to the wife,

@@ -60,6 +60,45 @@ object ScoutEntityResolver {
         return map
     }
 
+    // Every distinct entity (deduplicated) whose own slug, stored alias, or
+    // wife/son/dog name-pointer under [selfEntity] equals [token] -- unlike
+    // buildAliasMap(), this never collapses a same-name/alias collision
+    // between two different entities into one value. A caller must treat
+    // more than one result as ambiguous and never guess between them.
+    // Built fresh from TruthDb each call, same as buildAliasMap(). Existing
+    // resolveEntity()/buildAliasMap() are untouched and unused by this
+    // method. Note: retrieval relevance is not disclosure authorization --
+    // this method only identifies which entity a token could refer to, it
+    // makes no decision about who is entitled to hear anything derived
+    // from that resolution.
+    fun findMatchingEntities(
+        token: String,
+        truthDb: TruthDb,
+        selfEntity: String
+    ): List<String> {
+        val normalizedToken = token.trim().lowercase()
+        if (normalizedToken.isBlank()) return emptyList()
+
+        val matches = mutableSetOf<String>()
+
+        for (nameKey in setOf(FactKey.WIFE_NAME, FactKey.SON_NAME, FactKey.DOG_NAME)) {
+            truthDb.getFactValue(selfEntity, nameKey)?.let { name ->
+                val slug = name.trim().lowercase()
+                if (slug.isNotBlank() && slug == normalizedToken) matches.add(slug)
+            }
+        }
+
+        for (entity in truthDb.getAllEntities()) {
+            if (entity == selfEntity || entity == "scout") continue
+            if (entity == normalizedToken) matches.add(entity)
+            for (alias in truthDb.getAliases(entity)) {
+                if (alias.trim().lowercase() == normalizedToken) matches.add(entity)
+            }
+        }
+
+        return matches.toList()
+    }
+
     // Capitalized display form of an entity slug -- "diana" -> "Diana" -- used
     // when formatting facts about someone other than the user, for spoken
     // confirmations and for TinyLlama's grounding prompt.
