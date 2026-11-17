@@ -762,6 +762,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var lastSecondaryFaceName: String? = null
 
+    // Vision-identity freshness gate for handleVisionIntent(). lastKnownFaceScore/
+    // lastSecondaryFaceScore are the actual match score paired with the name above
+    // (1.0f sentinel for an explicit, user-initiated pending-introduction resolution,
+    // which has no probabilistic score of its own), and lastFaceIdentityUpdatedMs is
+    // set only when the async embed cycle below actually (re)resolves one of those
+    // names -- never on every frame. Real-device-adjacent finding: lastKnownFaceName/
+    // lastSecondaryFaceName are only cleared to null when NO face at all is detected,
+    // so if a known person leaves and someone else takes their place in front of the
+    // camera without the face count ever reaching zero, the old name can otherwise be
+    // spoken for the new person. VisionAnswerBuilder uses this trio, together with
+    // CONFIDENT_EMBED_THRESHOLD (the same bar ScoutGreetingIdentity already applies to
+    // a spoken return-greeting), to decide whether a cached name is safe to speak for
+    // an explicit "what do you see?" question -- falling back to the existing
+    // anonymous phrasing otherwise. This does not close every possible same-position
+    // swap (that would need real face tracking, out of scope here); it closes the
+    // case where the cached name is simply too old or was never confidently matched.
+    @Volatile
+
+    private var lastKnownFaceScore: Float? = null
+
+    @Volatile
+
+    private var lastSecondaryFaceScore: Float? = null
+
+    @Volatile
+
+    private var lastFaceIdentityUpdatedMs: Long = 0L
+
     private val EMBED_INTERVAL_MS = 2_000L
 
     // Minimum score to add an embedding to a person's stored profile. Higher than the
@@ -2910,6 +2938,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                     val nameMatchHash = if (resolvedNameFromMulti == null) peopleDb.findBestMatch(embedding) else null
                                                     val resolvedName = resolvedNameFromMulti
                                                         ?: if (nameMatchHash != null) peopleDb.getName(nameMatchHash) else null
+                                                    // Vision-identity freshness gate: only the confident
+                                                    // multi-embedding match carries a real comparable score.
+                                                    // The legacy single-hash fallback (nameMatchHash) has none,
+                                                    // so it's treated as not confident enough to SPEAK below --
+                                                    // still fine to silently store/enroll as before.
+                                                    val resolvedNameScore: Float? =
+                                                        if (resolvedNameFromMulti != null) multiMatch?.second else null
 
                                                     // Face-Sample Quality Gate v1 (ScoutFaceSampleQuality) -- only
                                                     // decides whether THIS crop is good enough to bank as a future
@@ -2928,6 +2963,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                         // Only add to profile when confidently matched — prevents cross-person pollution
                                                         // when a borderline match fires near the recognition threshold.
                                                         lastKnownFaceName = resolvedName
+                                                        lastKnownFaceScore = resolvedNameScore
+                                                        lastFaceIdentityUpdatedMs = System.currentTimeMillis()
                                                         if ((multiMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD && primaryQualityOk) {
                                                             peopleDb.addNamedEmbedding(resolvedName, embedding)
                                                         }
@@ -2947,6 +2984,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                             peopleDb.storeEmbedding(capturedHash, embedding)
                                                             peopleDb.addNamedEmbedding(pendingName, embedding)
                                                             lastKnownFaceName = pendingName
+                                                            // Explicit, user-initiated introduction happening right
+                                                            // now -- not a probabilistic match, so no threshold to
+                                                            // clear; sentinel 1.0f marks it as trivially confident.
+                                                            lastKnownFaceScore = 1.0f
+                                                            lastFaceIdentityUpdatedMs = System.currentTimeMillis()
                                                             pendingFaceIntroName = null
                                                         } else if (capturedHash != null && primaryQualityOk) {
                                                             // Truly unknown — store embedding for greeting flow.
@@ -2994,9 +3036,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                             val emb2 = faceEmbedder.getEmbedding(fb2)
                                                             val secMatch = peopleDb.findBestMatchNameWithScore(emb2, threshold = 0.62f)
                                                             var secName = secMatch?.first
+                                                            // Vision-identity freshness gate: same reasoning as the
+                                                            // primary face's resolvedNameScore just above -- only the
+                                                            // confident multi-embedding match carries a real score.
+                                                            var secNameScore: Float? = secMatch?.second
                                                             if (secName == null) {
                                                                 val h2 = peopleDb.findBestMatch(emb2, threshold = 0.62f)
-                                                                if (h2 != null) secName = peopleDb.getName(h2)
+                                                                if (h2 != null) {
+                                                                    secName = peopleDb.getName(h2)
+                                                                    secNameScore = null
+                                                                }
                                                             }
                                                             // Face-Sample Quality Gate v1 -- secondary face's own
                                                             // measurements, same policy as the primary face. The ?: 0f
@@ -3016,12 +3065,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                                                 // Deliberately NOT quality-gated in v1, same as the primary
                                                                 // pending-introduction path above.
                                                                 secName = pendingFaceIntroName
+                                                                secNameScore = 1.0f
                                                                 peopleDb.addNamedEmbedding(secName!!, emb2)
                                                                 pendingFaceIntroName = null
                                                             } else if (secName != null && (secMatch?.second ?: 0f) >= CONFIDENT_EMBED_THRESHOLD && secondaryQualityOk) {
                                                                 peopleDb.addNamedEmbedding(secName, emb2)
                                                             }
                                                             lastSecondaryFaceName = secName
+                                                            lastSecondaryFaceScore = secNameScore
+                                                            lastFaceIdentityUpdatedMs = System.currentTimeMillis()
                                                             Log.d("ScoutFace", "Secondary face: name=$secName")
                                                         } finally {
                                                             if (fb2 !== sc2) sc2.recycle()
@@ -3170,6 +3222,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                                 lastKnownFaceName = null
 
+                                lastKnownFaceScore = null
+
                                 // Return-greeting freshness fix: without this, lastFaceEmbedding
                                 // would keep whatever the pre-absence person's embedding was
                                 // indefinitely -- maybeMakeReturnGreeting()'s fresh PeopleDb
@@ -3181,6 +3235,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 lastFaceEmbedding = null
 
                                 lastSecondaryFaceName = null
+
+                                lastSecondaryFaceScore = null
 
                                 presenceDecider.onFaceLost()
 
@@ -5143,8 +5199,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             lastFaceHashes = lastFaceHashes,
             lastSceneLabels = lastSceneLabels,
             knownFaceName = lastKnownFaceName,
+            knownFaceNameScore = lastKnownFaceScore,
             pendingIntroName = pendingFaceIntroName,
-            secondaryFaceName = lastSecondaryFaceName
+            secondaryFaceName = lastSecondaryFaceName,
+            secondaryFaceNameScore = lastSecondaryFaceScore,
+            lastFaceIdentityUpdatedMs = lastFaceIdentityUpdatedMs,
+            identityConfidenceThreshold = CONFIDENT_EMBED_THRESHOLD
         )
 
         respond(out)

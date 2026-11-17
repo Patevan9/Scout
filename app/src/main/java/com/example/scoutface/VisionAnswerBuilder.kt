@@ -1,6 +1,7 @@
 package com.example.scoutface
 
 import com.example.scoutface.brain.FactKey
+import com.example.scoutface.brain.ScoutGreetingIdentity
 import java.util.Locale
 
 private val OBJECT_WHITELIST = setOf(
@@ -179,6 +180,21 @@ class VisionAnswerBuilder(
     private val voice: VoiceBank,
     private val entityUserPrimary: String
 ) {
+    // Real-device finding: lastKnownFaceName/lastSecondaryFaceName are only cleared
+    // to null when NO face at all is detected, not when the face composition changes
+    // while staying non-zero -- so a known person's cached name can otherwise still
+    // be spoken for whoever is currently in frame after a swap. This is deliberately
+    // tighter than the 1800L faceFresh/labelFresh window below: it exists only to
+    // rule out "no embed cycle has run recently enough to trust," combined with
+    // ScoutGreetingIdentity's existing CONFIDENT_EMBED_THRESHOLD bar (the same one a
+    // spoken return-greeting already requires) to rule out an unconfident match. It
+    // does not, by itself, detect every possible swap (e.g. one person replacing
+    // another in the same spot within a single embed cycle, with the face count
+    // never reaching zero) -- closing that fully would need real cross-frame face
+    // tracking, out of scope here. Anonymous phrasing is the deliberate fallback in
+    // every case this can't rule out, per "anonymous is preferable to a wrong name."
+    private val IDENTITY_FRESHNESS_MS = 2_200L
+
     fun build(
         now: Long,
         lastFaceUpdatedMs: Long,
@@ -187,8 +203,12 @@ class VisionAnswerBuilder(
         lastFaceHashes: List<String>,
         lastSceneLabels: List<Pair<String, Float>>,
         knownFaceName: String? = null,
+        knownFaceNameScore: Float? = null,
         pendingIntroName: String? = null,
-        secondaryFaceName: String? = null
+        secondaryFaceName: String? = null,
+        secondaryFaceNameScore: Float? = null,
+        lastFaceIdentityUpdatedMs: Long = 0L,
+        identityConfidenceThreshold: Float = 0.72f
     ): String {
         val faceAgeMs = now - lastFaceUpdatedMs
         val labelAgeMs = now - lastSceneUpdatedMs
@@ -201,6 +221,20 @@ class VisionAnswerBuilder(
         val labels = if (labelFresh) lastSceneLabels else emptyList()
         val faceCount = if (faceFresh) lastFaceCount else 0
         val faceHashes = if (faceFresh) lastFaceHashes else emptyList()
+
+        // Only ever safe to SPEAK a cached name when it was resolved recently enough
+        // to trust (an embed cycle actually ran) AND its match score clears the same
+        // stricter bar a spoken identity claim already requires elsewhere
+        // (ScoutGreetingIdentity/CONFIDENT_EMBED_THRESHOLD). Not confident/not fresh
+        // -> null, which every call site below already treats as "say it anonymously."
+        val identityFresh = lastFaceIdentityUpdatedMs != 0L &&
+            (now - lastFaceIdentityUpdatedMs) <= IDENTITY_FRESHNESS_MS
+        val safeKnownFaceName = if (identityFresh) {
+            ScoutGreetingIdentity.resolveSpeakableName(knownFaceName, knownFaceNameScore, identityConfidenceThreshold)
+        } else null
+        val safeSecondaryFaceName = if (identityFresh) {
+            ScoutGreetingIdentity.resolveSpeakableName(secondaryFaceName, secondaryFaceNameScore, identityConfidenceThreshold)
+        } else null
 
         val dogKnownName = truthDb.getFactValue(entityUserPrimary, FactKey.DOG_NAME)
 
@@ -234,21 +268,25 @@ class VisionAnswerBuilder(
                     else -> ""
                 }
                 when {
-                    !knownFaceName.isNullOrBlank() && !secondaryFaceName.isNullOrBlank() ->
-                        "I see $knownFaceName and $secondaryFaceName.$dogLine"
-                    !knownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
-                        "I see $knownFaceName and $pendingIntroName.$dogLine"
-                    !knownFaceName.isNullOrBlank() ->
-                        "I see $knownFaceName and someone else.$dogLine"
-                    !secondaryFaceName.isNullOrBlank() ->
-                        "I see $secondaryFaceName and someone else.$dogLine"
+                    !safeKnownFaceName.isNullOrBlank() && !safeSecondaryFaceName.isNullOrBlank() ->
+                        "I see $safeKnownFaceName and $safeSecondaryFaceName.$dogLine"
+                    !safeKnownFaceName.isNullOrBlank() && !pendingIntroName.isNullOrBlank() ->
+                        "I see $safeKnownFaceName and $pendingIntroName.$dogLine"
+                    !safeKnownFaceName.isNullOrBlank() ->
+                        "I see $safeKnownFaceName and someone else.$dogLine"
+                    !safeSecondaryFaceName.isNullOrBlank() ->
+                        "I see $safeSecondaryFaceName and someone else.$dogLine"
                     else -> "I see two people.$dogLine"
                 }
             }
 
             faceCount == 1 -> {
-                val knownName = (knownFaceName?.trim()?.takeIf { it.isNotBlank() }
-                    ?: faceHashes.firstOrNull()?.let { peopleDb.getName(it) }?.trim()?.takeIf { it.isNotBlank() })
+                // Deliberately NOT falling back to peopleDb.getName(faceHashes.firstOrNull())
+                // here: that hash is a position/size bucket (see
+                // VisionUtils.faceFingerprintFromBoxStable), not a person identity, so
+                // reusing it to name whoever is CURRENTLY in that same screen position would
+                // reintroduce exactly the kind of wrong-name risk this fix removes elsewhere.
+                val knownName = safeKnownFaceName?.trim()?.takeIf { it.isNotBlank() }
 
                 val objectLine = when {
                     seesDog && !dogKnownName.isNullOrBlank() -> " ${dogKnownName} is nearby too."
