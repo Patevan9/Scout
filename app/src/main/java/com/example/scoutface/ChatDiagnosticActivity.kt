@@ -73,8 +73,8 @@ class ChatDiagnosticActivity : AppCompatActivity() {
             text = "Developer diagnostic tool -- Fold 7 Qwen investigation. Shows the " +
                 "exact rendered prompt applyModelChatTemplate() produced for the most " +
                 "recent real production reply, from a snapshot kept in memory only. Not " +
-                "part of Scout's Diagnostic Report, never written to disk. Tap Refresh " +
-                "after Scout answers a real question to see that turn's data."
+                "part of Tolliver's Diagnostic Report, never written to disk. Tap Refresh " +
+                "after Tolliver answers a real question to see that turn's data."
             textSize = 13f
             setTextColor(txtSec)
             setPadding(0, dp(8), 0, dp(16))
@@ -158,9 +158,9 @@ class ChatDiagnosticActivity : AppCompatActivity() {
             // prompt, specifically so this screen never shows a completed-looking
             // result that's actually left over from the PREVIOUS turn while a new
             // one is still running).
-            "Model path: $modelPath\n\nNo completed reply to show yet -- either Scout " +
+            "Model path: $modelPath\n\nNo completed reply to show yet -- either Tolliver " +
                 "hasn't answered anything this session, or it's still generating a " +
-                "reply right now. Ask Scout something (or wait for it to finish), " +
+                "reply right now. Ask Tolliver something (or wait for it to finish), " +
                 "then tap Refresh."
         } else {
             "Model path: $modelPath\n" +

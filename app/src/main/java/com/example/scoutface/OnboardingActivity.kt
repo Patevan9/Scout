@@ -24,10 +24,20 @@ class OnboardingActivity : AppCompatActivity() {
         val showIcon: Boolean = false
     )
 
-    private val pages = listOf(
+    // Built in onCreate(), not here -- the first page's body and the "what ___
+    // remembers" bullet need the companion's actual runtime name (the same
+    // no-value fallback MainActivity.ensureScoutIdentityDefaults() and
+    // SettingsActivity use, "Tolliver"), and reading SharedPreferences isn't
+    // safe from a property initializer this early in the Activity's
+    // construction. Every other page title/body here is product branding
+    // ("Welcome to Tolliver", "Own Tolliver forever," etc.), not the
+    // companion's name, so those stay as plain literals.
+    private lateinit var pages: List<OnboardPage>
+
+    private fun buildPages(companionName: String): List<OnboardPage> = listOf(
         OnboardPage(
-            title = "Welcome to Scout",
-            body = "I'm Scout. Just say my name and I'll be listening.",
+            title = "Welcome to Tolliver",
+            body = "I'm $companionName. Just say my name and I'll be listening.",
             bullets = listOf(
                 "See & Recognize — I see faces, scenes, and more.",
                 "Remember & Learn — Tell me anything. I'll keep it.",
@@ -37,12 +47,12 @@ class OnboardingActivity : AppCompatActivity() {
             showIcon = true
         ),
         OnboardPage(
-            title = "Try Scout Free for 7 Days",
-            body = "\$9.99 one time.\nNever a subscription.\nPay once. Own Scout forever."
+            title = "Try Tolliver Free for 7 Days",
+            body = "\$9.99 one time.\nNever a subscription.\nPay once. Own Tolliver forever."
         ),
         OnboardPage(
             title = "This Is Just The Beginning",
-            body = "Scout is actively growing. More is coming.",
+            body = "Tolliver is actively growing. More is coming.",
             bullets = listOf(
                 "Calendar integration",
                 "News & updates",
@@ -57,7 +67,7 @@ class OnboardingActivity : AppCompatActivity() {
                 "Your conversations stay on your phone.",
                 "Face recognition runs locally — never uploaded.",
                 "Gemini AI is optional and clearly labeled.",
-                "You decide what Scout remembers."
+                "You decide what $companionName remembers."
             )
         ),
         OnboardPage(
@@ -90,6 +100,16 @@ class OnboardingActivity : AppCompatActivity() {
         dotsContainer = findViewById(R.id.dotsContainer)
         pageCounter = findViewById(R.id.pageCounter)
         btnNext = findViewById(R.id.btnNext)
+
+        // Same no-value-fallback default as MainActivity.ensureScoutIdentityDefaults()
+        // and SettingsActivity's own robot_name reads -- "Tolliver" only when nothing
+        // is stored yet. Onboarding runs before that TruthDb default is ever seeded,
+        // but reads the same "robot_name" SharedPreferences key those use, so an
+        // existing custom name (e.g. onboarding somehow re-shown after setup) is
+        // honored rather than overridden.
+        val companionName = getSharedPreferences("scout_prefs", Context.MODE_PRIVATE)
+            .getString("robot_name", "Tolliver") ?: "Tolliver"
+        pages = buildPages(companionName)
 
         buildDots()
         showPage(currentPage)
@@ -157,7 +177,7 @@ class OnboardingActivity : AppCompatActivity() {
         pageCounter.text = "${index + 1} / $TOTAL_PAGES"
 
         // Button label
-        btnNext.text = if (index == TOTAL_PAGES - 1) "Start Using Scout" else "Next"
+        btnNext.text = if (index == TOTAL_PAGES - 1) "Start Using Tolliver" else "Next"
     }
 
     private fun finishOnboarding() {

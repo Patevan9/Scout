@@ -59,7 +59,7 @@
             android:minLines="2"
             android:maxLines="3"
             android:gravity="top|start"
-            android:hint="e.g. Scout stopped responding after the weather question"
+            android:hint="e.g. Tolliver stopped responding after the weather question"
             android:textSize="14sp"
             android:inputType="textMultiLine|textCapSentences" />
 

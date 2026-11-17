@@ -129,7 +129,7 @@ object ScoutFactExtractor {
     // in, string out), matching every other guard in this file, and never
     // wrong even before any dog fact has been taught.
     const val SELF_PET_RELATIONSHIP_CLARIFICATION =
-        "I'm Scout. I'm part of the family, but I'm not your dog or pet."
+        "I'm Tolliver. I'm part of the family, but I'm not your dog or pet."
 
     // Self-referential "are you even capable of learning/remembering" questions
     // -- "Can you learn?", "Do you have a memory?", "Are you capable of

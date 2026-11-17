@@ -47,6 +47,6 @@
         android:lineSpacingMultiplier="1.25"
         android:visibility="gone"
         android:importantForAccessibility="yes"
-        android:contentDescription="Scout caption" />
+        android:contentDescription="Tolliver caption" />
 
 </FrameLayout>

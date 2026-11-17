@@ -94,7 +94,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     }
 
     private val messages = mutableListOf(
-        "Scout is having his first cup of coffee...",
+        "Tolliver is having his first cup of coffee...",
         "Braincells coming together...",
         "Brewing a fresh pot of digital caffeine...",
         "Rubbing the sleep from his sensors...",
@@ -132,7 +132,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         "Inflating the ego...",
         "Warming up the motors...",
         "Calibrating the curiosity...",
-        "Loading... (Scout is trying his best)."
+        "Loading... (Tolliver is trying his best)."
     )
 
     private val handler    = Handler(Looper.getMainLooper())
@@ -165,11 +165,11 @@ class ModelDownloadActivity : AppCompatActivity() {
     // order. Interruption handling is intentionally excluded until that feature is
     // reliable; tips should only ever describe what Scout can actually do today.
     private val tips = listOf(
-        "To enter Scout Settings, simply swipe to the right.",
-        "Scout remembers what you teach him, stored locally on this device.",
+        "To enter Tolliver Settings, simply swipe to the right.",
+        "Tolliver remembers what you teach him, stored locally on this device.",
         "Your privacy stays on your device whenever possible.",
-        "You can ask Scout about today's weather when connected to the internet.",
-        "Scout gets to know you over time."
+        "You can ask Tolliver about today's weather when connected to the internet.",
+        "Tolliver gets to know you over time."
     )
 
     private val completionReceiver = object : BroadcastReceiver() {
@@ -286,7 +286,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         if (freeBytes < requiredFreeBytes) {
             android.util.Log.e("ScoutBrain",
                 "Not enough storage: dir=${dir.absolutePath} freeBytes=$freeBytes required=$requiredFreeBytes")
-            sizeText.text = "Not enough storage — free up at least ${formatBytes(requiredFreeBytes)} and reopen Scout."
+            sizeText.text = "Not enough storage — free up at least ${formatBytes(requiredFreeBytes)} and reopen Tolliver."
             percentText.text = ""
             return
         }
@@ -294,7 +294,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         // Shown immediately -- DownloadManager doesn't report real byte progress for a
         // few seconds after enqueueing, and the screen shouldn't sit blank until then.
         // updateProgress() overwrites this once real numbers start coming in.
-        sizeText.text = "Downloading Scout's offline AI brain — this is a one-time setup and may take a few minutes."
+        sizeText.text = "Downloading Tolliver's offline AI brain — this is a one-time setup and may take a few minutes."
 
         val destFile = File(dir, MODEL_FILENAME)
         if (destFile.exists()) destFile.delete()
@@ -311,8 +311,8 @@ class ModelDownloadActivity : AppCompatActivity() {
         }
 
         val request = DownloadManager.Request(Uri.parse(MODEL_DOWNLOAD_URL))
-            .setTitle("Scout offline brain")
-            .setDescription("Downloading Scout's AI — this may take a few minutes on WiFi.")
+            .setTitle("Tolliver offline brain")
+            .setDescription("Downloading Tolliver's AI — this may take a few minutes on WiFi.")
             // A raw file:// URI (Uri.fromFile) can't be written by the DownloadManager
             // system process into another app's app-specific external directory under
             // scoped storage — it silently never progresses. This is the API Android
@@ -459,7 +459,7 @@ class ModelDownloadActivity : AppCompatActivity() {
         percentText.visibility = View.GONE
         sizeText.textSize = 20f
         sizeText.setTypeface(sizeText.typeface, android.graphics.Typeface.BOLD)
-        sizeText.text = "Waking Scout up…"
+        sizeText.text = "Waking Tolliver up…"
 
         tipContainer.visibility = View.VISIBLE
         tipText.text = tips[tipIndex]
@@ -502,7 +502,7 @@ class ModelDownloadActivity : AppCompatActivity() {
     // ── Phase 3: Preparing (brief beat before handing back to MainActivity) ──────
 
     private fun enterPreparingPhase() {
-        sizeText.text = "Preparing Scout…"
+        sizeText.text = "Preparing Tolliver…"
         handler.postDelayed({ finishReady() }, PREPARING_MS)
     }
 

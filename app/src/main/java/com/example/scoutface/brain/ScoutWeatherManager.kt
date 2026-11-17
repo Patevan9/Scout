@@ -267,7 +267,7 @@ class ScoutWeatherManager(
         if (!granted) {
             requestInFlight.set(false)
             runOnMain {
-                respond("I need location access to check the weather. I will ask for it next time Scout starts up.")
+                respond("I need location access to check the weather. I will ask for it next time Tolliver starts up.")
             }
         }
         return granted

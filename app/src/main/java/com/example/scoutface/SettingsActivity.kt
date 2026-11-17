@@ -149,7 +149,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun speakPreview(full: Boolean) {
         val pitch = scoutPrefs.getFloat("voice_pitch", 1.0f)
         val speed = scoutPrefs.getFloat("voice_speed", 1.0f)
-        val name  = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
+        val name  = scoutPrefs.getString("robot_name", "Tolliver") ?: "Tolliver"
         // Deliberately not phrased as "My name is $name" / "I'm $name" -- those exact
         // sentence shapes are what TeachExtractor listens for to learn the *user's* own
         // name (FactKey.NAME), so if this preview were ever picked up by the recognizer,
@@ -202,11 +202,11 @@ class SettingsActivity : AppCompatActivity() {
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(8), dp(16), dp(32))
 
-        body.addView(sectionCard("👤", "My Household",        "Manage Scout's saved memory", IC_HOUSEHOLD) { push(S_HOUSEHOLD) })
+        body.addView(sectionCard("👤", "My Household",        "Manage Tolliver's saved memory", IC_HOUSEHOLD) { push(S_HOUSEHOLD) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("😊", "Companion",           "How Scout sounds, talks, and acts",  IC_COMPANION) { push(S_COMPANION) })
+        body.addView(sectionCard("😊", "Companion",           "How Tolliver sounds, talks, and acts",  IC_COMPANION) { push(S_COMPANION) })
         body.addView(cardSpacer())
-        body.addView(sectionCard("🧠", "AI",                  "Scout's thinking systems",           IC_AI)        { push(S_AI) })
+        body.addView(sectionCard("🧠", "AI",                  "Tolliver's thinking systems",           IC_AI)        { push(S_AI) })
         body.addView(cardSpacer())
         body.addView(sectionCard("🔗", "Connected Services",  "Calendar and other connections",     IC_CONNECTED) { push(S_CONNECTED) })
         body.addView(cardSpacer())
@@ -215,7 +215,7 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(sectionCard("🔧", "Builder's Workbench", "Hardware, controls, and chassis",    IC_WORKBENCH) { push(S_WORKBENCH) })
         body.addView(cardSpacer())
         body.addView(sectionCard("⚙️", "Advanced & Support",  "Donations, diagnostics, and help",   IC_ADVANCED)  { push(S_ADVANCED) })
-        body.addView(footerNote("Scout is built for families — safe, private, and always on your side."))
+        body.addView(footerNote("Tolliver is built for families — safe, private, and always on your side."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -226,7 +226,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun householdScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("My Household", "Export, import, or reset Scout's saved memory."))
+        root.addView(subHeader("My Household", "Export, import, or reset Tolliver's saved memory."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -234,7 +234,7 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardGroup(
             navRow("Memory Export", "", "Coming in a future release") { toast("Memory Export coming in a future release.") },
             navRow("Memory Import", "", "Coming in a future release") { toast("Memory Import coming in a future release.") },
-            navRow("Reset Memory Layers", "", "Clear Scout's memory", DESTRUCTIVE) { confirmReset() }
+            navRow("Reset Memory Layers", "", "Clear Tolliver's memory", DESTRUCTIVE) { confirmReset() }
         ))
 
         body.addView(footerNote("Your data stays private. All memory files stay on your device unless you choose to share them."))
@@ -246,7 +246,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun mainHeader(): View {
         val v = vCol(BG).padded(dp(20), dp(52), dp(20), dp(12))
         v.addView(lbl("Settings", 26f, TXT, bold = true))
-        v.addView(lbl("Customize Scout to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(12)))
+        v.addView(lbl("Customize Tolliver to fit your family.", 13f, TXT_SEC).padded(0, dp(4), 0, dp(12)))
         return v
     }
 
@@ -254,29 +254,29 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun companionScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Companion", "How Scout sounds, talks, and acts."))
+        root.addView(subHeader("Companion", "How Tolliver sounds, talks, and acts."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
-        val name = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
+        val name = scoutPrefs.getString("robot_name", "Tolliver") ?: "Tolliver"
 
         body.addView(sectionLabel("IDENTITY"))
         body.addView(cardGroup(
-            navRow("Robot Name", name, "How Scout introduces himself") { push(S_ROBOT) }
+            navRow("Robot Name", name, "How Tolliver introduces himself") { push(S_ROBOT) }
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("VOICE"))
         body.addView(cardGroup(
-            sliderRow("🎵", "Voice Pitch", "Adjust how high or low Scout's voice sounds", "voice_pitch", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
-            sliderRow("⚡", "Voice Speed", "Adjust how fast or slow Scout speaks", "voice_speed", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            sliderRow("🎵", "Voice Pitch", "Adjust how high or low Tolliver's voice sounds", "voice_pitch", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
+            sliderRow("⚡", "Voice Speed", "Adjust how fast or slow Tolliver speaks", "voice_speed", scoutPrefs, 0.5f, 2.0f, 1.0f, preview = true),
             resetVoiceRow()
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("ACCESSIBILITY"))
         body.addView(cardGroup(
-            toggleRow("Closed Captions", "Show Scout's words as text at the bottom of the screen",
+            toggleRow("Closed Captions", "Show Tolliver's words as text at the bottom of the screen",
                 scoutPrefs.getBoolean("closed_captions", false)
             ) { on -> scoutPrefs.edit().putBoolean("closed_captions", on).apply() }
         ))
@@ -284,10 +284,10 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("BEHAVIOR"))
         body.addView(cardGroup(
-            toggleRow("Presence Mode", "Scout adapts when you're nearby",
+            toggleRow("Presence Mode", "Tolliver adapts when you're nearby",
                 memPrefs.getBoolean("presence_mode_enabled", true)
             ) { on -> memPrefs.edit().putBoolean("presence_mode_enabled", on).apply() },
-            toggleRow("Allow Spontaneous Comments", "Scout may share observations",
+            toggleRow("Allow Spontaneous Comments", "Tolliver may share observations",
                 memPrefs.getBoolean("spontaneous_enabled", true)
             ) { on -> memPrefs.edit().putBoolean("spontaneous_enabled", on).apply() }
         ))
@@ -301,7 +301,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun aiScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("AI", "Scout's thinking systems."))
+        root.addView(subHeader("AI", "Tolliver's thinking systems."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -328,7 +328,7 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("CALENDAR"))
         body.addView(cardGroup(
-            toggleRow("Calendar Awareness", "Let Scout answer questions about your calendar (read-only)",
+            toggleRow("Calendar Awareness", "Let Tolliver answer questions about your calendar (read-only)",
                 memPrefs.getBoolean("calendar_awareness_enabled", false) &&
                     ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
             ) { on -> onCalendarToggleChanged(on) }
@@ -353,13 +353,13 @@ class SettingsActivity : AppCompatActivity() {
                 scoutPrefs.getBoolean("hardware_mode", false)
             ) { on -> scoutPrefs.edit().putBoolean("hardware_mode", on).apply() },
             navRow("Motor Controls", "✦ Future", "Drive arms, lights, and more") { toast("Motor Controls coming in a future update!") },
-            navRow("Bluetooth Pairing", "✦ Future", "Pair with Scout's hardware") { toast("Bluetooth Pairing coming in a future update!") }
+            navRow("Bluetooth Pairing", "✦ Future", "Pair with Tolliver's hardware") { toast("Bluetooth Pairing coming in a future update!") }
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("SAFETY"))
         body.addView(cardGroup(
-            toggleRow("Pet Awareness", "Scout uses extra caution around pets",
+            toggleRow("Pet Awareness", "Tolliver uses extra caution around pets",
                 scoutPrefs.getBoolean("pet_safety", true)
             ) { on -> scoutPrefs.edit().putBoolean("pet_safety", on).apply() }
         ))
@@ -397,7 +397,7 @@ class SettingsActivity : AppCompatActivity() {
         if (!askedBefore || shouldShowRationale) {
             AlertDialog.Builder(this)
                 .setTitle("Calendar Access")
-                .setMessage("Scout will look up your calendar to answer questions like \"what's on my calendar today.\" He can only read events — he can never create, change, or delete anything.")
+                .setMessage("Tolliver will look up your calendar to answer questions like \"what's on my calendar today.\" He can only read events — he can never create, change, or delete anything.")
                 .setPositiveButton("Continue") { _, _ ->
                     scoutPrefs.edit().putBoolean("calendar_permission_asked_before", true).apply()
                     calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
@@ -410,7 +410,7 @@ class SettingsActivity : AppCompatActivity() {
             // showing any dialog, so don't call launch() here at all.
             AlertDialog.Builder(this)
                 .setTitle("Calendar Access Needed")
-                .setMessage("Calendar access was turned off in your phone's settings. To use Calendar Awareness, open Scout's app settings and allow Calendar access.")
+                .setMessage("Calendar access was turned off in your phone's settings. To use Calendar Awareness, open Tolliver's app settings and allow Calendar access.")
                 .setPositiveButton("Open Settings") { _, _ ->
                     startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                         data = Uri.fromParts("package", packageName, null)
@@ -429,7 +429,7 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("CAMERA"))
         body.addView(cardGroup(
-            toggleRow("Voice Camera Commands", "Scout will look at you when you speak",
+            toggleRow("Voice Camera Commands", "Tolliver will look at you when you speak",
                 scoutPrefs.getBoolean("voice_cam_cmds", true)
             ) { on -> scoutPrefs.edit().putBoolean("voice_cam_cmds", on).apply() }
         ))
@@ -437,11 +437,11 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(cardSpacer())
         body.addView(sectionLabel("LEGAL"))
         body.addView(cardGroup(
-            navRow("Privacy Policy", "", "How Scout handles your data") { showPrivacyPolicy() },
-            navRow("Terms of Use", "", "Terms for using Scout") { showTermsOfUse() }
+            navRow("Privacy Policy", "", "How Tolliver handles your data") { showPrivacyPolicy() },
+            navRow("Terms of Use", "", "Terms for using Tolliver") { showTermsOfUse() }
         ))
 
-        body.addView(footerNote("Camera processing stays on your device. Scout may store local face-recognition data for people you introduce — nothing is uploaded or shared unless you choose to."))
+        body.addView(footerNote("Camera processing stays on your device. Tolliver may store local face-recognition data for people you introduce — nothing is uploaded or shared unless you choose to."))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -457,21 +457,21 @@ class SettingsActivity : AppCompatActivity() {
 
         body.addView(sectionLabel("DONATE"))
         body.addView(cardGroup(
-            navRow("Donate to Scout", "", "Support Scout's development — completely optional") { push(S_DONATE) }
+            navRow("Donate to Tolliver", "", "Support Tolliver's development — completely optional") { push(S_DONATE) }
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("SUPPORT"))
         body.addView(cardGroup(
             navRow("Support", "", "Get help and connect to support") { showSupport() },
-            navRow("About Scout", "", "Version and info") { onAboutScoutTapped() },
+            navRow("About Tolliver", "", "Version and info") { onAboutScoutTapped() },
             navRow("Licenses", "", "Open source licenses") { showLicenses() }
         ))
 
         body.addView(cardSpacer())
         body.addView(sectionLabel("DIAGNOSTICS"))
         val diagRows = mutableListOf(
-            navRow("Diagnostic Report", "", "Review Scout's technical diagnostic report, then choose where to send it") {
+            navRow("Diagnostic Report", "", "Review Tolliver's technical diagnostic report, then choose where to send it") {
                 startActivity(Intent(this, DiagReportActivity::class.java).putExtra(DiagReportActivity.EXTRA_SHOW_SHARE, true))
             },
             navRow("Clear Diagnostic History", "", "Remove all diagnostic events, crash log, and report") { confirmDeleteDiagLogs() }
@@ -479,7 +479,7 @@ class SettingsActivity : AppCompatActivity() {
         // Hidden until unlocked via 7 taps on "About Scout" -- see onAboutScoutTapped().
         // Ordinary users never see this row.
         if (scoutPrefs.getBoolean("dev_benchmark_unlocked", false)) {
-            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run TinyLlama thread-count benchmarks") {
+            diagRows.add(navRow("Performance Benchmark (Dev)", "", "Run Qwen2.5 thread-count benchmarks") {
                 startActivity(Intent(this, LlamaBenchmarkActivity::class.java))
             })
             // Fold 7 Qwen investigation diagnostic -- same hidden-unlock gate as
@@ -490,7 +490,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         body.addView(cardGroup(*diagRows.toTypedArray()))
 
-        body.addView(footerNote("Thank you for supporting Scout!"))
+        body.addView(footerNote("Thank you for supporting Tolliver!"))
         scroll.addView(body)
         root.addView(scroll)
         return root
@@ -511,7 +511,7 @@ class SettingsActivity : AppCompatActivity() {
     // tier is ever changed to unlock a real benefit, move it to Play Billing.
     private fun donateScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Donate to Scout", "Completely optional — never required, never unlocks features."))
+        root.addView(subHeader("Donate to Tolliver", "Completely optional — never required, never unlocks features."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -581,7 +581,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         body.addView(ctaBtn)
-        body.addView(footerNote("Scout is a one-time purchase. Donations never unlock core features. You'll complete your contribution securely through Stripe in your browser."))
+        body.addView(footerNote("Tolliver is a one-time purchase. Donations never unlock core features. You'll complete your contribution securely through Stripe in your browser."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -592,7 +592,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun robotNameScreen(): View {
         val root = vCol(BG).fillParent()
-        root.addView(subHeader("Robot Name", "This is how Scout introduces himself."))
+        root.addView(subHeader("Robot Name", "This is how Tolliver introduces himself."))
         val scroll = ScrollView(this).wrapWeight()
         val body = vCol(BG).padded(dp(16), dp(16), dp(16), dp(32))
 
@@ -608,13 +608,13 @@ class SettingsActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
 
-        val cur = scoutPrefs.getString("robot_name", "Scout") ?: "Scout"
+        val cur = scoutPrefs.getString("robot_name", "Tolliver") ?: "Tolliver"
         val edit = EditText(this).apply {
             setText(cur)
             textSize = 16f
             setTextColor(TXT)
             setHintTextColor(TXT_MUTE)
-            hint = "Scout"
+            hint = "Tolliver"
             background = roundRect(BG, 10)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
@@ -623,7 +623,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         cardWrap.addView(lbl("Robot Name", 12f, TXT_SEC).padded(0, 0, 0, dp(8)))
         cardWrap.addView(edit)
-        cardWrap.addView(lbl("Choose the name Scout will use when speaking.", 12f, TXT_MUTE).padded(0, dp(8), 0, 0))
+        cardWrap.addView(lbl("Choose the name Tolliver will use when speaking.", 12f, TXT_MUTE).padded(0, dp(8), 0, 0))
         body.addView(cardWrap)
 
         body.addView(spacer(dp(16)))
@@ -643,7 +643,7 @@ class SettingsActivity : AppCompatActivity() {
                 toast("Name can't be empty")
             }
         })
-        body.addView(tipCard("Your change takes effect immediately. Scout will use this name from now on."))
+        body.addView(tipCard("Your change takes effect immediately. Tolliver will use this name from now on."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -674,7 +674,7 @@ class SettingsActivity : AppCompatActivity() {
         body.addView(actionBtn(if (hasKey) "Update API Key" else "Set Up API Key") {
             startActivity(Intent(this, ApiKeySetupActivity::class.java))
         })
-        body.addView(tipCard("Your key is stored securely on this device only. Scout never sends your key anywhere else."))
+        body.addView(tipCard("Your key is stored securely on this device only. Tolliver never sends your key anywhere else."))
 
         scroll.addView(body)
         root.addView(scroll)
@@ -980,7 +980,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun confirmReset() {
         val dialog = AlertDialog.Builder(this)
             .setTitle("Reset Memory Layers")
-            .setMessage("This will permanently erase Scout's learned memories and learned face data. Scout's built-in knowledge will not be affected.\n\nContinue?")
+            .setMessage("This will permanently erase Tolliver's learned memories and learned face data. Tolliver's built-in knowledge will not be affected.\n\nContinue?")
             .setPositiveButton("Reset") { _, _ ->
                 try {
                     val db = PeopleDb(this)
@@ -1005,7 +1005,7 @@ class SettingsActivity : AppCompatActivity() {
                 "  · The crash log\n" +
                 "  · Any generated diagnostic report\n\n" +
                 "Diagnostic information is normally removed automatically after 7 days.\n\n" +
-                "This will not affect Scout's memories, personal facts, habits, " +
+                "This will not affect Tolliver's memories, personal facts, habits, " +
                 "settings, conversations, model files, or any other data.\n\n" +
                 "Continue?"
             )
@@ -1046,8 +1046,8 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun showAbout() {
         AlertDialog.Builder(this)
-            .setTitle("About Scout")
-            .setMessage("Scout is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0\n\nCopyright © 2026 Patrick Evan Lippy. All rights reserved.")
+            .setTitle("About Tolliver")
+            .setMessage("Tolliver is a local-first AI companion robot app.\n\nBuilt for families. Safe, private, and always on your side.\n\nVersion 1.0\n\nCopyright © 2026 Patrick Evan Lippy. All rights reserved.")
             .setPositiveButton("Close", null)
             .show()
     }
@@ -1057,8 +1057,8 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://patevan9.github.io/lippyrobotics.github.io/support.html")))
         } catch (_: Exception) {
             AlertDialog.Builder(this)
-                .setTitle("Unable to open the Scout Support Center")
-                .setMessage("Scout couldn't open the Support Center. Please make sure Internet access is enabled in Scout, confirm that your device is connected to the Internet, and try again.")
+                .setTitle("Unable to open the Tolliver Support Center")
+                .setMessage("Tolliver couldn't open the Support Center. Please make sure Internet access is enabled in Tolliver, confirm that your device is connected to the Internet, and try again.")
                 .setPositiveButton("Close", null)
                 .show()
         }
